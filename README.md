@@ -1,8 +1,9 @@
 # Note Note
 
-A notes workspace for the Omarchy shell: notebook tabs across the top, a
-preview list on the left, and an editable, autosaved note on the right.
-The layout follows your Omarchy theme in both dark and light modes. Local Markdown notes, your
+A Linux notes workspace, available as an **Omarchy shell plugin** and a
+**standalone Qt 6 application** from this repository. Both run the same
+editor, notebook tabs, note list, autosave and providers. The plugin follows
+your Omarchy theme; the standalone app uses the desktop palette. Local Markdown notes, your
 Microsoft Sticky Notes, OneNote and Notion pages all live in the same list.
 
 OneNote saves fetch the current page and merge independent edits made on
@@ -11,7 +12,7 @@ draft kept on this device. See [merge behavior and limits](lib/notemerge/README.
 
 ![Note Note with notebook tabs, a note list, and an editable document](preview.png)
 
-**[Install](#install)** · **[Update](#update)** · **[Shortcut](#shortcut)** ·
+**[Install plugin](#install)** · **[Standalone app](#standalone-app)** · **[Update](#update)** · **[Shortcut](#shortcut)** ·
 **[Removal](#removal)** · **[Settings](#settings)** ·
 **[Notebooks](#notebooks)** · **[Providers](#providers)** · **[Keys](#keys)**
 
@@ -29,6 +30,41 @@ your shell.
 
 Project code is MIT-licensed; bundled components retain their own licenses,
 including GPL-2.0-or-later for `merge3`. See [third-party components](NOTICE.md).
+
+## Standalone app
+
+Requires Linux, Qt **6.8 or newer** (Quick, Quick Controls 2, Network and
+SVG image support), Python **3.9 or newer**, and `inotifywait` from
+inotify-tools. Building also requires CMake 3.21+, a C++17 compiler and Qt
+Test when tests are enabled. No Omarchy or Quickshell installation is needed.
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+./build/note-note
+```
+
+Install the binary, desktop entry, icon and resources for your user:
+
+```bash
+cmake --install build --prefix "$HOME/.local"
+```
+
+The app then appears as **Note Note** in your launcher. A second launch
+activates the running window. Closing waits for accepted saves; a failed
+save keeps the window and draft available to retry.
+
+The standalone app follows your system colors: Omarchy themes, KDE color
+roles, or Qt desktop integration and GNOME/desktop portal preferences.
+Colors update live, with a built-in palette when no system colors are
+available. See [system color support](docs/standalone.md#system-colors).
+
+Both versions use `~/.config/notenote/config.json` and the same local notes.
+The standalone app keeps its own sessions, sign-ins and caches under
+`~/.local/state/notenote/` and `~/.cache/notenote/`; sign in separately there.
+XDG directory overrides are supported. See [standalone development and
+architecture](docs/standalone.md) for dependencies, installation, storage
+and testing. Distribution packages and Flatpak are future packaging work.
 
 ## Update
 
@@ -137,7 +173,7 @@ many pages are searchable while it fills; searches then use the saved text.
 Indexing reads page text without downloading images or attachments. See
 [OneNote search](docs/onenote-search.md) for sync and coverage details.
 Notion remains title-only because its API does not expose body search.
-**Detach**, in the menu at the top
+In the Omarchy plugin, **Detach**, in the menu at the top
 right, turns the overlay into an ordinary window you can keep open beside
 your work; **Back to overlay** brings it back.
 
@@ -157,7 +193,8 @@ Every source of notes is a self-contained *provider* — a folder with a
   signed in.
 
 External providers go in
-`~/.config/omarchy/note-note/providers/<id>/Provider.qml` — a plain
+`~/.config/omarchy/note-note/providers/<id>/Provider.qml` for the plugin, or
+`~/.config/notenote/providers/<id>/Provider.qml` for the standalone app — a plain
 `git clone` into that directory is an install. The contract is documented
 in [`providers/PROVIDERS.md`](providers/PROVIDERS.md); `examples/hello/` is
 a minimal provider to start from.
@@ -166,7 +203,8 @@ a minimal provider to start from.
 
 - **Your notes on disk**: `~/Notes` (or `NOTE_NOTE_DIR`) — nothing else on
   the filesystem beyond its own state and cache under
-  `~/.local/state/omarchy/` and `~/.cache/omarchy/`.
+  `~/.local/state/omarchy/` and `~/.cache/omarchy/` (plugin), or
+  `~/.local/state/notenote/` and `~/.cache/notenote/` (standalone).
 - **Microsoft account, only after you sign in**: `Mail.ReadWrite` (Sticky
   Notes are stored in your mailbox), `Notes.ReadWrite` (OneNote), and `User.Read`.
   OneNote's optional `Files.Read` permission allows reading your OneDrive files;

@@ -28,3 +28,11 @@
   Bold Italic faces for the interface. Copied unmodified from
   [ArtifexSoftware/urw-base35-fonts](https://github.com/ArtifexSoftware/urw-base35-fonts/tree/3c0ba3b5687632dfc66526544a4e811fe0ec0cd9/fonts)
   at commit `3c0ba3b5687632dfc66526544a4e811fe0ec0cd9`.
+
+- **Symbols Nerd Font** 3.5.1 — `assets/fonts/nerd-symbols/` — Copyright
+  Ryan L McIntyre and the contributing icon projects. Copied unmodified
+  from Arch's `ttf-nerd-fonts-symbols` 3.5.1-1 package, together with its
+  license notice (`assets/fonts/nerd-symbols/LICENSE`). The upstream
+  [Nerd Fonts project](https://github.com/ryanoasis/nerd-fonts) includes
+  MIT/OFL and component-specific licensing, as described in that notice.
+  Used as the standalone application's fallback for toolbar symbols.
