@@ -85,10 +85,9 @@ single-instance activation.
 
 Distribution packagers can configure `CMAKE_INSTALL_PREFIX=/usr` and stage
 the installation with `DESTDIR`. Package the runtime modules and image
-plugins as dependencies. The current deliverable is a native CMake
-application and release archives; Debian/RPM/Arch packages, AppImage and Flatpak manifests are
-separate follow-up work. Flatpak will also require decisions about access to
-arbitrary local notebook folders and external providers.
+plugins as dependencies. Deliverables include native and Omarchy release
+archives and a [standalone Flatpak bundle](flatpak.md). Debian/RPM/Arch
+packages and AppImage are separate follow-up work.
 
 ### Release archives
 
@@ -120,9 +119,9 @@ included in `INSTALL.md`.
 For general Linux distribution, Flatpak is the recommended standalone
 delivery format: the [KDE Flatpak runtime](https://docs.flatpak.org/en/latest/qt.html)
 provides Qt independently of host packages. The Omarchy plugin stays a
-separate archive or Git install. A Flatpak bundle needs its own manifest,
-builder and SDK; it also needs explicit notebook access and verification of
-theme discovery under [Flatpak's filesystem permissions](https://docs.flatpak.org/en/latest/sandbox-permissions.html).
+separate archive or Git install. See the [Flatpak build and installation
+guide](flatpak.md) for the manifest, notebook permissions, private storage
+and theme integration.
 
 Qt uses the desktop's windowing integration. A per-user local activation
 socket brings an existing window forward when the executable is launched

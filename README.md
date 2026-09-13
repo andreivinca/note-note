@@ -33,7 +33,10 @@ including GPL-2.0-or-later for `merge3`. See [third-party components](NOTICE.md)
 
 ## Standalone app
 
-Requires Linux, Qt **6.8 or newer** (Quick, Quick Controls 2, Network and
+An installable **Flatpak bundle** provides the standalone app with a shared
+Qt runtime. See [Flatpak installation and builds](docs/flatpak.md).
+
+Building and running natively requires Linux, Qt **6.8 or newer** (Quick, Quick Controls 2, Network and
 SVG image support), Python **3.9 or newer**, and `inotifywait` from
 inotify-tools. Building also requires CMake 3.21+, a C++17 compiler and Qt
 Test when tests are enabled. No Omarchy or Quickshell installation is needed.
@@ -59,13 +62,14 @@ roles, or Qt desktop integration and GNOME/desktop portal preferences.
 Colors update live, with a built-in palette when no system colors are
 available. See [system color support](docs/standalone.md#system-colors).
 
-Both versions use `~/.config/notenote/config.json` and the same local notes.
+The plugin and native standalone use `~/.config/notenote/config.json` and the same local notes.
 The standalone app keeps its own sessions, sign-ins and caches under
 `~/.local/state/notenote/` and `~/.cache/notenote/`; sign in separately there.
 XDG directory overrides are supported. See [standalone development and
 architecture](docs/standalone.md) for dependencies, installation, storage
-and testing. [Release archives](docs/standalone.md#release-archives) can be
-created for each host; distribution packages and Flatpak are future packaging work.
+and testing. The Flatpak has its own settings and sign-ins under
+`~/.var/app/io.github.andreivinca.note-note/`, with access to `~/Notes`.
+[Release archives](docs/standalone.md#release-archives) can also be created for each host.
 
 ## Update
 

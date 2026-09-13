@@ -13,6 +13,23 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def wait_for_marker(stream, marker, timeout=5):
+    """Wait through startup diagnostics without buffering unread pipe output."""
+    deadline = time.monotonic() + timeout
+    output = b""
+    while marker.encode() not in output:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or not select.select([stream], [], [], remaining)[0]:
+            raise RuntimeError("fixture did not become ready: " + output.decode(errors="replace"))
+        chunk = os.read(stream.fileno(), 4096)
+        if not chunk:
+            raise RuntimeError("fixture exited before becoming ready: " + output.decode(errors="replace"))
+        output += chunk
+        if len(output) > 65536:
+            raise RuntimeError("fixture produced excessive startup output: " + output[-4096:].decode(errors="replace"))
+    return output.decode(errors="replace")
+
+
 def check_window_close(binary, harness, env, host):
     command = [str(binary), "--qml", str(harness)]
     if not host:
@@ -24,16 +41,7 @@ def check_window_close(binary, harness, env, host):
                       WAYLAND_DISPLAY=str(Path(os.environ["XDG_RUNTIME_DIR"]) / display))
     with subprocess.Popen(command, env=native_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as process:
         try:
-            deadline = time.monotonic() + 5
-            startup = ""
-            while "<<<WM_CLOSE_READY>>>" not in startup:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0 or not select.select([process.stderr], [], [], remaining)[0]:
-                    raise RuntimeError("close fixture did not become ready: " + startup)
-                line = process.stderr.readline()
-                if not line:
-                    raise RuntimeError("close fixture exited before becoming ready: " + startup)
-                startup += line
+            startup = wait_for_marker(process.stderr, "<<<WM_CLOSE_READY>>>")
             clients = json.loads(subprocess.check_output(["hyprctl", "-j", "clients"], text=True, timeout=5))
             window = next((client for client in clients if client["pid"] == process.pid and client["mapped"]), None)
             if not window:
@@ -50,7 +58,7 @@ def check_window_close(binary, harness, env, host):
                 process.communicate()
 
 
-def check_activation(binary, work, env):
+def check_activation(launcher, work, env):
     """Use the real entry point and socket with a payload-free test window."""
     resources = work / "activation-resources"
     host = resources / "hosts/standalone"
@@ -69,11 +77,10 @@ QtObject {
   Component.onCompleted: console.error("<<<READY>>>")
 }
 ''')
-    command = [str(binary), "--data-dir", str(resources)]
+    command = [*launcher, "--data-dir", str(resources)]
     with subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as first:
         try:
-            if not select.select([first.stderr], [], [], 5)[0] or "<<<READY>>>" not in first.stderr.readline():
-                raise RuntimeError("first instance did not become ready")
+            wait_for_marker(first.stderr, "<<<READY>>>")
             second = subprocess.run(command, env=env, capture_output=True, text=True, timeout=5)
             output, errors = first.communicate(timeout=5)
             if second.returncode or first.returncode or "<<<ACTIVATED>>>" not in errors:
@@ -112,6 +119,7 @@ def main():
         harness.write_text(source)
         env = dict(os.environ, NOTE_NOTE_TEST_ROOT=str(resources), HOME=str(work), XDG_CONFIG_HOME=str(work / "config"),
                    XDG_STATE_HOME=str(work / "state"), XDG_CACHE_HOME=str(work / "cache"),
+                   HOST_XDG_CONFIG_HOME=str(work / "config"), HOST_XDG_STATE_HOME=str(work / "state"),
                    XDG_RUNTIME_DIR=str(runtime), QT_QPA_PLATFORM="offscreen",
                    DBUS_SESSION_BUS_ADDRESS="unix:path=" + str(work / "no-session-bus"),
                    QT_QPA_PLATFORMTHEME="generic", QT_FORCE_STDERR_LOGGING="1", QT_QUICK_BACKEND="software")
@@ -172,7 +180,7 @@ def main():
             if "onenote" not in json.loads(state.read_text())["providers"]:
                 print("FAIL: provider disposal overwrote the saved session")
                 return 1
-            check_activation(binary, work, env)
+            check_activation([str(binary)], work, env)
         except (OSError, subprocess.SubprocessError, RuntimeError) as error:
             print("FAIL: window close or instance activation:", error)
             return 1

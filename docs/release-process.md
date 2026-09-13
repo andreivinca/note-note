@@ -17,6 +17,10 @@ Build and verify local standalone and plugin archives using the
 checksums go to `build/dist/<version>/`. Creating these artifacts does not
 publish a GitHub release, merge the development branch or update the marketplace.
 
+Build the standalone Flatpak separately using the [Flatpak guide](flatpak.md).
+It uses the same release version and shared application, with its own
+runtime, permissions and bundle checksum.
+
 
 1. Work is committed **only when the author asks for it**.
 2. Bump `version` in `manifest.json` (semver: breaking layout/contract change

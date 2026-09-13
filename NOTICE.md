@@ -1,5 +1,12 @@
 # Third-party components
 
+- **inotify-tools** 4.25.9.0 — built into the Flatpak from the
+  [upstream source archive](https://github.com/inotify-tools/inotify-tools/releases/tag/4.25.9.0).
+  GNU GPL v2; the upstream `COPYING` is installed at
+  `/app/share/licenses/inotify-tools/COPYING`. The Flatpak manifest pins
+  the source URL and SHA-256. Provides the local notebook file watcher;
+  native and Omarchy installations use the system package.
+
 - **merge3** 0.0.16 — `lib/notemerge/_vendor/merge3/` — Copyright (C)
   2005–2010 Canonical Ltd; Copyright (C) 2021–2023 Jelmer Vernooĳ.
   GPL-2.0-or-later (see the bundled `COPYING`). Vendored unmodified from

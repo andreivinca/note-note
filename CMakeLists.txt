@@ -39,6 +39,7 @@ install(DIRECTORY assets design ui providers services lib
 install(DIRECTORY hosts/standalone DESTINATION ${CMAKE_INSTALL_DATADIR}/note-note/hosts
     FILES_MATCHING PATTERN "*.qml")
 install(FILES packaging/io.github.andreivinca.note-note.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+install(FILES packaging/io.github.andreivinca.note-note.metainfo.xml DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo)
 install(FILES packaging/io.github.andreivinca.note-note.svg DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
 
 if(BUILD_TESTING)

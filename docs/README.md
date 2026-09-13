@@ -9,6 +9,7 @@ are, and the mistakes that are expensive to repeat.
 | [Business requirements](business-requirements.md) | deciding what the product should or should not do |
 | [Technical requirements](technical-requirements.md) | changing the architecture, adding a provider, touching the host |
 | [Standalone app and shared hosts](standalone.md) | building, installing or extending either launcher and its platform adapter |
+| [Flatpak](flatpak.md) | building or installing the standalone Linux bundle and configuring its sandbox |
 | [Editing tools](editing-tools.md) | adding a toolbar action, shortcut, menu or tool panel |
 | [Status bar](status-bar.md) | registering a status control or creating a custom one |
 | [Security rules](security.md) | writing any code that reads a file, spawns a process, or talks to a network — **and before every release** |

@@ -76,6 +76,8 @@ def main():
         env.pop("WAYLAND_DISPLAY", None)
         if standalone:
             env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=" + str(work / "no-session-bus")
+            env["HOST_XDG_CONFIG_HOME"] = str(work / "config")
+            env["HOST_XDG_STATE_HOME"] = str(work / "state")
         if "--host" in sys.argv:
             display = os.environ.get("WAYLAND_DISPLAY")
             if not display:

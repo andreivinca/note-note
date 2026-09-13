@@ -6,6 +6,7 @@
 #include <QFile>
 #include <QGuiApplication>
 #include <QSaveFile>
+#include <QScopeGuard>
 #include <QTemporaryDir>
 #include <QtTest>
 #include <cstdio>
@@ -97,6 +98,39 @@ private:
     }
 
 private slots:
+    void hostThemeDirectories()
+    {
+        const QList<QByteArray> names = {"FLATPAK_ID", "XDG_CONFIG_HOME", "XDG_STATE_HOME",
+                                       "HOST_XDG_CONFIG_HOME", "HOST_XDG_STATE_HOME"};
+        QMap<QByteArray, QByteArray> original;
+        for (const auto &name : names) {
+            original.insert(name, qgetenv(name.constData()));
+        }
+        const auto restore = qScopeGuard([original]() {
+            for (auto it = original.cbegin(); it != original.cend(); ++it) {
+                if (it.value().isNull()) {
+                    qunsetenv(it.key().constData());
+                } else {
+                    qputenv(it.key().constData(), it.value());
+                }
+            }
+        });
+        qputenv("XDG_CONFIG_HOME", "/private/config");
+        qputenv("XDG_STATE_HOME", "/private/state");
+        qputenv("HOST_XDG_CONFIG_HOME", "/desktop/config");
+        qputenv("HOST_XDG_STATE_HOME", "/desktop/state");
+        qunsetenv("FLATPAK_ID");
+        QCOMPARE(Environment::current().configHome, "/private/config");
+        QCOMPARE(Environment::current().stateHome, "/private/state");
+        qputenv("FLATPAK_ID", "io.github.andreivinca.note-note");
+        QCOMPARE(Environment::current().configHome, "/desktop/config");
+        QCOMPARE(Environment::current().stateHome, "/desktop/state");
+        qunsetenv("HOST_XDG_CONFIG_HOME");
+        qputenv("HOST_XDG_STATE_HOME", "relative-path");
+        QCOMPARE(Environment::current().configHome, QDir::homePath() + "/.config");
+        QCOMPARE(Environment::current().stateHome, QDir::homePath() + "/.local/state");
+    }
+
     void desktopDetection()
     {
         QCOMPARE(Environment::detectDesktop("Hyprland", "Hyprland", "omarchy"), "omarchy");

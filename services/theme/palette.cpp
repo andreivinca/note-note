@@ -12,9 +12,12 @@
 namespace NoteNoteTheme {
 namespace {
 
-QString xdgDirectory(const char *variable, const QString &fallback)
+QString themeDirectory(const char *variable, const char *hostVariable, const QString &fallback)
 {
-    const QString value = qEnvironmentVariable(variable);
+    // Flatpak redirects application storage into ~/.var/app. Desktop theme
+    // files still belong to the host's XDG directories, granted read-only
+    // by the manifest. This does not change application or account storage.
+    const QString value = qEnvironmentVariable(qEnvironmentVariableIsEmpty("FLATPAK_ID") ? variable : hostVariable);
     return QDir::isAbsolutePath(value) ? value : QDir::homePath() + fallback;
 }
 
@@ -132,8 +135,9 @@ Environment Environment::current()
 {
     return {detectDesktop(qEnvironmentVariable("XDG_CURRENT_DESKTOP"), qEnvironmentVariable("XDG_SESSION_DESKTOP"),
                           qEnvironmentVariable("DESKTOP_SESSION")),
-        xdgDirectory("XDG_CONFIG_HOME", QStringLiteral("/.config")),
-        xdgDirectory("XDG_STATE_HOME", QStringLiteral("/.local/state")), qEnvironmentVariable("QT_QPA_PLATFORMTHEME")};
+        themeDirectory("XDG_CONFIG_HOME", "HOST_XDG_CONFIG_HOME", QStringLiteral("/.config")),
+        themeDirectory("XDG_STATE_HOME", "HOST_XDG_STATE_HOME", QStringLiteral("/.local/state")),
+        qEnvironmentVariable("QT_QPA_PLATFORMTHEME")};
 }
 
 QString Environment::detectDesktop(const QString &current, const QString &session, const QString &loginSession)
