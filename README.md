@@ -64,7 +64,8 @@ The standalone app keeps its own sessions, sign-ins and caches under
 `~/.local/state/notenote/` and `~/.cache/notenote/`; sign in separately there.
 XDG directory overrides are supported. See [standalone development and
 architecture](docs/standalone.md) for dependencies, installation, storage
-and testing. Distribution packages and Flatpak are future packaging work.
+and testing. [Release archives](docs/standalone.md#release-archives) can be
+created for each host; distribution packages and Flatpak are future packaging work.
 
 ## Update
 

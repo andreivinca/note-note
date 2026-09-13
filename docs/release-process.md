@@ -12,6 +12,12 @@
 
 ## Cutting a release
 
+Build and verify local standalone and plugin archives using the
+[release archive commands](standalone.md#release-archives). Outputs and
+checksums go to `build/dist/<version>/`. Creating these artifacts does not
+publish a GitHub release, merge the development branch or update the marketplace.
+
+
 1. Work is committed **only when the author asks for it**.
 2. Bump `version` in `manifest.json` (semver: breaking layout/contract change
    → major, feature → minor, fix → patch).

@@ -86,9 +86,43 @@ single-instance activation.
 Distribution packagers can configure `CMAKE_INSTALL_PREFIX=/usr` and stage
 the installation with `DESTDIR`. Package the runtime modules and image
 plugins as dependencies. The current deliverable is a native CMake
-application; Debian/RPM/Arch packages, AppImage and Flatpak manifests are
+application and release archives; Debian/RPM/Arch packages, AppImage and Flatpak manifests are
 separate follow-up work. Flatpak will also require decisions about access to
 arbitrary local notebook folders and external providers.
+
+### Release archives
+
+```bash
+cmake -S . -B build/release -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+cmake --build build/release --parallel
+ctest --test-dir build/release --output-on-failure
+python3 packaging/package.py
+```
+
+The packaging step tests the installed, stripped executable and validates
+the plugin manifest before creating `build/dist/<version>/`:
+
+- `note-note-<version>-linux-<architecture>.tar.xz`: standalone `bin/` and
+  `share/` directories, installation instructions and build metadata. Qt is
+  supplied by the target system; the metadata records the actual build version.
+- `note-note-<version>-omarchy.tar.xz`: shared QML/Python application, Omarchy
+  entry point and optional text inspector sources. Run `sh cpp/build.sh`
+  inside the extracted plugin to build the inspector against the shell's Qt.
+  The script fallback remains available without that build.
+- `SHA256SUMS` and `BUILD-INFO.json`: archive checksums and build provenance.
+
+Archives contain no user settings, credentials or notebook contents. The
+packager selects tracked source files for the plugin and CMake-installed
+resources for the native application. It does not publish or install either
+archive. Extract each into a fresh directory; installation instructions are
+included in `INSTALL.md`.
+
+For general Linux distribution, Flatpak is the recommended standalone
+delivery format: the [KDE Flatpak runtime](https://docs.flatpak.org/en/latest/qt.html)
+provides Qt independently of host packages. The Omarchy plugin stays a
+separate archive or Git install. A Flatpak bundle needs its own manifest,
+builder and SDK; it also needs explicit notebook access and verification of
+theme discovery under [Flatpak's filesystem permissions](https://docs.flatpak.org/en/latest/sandbox-permissions.html).
 
 Qt uses the desktop's windowing integration. A per-user local activation
 socket brings an existing window forward when the executable is launched

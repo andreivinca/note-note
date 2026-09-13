@@ -7,6 +7,7 @@ set(CMAKE_AUTOMOC ON)
 include(GNUInstallDirs)
 include(CTest)
 find_package(Qt6 6.8 REQUIRED COMPONENTS Quick QuickControls2 Network DBus)
+configure_file(packaging/build-info.json.in note-note-build.json @ONLY)
 file(RELATIVE_PATH NOTE_NOTE_DATA_FROM_BIN "${CMAKE_INSTALL_FULL_BINDIR}" "${CMAKE_INSTALL_FULL_DATADIR}/note-note")
 
 add_library(note-note-theme STATIC
