@@ -58,6 +58,12 @@ inotify-tools. ImageMagick is optional for scaling large pasted images.
 Python libraries are vendored; no runtime pip installation is needed.
 The bundled symbol font supplies toolbar icons on desktops without Nerd Fonts.
 
+The standalone host uses the same 12-pixel base type scale and spacing as
+the default Omarchy plugin. Qt applies the monitor's display scaling to
+both. Custom shell font and spacing overrides continue to apply to the
+plugin; standalone colors come from the system theme independently of
+these default dimensions.
+
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel

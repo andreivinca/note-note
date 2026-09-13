@@ -11,33 +11,35 @@ QtObject {
   readonly property var spacing: source ? source.spacing : desktopSpacing
   readonly property color hoverFill: hoverFillFor(Color.foreground, Color.accent)
   readonly property color selectionFill: Util.alpha(Color.accent, 0.35)
+  // Keep the standalone baseline aligned with the shell's default type
+  // scale and spacing so packaging does not change the workspace density.
   property QtObject desktopFont: QtObject {
     readonly property string family: style.fontFamily
     readonly property string menuFamily: style.fontFamily
-    readonly property int baseSize: 14
-    readonly property int caption: 11
-    readonly property int bodySmall: 12
-    readonly property int body: 14
-    readonly property int subtitle: 15
-    readonly property int title: 16
-    readonly property int displayLarge: 32
-    readonly property int iconSmall: 14
-    readonly property int icon: 18
-    readonly property int iconLarge: 22
+    readonly property int baseSize: 12
+    readonly property int caption: 10
+    readonly property int bodySmall: 11
+    readonly property int body: 12
+    readonly property int subtitle: 13
+    readonly property int title: 14
+    readonly property int displayLarge: 28
+    readonly property int iconSmall: 11
+    readonly property int icon: 14
+    readonly property int iconLarge: 18
   }
   property QtObject desktopSpacing: QtObject {
     readonly property int xxs: 2
-    readonly property int xs: 4
-    readonly property int sm: 8
-    readonly property int md: 12
-    readonly property int lg: 16
-    readonly property int xxxl: 32
+    readonly property int xs: 3
+    readonly property int sm: 4
+    readonly property int md: 6
+    readonly property int lg: 8
+    readonly property int xxxl: 14
     readonly property int hairline: 1
-    readonly property int controlGap: 6
-    readonly property int controlHeight: 32
+    readonly property int controlGap: 8
+    readonly property int controlHeight: 28
     readonly property int controlPaddingX: 10
-    readonly property int panelPadding: 20
-    readonly property int popupRowHeight: 32
+    readonly property int panelPadding: 18
+    readonly property int popupRowHeight: 28
   }
   function space(value) {
     return source ? source.space(value) : value
