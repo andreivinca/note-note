@@ -34,7 +34,7 @@ install(TARGETS note-note RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES Workspace.qml LICENSE NOTICE.md DESTINATION ${CMAKE_INSTALL_DATADIR}/note-note)
 install(DIRECTORY assets design ui providers services lib
     DESTINATION ${CMAKE_INSTALL_DATADIR}/note-note
-    PATTERN "__pycache__" EXCLUDE PATTERN "*.pyc" EXCLUDE
+    PATTERN "__pycache__" EXCLUDE PATTERN "*.pyc" EXCLUDE PATTERN "graphify-out" EXCLUDE
     PATTERN "*selftest*" EXCLUDE)
 install(DIRECTORY hosts/standalone DESTINATION ${CMAKE_INSTALL_DATADIR}/note-note/hosts
     FILES_MATCHING PATTERN "*.qml")
