@@ -147,7 +147,9 @@ milk, eggs
 A note with no title shows the first words of its body in the list instead.
 
 Each source and notebook gets its own tab across the top; click one, or
-`Ctrl+Tab` through them. Whether a source's notebooks spread into a tab
+`Ctrl+Tab` through them. Use `Alt+1` through `Alt+9` to open the corresponding
+tab from left to right; numbers without a tab do nothing.
+Whether a source's notebooks spread into a tab
 each or fold inside a single tab is per source — the `notebookTabs`
 setting; your local folders spread by default, OneNote folds. Local notes offer
 **New Note** and **New notebook** at the bottom. OneNote offers **New section**

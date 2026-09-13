@@ -1943,6 +1943,12 @@ Item {
       "previousTab": function() {
         root.cycleSection(-1);
       },
+      "selectTab": function() {
+        var tab = root.tabs[event.key - Qt.Key_1];
+        if (tab) {
+          root.setActiveSection(tab.key);
+        }
+      },
       "toggleList": root.toggleList,
       "paste": editor.paste,
       "pastePlain": editor.pastePlain
