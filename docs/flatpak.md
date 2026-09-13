@@ -6,10 +6,10 @@ Both use the shared workspace and providers in this repository.
 
 ## Install and run
 
-With Flatpak installed, install the local 1.0.20 x86_64 bundle:
+With Flatpak installed, install the local 1.0.21 x86_64 bundle:
 
 ```bash
-flatpak install --user ./note-note-1.0.20-x86_64.flatpak
+flatpak install --user ./note-note-1.0.21-x86_64.flatpak
 flatpak run io.github.andreivinca.note-note
 ```
 
@@ -40,9 +40,9 @@ From the repository root, build the current working tree and export it:
 flatpak run org.flatpak.Builder --user --force-clean \
   --state-dir=build/flatpak/cache --repo=build/flatpak/repo \
   build/flatpak/app packaging/io.github.andreivinca.note-note.json
-mkdir -p build/dist/1.0.20
+mkdir -p build/dist/1.0.21
 flatpak build-bundle --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo \
-  build/flatpak/repo build/dist/1.0.20/note-note-1.0.20-x86_64.flatpak \
+  build/flatpak/repo build/dist/1.0.21/note-note-1.0.21-x86_64.flatpak \
   io.github.andreivinca.note-note stable
 ```
 
@@ -55,9 +55,9 @@ metadata in sync when changing versions.
 Create a checksum next to the bundle:
 
 ```bash
-cd build/dist/1.0.20
-sha256sum note-note-1.0.20-x86_64.flatpak > note-note-1.0.20-x86_64.flatpak.sha256
-sha256sum --check note-note-1.0.20-x86_64.flatpak.sha256
+cd build/dist/1.0.21
+sha256sum note-note-1.0.21-x86_64.flatpak > note-note-1.0.21-x86_64.flatpak.sha256
+sha256sum --check note-note-1.0.21-x86_64.flatpak.sha256
 ```
 
 Build caches and the local OSTree repository stay under `build/flatpak/`.

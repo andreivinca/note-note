@@ -46,33 +46,43 @@ Controls.AbstractButton {
       : button.selected || button.active ? Style.selectedFillFor(button.foreground, button.accent)
       : button.backgroundColor
   }
-  contentItem: RowLayout {
-    spacing: Style.spacing.controlGap
-    Text {
-      visible: button.iconText.length > 0
-      text: button.iconText
-      textFormat: Text.PlainText
-      color: button.foreground
-      font.family: button.fontFamily
-      font.pixelSize: button.iconSize
-      rotation: button.iconRotation
-      Layout.alignment: Qt.AlignVCenter
-      RotationAnimation on rotation {
-        from: 0
-        to: 360
-        duration: 900
-        loops: Animation.Infinite
-        running: button.iconSpinning
+  contentItem: Item {
+    implicitWidth: contentRow.implicitWidth
+    implicitHeight: contentRow.implicitHeight
+
+    RowLayout {
+      id: contentRow
+      x: button.leftAlign ? 0 : (parent.width - width) / 2
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.alignWhenCentered: false
+      spacing: Style.spacing.controlGap
+
+      Text {
+        visible: button.iconText.length > 0
+        text: button.iconText
+        textFormat: Text.PlainText
+        color: button.foreground
+        font.family: button.fontFamily
+        font.pixelSize: button.iconSize
+        rotation: button.iconRotation
+        Layout.alignment: Qt.AlignVCenter
+        RotationAnimation on rotation {
+          from: 0
+          to: 360
+          duration: 900
+          loops: Animation.Infinite
+          running: button.iconSpinning
+        }
       }
-    }
-    Text {
-      visible: button.text.length > 0
-      text: button.text
-      textFormat: Text.PlainText
-      color: button.selected ? Style.selectedStateColor(button.foreground, button.accent) : button.foreground
-      font.family: button.fontFamily
-      font.pixelSize: button.fontSize
-      Layout.alignment: Qt.AlignVCenter
+      Text {
+        visible: button.text.length > 0
+        text: button.text
+        textFormat: Text.PlainText
+        color: button.selected ? Style.selectedStateColor(button.foreground, button.accent) : button.foreground
+        font.family: button.fontFamily
+        font.pixelSize: button.fontSize
+        Layout.alignment: Qt.AlignVCenter
+      }
     }
   }
   Controls.ToolTip.visible: hovered && tooltipText.length > 0
