@@ -35,6 +35,8 @@ including GPL-2.0-or-later for `merge3`. See [third-party components](NOTICE.md)
 
 An installable **Flatpak bundle** provides the standalone app with a shared
 Qt runtime. See [Flatpak installation and builds](docs/flatpak.md).
+After installing the build tools listed there, run `./build-flatpak.sh`
+to create a bundle and checksum under `build/dist/<version>/`.
 
 Building and running natively requires Linux, Qt **6.8 or newer** (Quick, Quick Controls 2, Network and
 SVG image support), Python **3.9 or newer**, and `inotifywait` from

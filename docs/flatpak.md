@@ -21,47 +21,58 @@ bundle with the same command to update the application.
 
 ## Build
 
-The [manifest](../packaging/io.github.andreivinca.note-note.json) uses
+The [manifest](../packaging/flatpak/io.github.andreivinca.note-note.json) uses
 `org.kde.Platform` and `org.kde.Sdk` 6.11. Qt and Python come from the
 runtime; the manifest builds a pinned, checksum-verified inotify-tools
 source archive and then the application using CMake. Host Qt packages
 are not used. The Qt text inspector is compiled into the executable.
 
-Set up the build tools once:
+Set up the build tools once. The build script also uses Bash, Python 3,
+and the standard `sha256sum` utility on the host:
 
 ```bash
 flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 flatpak install --user flathub org.flatpak.Builder org.kde.Sdk//6.11 org.kde.Platform//6.11
 ```
 
-From the repository root, build the current working tree and export it:
+From the repository root, build the current working tree and create an
+installable bundle:
 
 ```bash
-flatpak run org.flatpak.Builder --user --force-clean \
-  --state-dir=build/flatpak/cache --repo=build/flatpak/repo \
-  build/flatpak/app packaging/io.github.andreivinca.note-note.json
-mkdir -p build/dist/1.0.21
-flatpak build-bundle --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo \
-  build/flatpak/repo build/dist/1.0.21/note-note-1.0.21-x86_64.flatpak \
-  io.github.andreivinca.note-note stable
+./build-flatpak.sh
 ```
 
-These commands target the builder's default architecture; the filename
-above is for x86_64. Check `flatpak --default-arch` when building elsewhere.
-The runtime is downloaded separately rather than embedded in the bundle.
+The [script](../build-flatpak.sh) locates the repository from its own path,
+so it also works when launched from another directory. It reads the version
+from `manifest.json` and uses Flatpak's default architecture. The manifest
+remains the build recipe, including its runtime, dependencies and permissions.
+The build downloads and prepares the screenshot metadata for software stores.
+
+The script runs two compile jobs by default. To choose another limit:
+
+```bash
+JOBS=4 ./build-flatpak.sh
+```
+
+| Output | Location |
+|---|---|
+| Installable bundle | `build/dist/<version>/note-note-<version>-<arch>.flatpak` |
+| SHA-256 checksum | The bundle path followed by `.sha256` |
+| Build log | `build/flatpak/build.log` |
+| Build files and cache | `build/flatpak/app/` and `build/flatpak/cache/` |
+| Local OSTree repository | `build/flatpak/repo/` |
+
+The checksum is generated and checked after the bundle is built. Build output
+also appears in the terminal, and a failed build stops the script before
+bundling. The runtime is downloaded separately when installing the bundle.
 Keep `manifest.json`, the CMake project version and the AppStream release
 metadata in sync when changing versions.
 
-Create a checksum next to the bundle:
-
-```bash
-cd build/dist/1.0.21
-sha256sum note-note-1.0.21-x86_64.flatpak > note-note-1.0.21-x86_64.flatpak.sha256
-sha256sum --check note-note-1.0.21-x86_64.flatpak.sha256
-```
-
-Build caches and the local OSTree repository stay under `build/flatpak/`.
-No command above publishes a release or uploads to Flathub.
+The script builds locally; it does not install the app, create commits, or
+publish releases. Flathub uses its own build automation and the manifest in
+the app's Flathub repository. To test that manifest locally, run
+`flatpak run --command=flathub-build org.flatpak.Builder <manifest>` from its
+checkout, following the [Flathub build instructions](https://docs.flathub.org/docs/for-app-authors/submission#build-and-install).
 
 ## Storage and permissions
 

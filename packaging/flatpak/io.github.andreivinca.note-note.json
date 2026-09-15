@@ -50,7 +50,7 @@
       "sources": [
         {
           "type": "dir",
-          "path": "..",
+          "path": "../..",
           "skip": [".git", ".flatpak-builder", "build", "cpp/build", "graphify-out", "__pycache__"]
         }
       ]

@@ -9,7 +9,7 @@ import tempfile
 from standalone_selftest import check_activation
 
 ROOT = Path(__file__).resolve().parents[1]
-APP_ID = json.loads((ROOT / "packaging/io.github.andreivinca.note-note.json").read_text())["app-id"]
+APP_ID = json.loads((ROOT / "packaging/flatpak/io.github.andreivinca.note-note.json").read_text())["app-id"]
 
 
 def main():
