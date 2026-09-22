@@ -463,17 +463,26 @@ class TransportTests(unittest.TestCase):
             remote.download({"size": 3, "@microsoft.graph.downloadUrl": "https://test.files.1drv.com/x"})
             request = opened.call_args.args[0]
             self.assertIsNone(request.get_header("Authorization"))
-        self.assertIsNone(order.NoRedirect().redirect_request(None, None, 302, "", {}, "https://evil.test"))
+        self.assertIsNone(order.provider_io.NoRedirect().redirect_request(None, None, 302, "", {}, "https://evil.test"))
         with patch.object(remote.opener, "open", side_effect=urllib.error.HTTPError("secret-url", 302, "", {}, None)):
             with self.assertRaisesRegex(order.OrderUnavailable, "HTTP 302"):
                 remote.download({"size": 3, "@microsoft.graph.downloadUrl": "https://test.files.1drv.com/x"})
 
     def test_size_and_wall_clock_limits(self):
-        with self.assertRaises(order.OrderUnavailable):
-            order.read_response(io.BytesIO(bytes(toc.MAX_BYTES + 1)), float("inf"))
-        with patch.object(order.time, "monotonic", side_effect=[0, 2]):
-            with self.assertRaises(order.OrderUnavailable):
-                order.read_response(io.BytesIO(b"x"), 1)
+        class Response(io.BytesIO):
+            status = 200
+        remote = order.Remote("snapshot")
+        with patch.object(remote.opener, "open", return_value=Response(bytes(order.MAX_BODY + 1))):
+            with self.assertRaisesRegex(order.OrderUnavailable, "size limit"):
+                remote.request("https://graph.microsoft.com/v1.0/x")
+        # The request's own three clock reads pass; the reader's finds the
+        # deadline gone, which must come back as "timed out", not as a size
+        # limit or a bare transport error.
+        early, late = remote.deadline - 100, remote.deadline + 1
+        with patch.object(remote.opener, "open", return_value=Response(b"x")):
+            with patch.object(order.time, "monotonic", side_effect=[early, early, early, late]):
+                with self.assertRaisesRegex(order.OrderUnavailable, "timed out"):
+                    remote.request("https://graph.microsoft.com/v1.0/x")
 
     def test_graph_401_never_refreshes_or_forgets_shared_auth(self):
         remote = order.Remote("snapshot")

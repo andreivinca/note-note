@@ -77,7 +77,7 @@ def headers(**fields):
 
 
 class Response:
-    """Just enough of an HTTP response for `msgraph.read_bounded`."""
+    """Just enough of an HTTP response for `provider_io.read_bounded`."""
 
     def __init__(self, status, body):
         self.status = status
@@ -85,6 +85,11 @@ class Response:
 
     def read(self, size=-1):
         return self.body if size < 0 else self.body[:size]
+
+    def read1(self, size=-1):
+        chunk = self.body if size < 0 else self.body[:size]
+        self.body = self.body[len(chunk):]
+        return chunk
 
     def __enter__(self):
         return self
@@ -492,6 +497,39 @@ def test_cache_session_and_inflight_refresh(verbose):
     return failures
 
 
+def test_bounded_reader_holds_size_and_time(verbose):
+    """One reader for every transport: it stops at the byte limit, and it
+    stops at the deadline on a body that arrives a byte at a time — the
+    reader it replaced in onenote.py waited for a full chunk and could
+    outlive its deadline on exactly that drip."""
+    import provider_io
+
+    class Drip:
+        def __init__(self, clock):
+            self.clock = clock
+
+        def read1(self, size):
+            self.clock[0] += 1.0
+            return b"x"
+
+    failures = 0
+    whole = provider_io.read_bounded(Response(200, b"abc" * 1000), 3000)
+    failures += check("a body within the limit is read whole", whole == b"abc" * 1000)
+    try:
+        provider_io.read_bounded(Response(200, b"abcd"), 3)
+        failures += check("a body over the limit is refused", False)
+    except OverflowError:
+        pass
+    clock = [0.0]
+    with patch.object(provider_io.time, "monotonic", side_effect=lambda: clock[0]):
+        try:
+            provider_io.read_bounded(Drip(clock), 1000, deadline=2.5)
+            failures += check("a drip-fed body is cut off at the deadline", False)
+        except TimeoutError:
+            failures += check("a drip-fed body is cut off at the deadline", clock[0] == 3.0, "clock %r" % clock)
+    return failures
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -510,6 +548,7 @@ def main():
         total += test_optional_scopes_cannot_break_required_refresh(args.verbose)
         total += test_optional_refresh_with_malformed_reply_or_omitted_scope(args.verbose)
         total += test_cache_session_and_inflight_refresh(args.verbose)
+        total += test_bounded_reader_holds_size_and_time(args.verbose)
     finally:
         shutil.rmtree(WORK, ignore_errors=True)
 

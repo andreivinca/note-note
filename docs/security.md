@@ -130,6 +130,10 @@ applies in reverse (`services/clipboard/clipboard.py`,
 - A socket timeout bounds one read, not the transfer: a drip-fed response can
   hold a connection open forever. Use a **wall-clock deadline** across all
   reads (`time.monotonic()`), and one shared budget per page for many fetches.
+  There is one reader for this, `lib/provider_io.read_bounded`, bounded in
+  bytes and, given a deadline, in time; every transport reads through it, and
+  `provider_io.NoRedirect` is the one opener that refuses to follow a
+  redirect with a token or a signed URL.
 - Cap how many items a single operation may fetch (40 images per page).
 - Prune caches by count *and* by total bytes (400 files / 200 MiB), oldest
   first.

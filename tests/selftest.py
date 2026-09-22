@@ -17,6 +17,7 @@ SUITES = [
     "providers/onenote/selftest.py",
     "providers/onenote/merge_selftest.py",
     "providers/onenote/search_selftest.py",
+    "providers/onenote/order_selftest.py",
     "services/microsoft/selftest.py",
     "lib/ratelimit_selftest.py",
     "services/requests/selftest.py",

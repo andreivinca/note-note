@@ -66,6 +66,11 @@ class Response:
     def read(self, size=-1):
         return self.body if size < 0 else self.body[:size]
 
+    def read1(self, size=-1):
+        chunk = self.read(size)
+        self.body = self.body[len(chunk):]
+        return chunk
+
     def __enter__(self):
         return self
 

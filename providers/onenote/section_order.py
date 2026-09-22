@@ -27,6 +27,7 @@ import urllib.parse
 import urllib.request
 
 import msgraph
+import provider_io
 import ratelimit
 
 CACHE_VERSION = 2
@@ -54,11 +55,6 @@ class OrderUnavailable(ValueError):
     """The remote custom order could not be established safely."""
 
 
-class NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
-
-
 def download_url(url):
     try:
         parsed = urllib.parse.urlsplit(url)
@@ -72,24 +68,6 @@ def download_url(url):
     return url
 
 
-def read_response(response, deadline):
-    chunks, size = [], 0
-    # read1 returns after one socket read; read(n) could wait for n bytes
-    # indefinitely when a peer drip-feeds data within each socket timeout.
-    while True:
-        if time.monotonic() >= deadline:
-            raise OrderUnavailable("section metadata download timed out")
-        chunk = response.read1(min(65536, MAX_BODY + 1 - size))
-        if time.monotonic() >= deadline:
-            raise OrderUnavailable("section metadata download timed out")
-        if not chunk:
-            return b"".join(chunks)
-        size += len(chunk)
-        if size > MAX_BODY:
-            raise OrderUnavailable("section metadata exceeds its size limit")
-        chunks.append(chunk)
-
-
 class Remote:
     """Optional transport: owns no sign-in and has a separate rate budget.
 
@@ -98,7 +76,7 @@ class Remote:
     """
     def __init__(self, token):
         self.token = token
-        self.opener = urllib.request.build_opener(NoRedirect)
+        self.opener = urllib.request.build_opener(provider_io.NoRedirect)
         self.deadline = time.monotonic() + MAX_SECONDS
         self.requests = 0
 
@@ -116,7 +94,11 @@ class Remote:
                 raise OrderUnavailable("section metadata download timed out")
             try:
                 with self.opener.open(request, timeout=min(10, remaining)) as response:
-                    return response.status, read_response(response, deadline)
+                    return response.status, provider_io.read_bounded(response, MAX_BODY, deadline)
+            except OverflowError as error:
+                raise OrderUnavailable("section metadata exceeds its size limit") from error
+            except TimeoutError as error:
+                raise OrderUnavailable("section metadata download timed out") from error
             except urllib.error.HTTPError as error:
                 with error:
                     if error.code in msgraph.THROTTLED_STATUSES:

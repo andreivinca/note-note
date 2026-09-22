@@ -14,10 +14,14 @@ failures were worth another attempt, and by the time anyone compared them the
 three answers disagreed and none of them covered a 500. They now read the
 same two names.
 
+The bounded response reader and the redirect refusal are here for the same
+reason: three readers existed, and the oldest did not enforce the deadline
+its docstring promised.
+
 Standard library only, and `lib/` is already on the path of every script that
 imports this.
 """
-import json, os, sys
+import json, os, sys, time, urllib.request
 
 
 def out(obj):
@@ -88,6 +92,42 @@ def read_payload(path):
         except ValueError:
             return None
     return load_json(path, None)
+
+
+# ---------------------------------------------------------- HTTP transport
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuses every redirect. A request that carries a bearer token, or a
+    signed download URL that is a credential in itself, goes only where it
+    was addressed; an opener built with this answers a redirect with the
+    HTTPError it is, for the caller to refuse."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def read_bounded(response, max_bytes, deadline=None):
+    """The body of a response, at most `max_bytes` long — one byte more is an
+    OverflowError — and, when `deadline` (a `time.monotonic()` value) is
+    given, arrived by then, or a TimeoutError.
+
+    A socket timeout bounds one read, not the transfer: a peer that drips a
+    byte within every timeout keeps a fetch alive for as long as it likes,
+    which is what the deadline is for. The body is taken with `read1`, which
+    returns after one socket read; `read(n)` waits for the full n bytes and
+    could outlive the deadline on the same drip.
+    """
+    chunks, size = [], 0
+    while True:
+        if deadline is not None and time.monotonic() >= deadline:
+            raise TimeoutError("the response did not arrive in time")
+        chunk = response.read1(min(65536, max_bytes + 1 - size))
+        if not chunk:
+            return b"".join(chunks)
+        size += len(chunk)
+        if size > max_bytes:
+            raise OverflowError("response larger than %d bytes" % max_bytes)
+        chunks.append(chunk)
 
 
 # ------------------------------------------------------- HTTP classification

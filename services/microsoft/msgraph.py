@@ -31,7 +31,7 @@ import ratelimit  # noqa: E402
 # where a helper is defined is not their business.
 from provider_io import (  # noqa: E402,F401
     out, fail, fail_throttled, fail_transient, load_json, save_private, read_payload,
-    THROTTLED_STATUSES, TRANSIENT_STATUSES,
+    read_bounded, THROTTLED_STATUSES, TRANSIENT_STATUSES,
 )
 
 HOME = os.path.expanduser("~")
@@ -75,14 +75,6 @@ def config():
 
 # Default ceiling for a response body; callers pass their own max_bytes.
 MAX_BODY = 8 * 1024 * 1024
-
-
-def read_bounded(resp, max_bytes):
-    """Read at most max_bytes (+1 to detect overflow) from a response."""
-    raw = resp.read(max_bytes + 1)
-    if len(raw) > max_bytes:
-        raise OverflowError("response larger than %d bytes" % max_bytes)
-    return raw
 
 
 # Pacing. An importer sets these two before it makes any request — sticky.py

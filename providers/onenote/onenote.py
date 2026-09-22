@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "..", "services", "microsoft"))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "lib"))
 sys.path.insert(0, HERE)
 import msgraph  # noqa: E402
+import provider_io  # noqa: E402
 import ratelimit  # noqa: E402
 from msgraph import (graph, http, fail, fail_throttled, out, load_json, save_private,  # noqa: E402
                      read_payload, access_token, TRANSIENT_STATUSES, CACHE_DIR, GRAPH)
@@ -473,12 +474,7 @@ MAX_CACHE_FILES = 400
 _image_budget = [0.0, 0]        # [deadline (monotonic), images fetched]
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
-
-
-_image_opener = urllib.request.build_opener(_NoRedirect)
+_image_opener = urllib.request.build_opener(provider_io.NoRedirect)
 
 
 def image_allowed(src):
@@ -487,23 +483,6 @@ def image_allowed(src):
     except ValueError:
         return False
     return u.scheme == "https" and u.netloc.lower() == IMAGE_HOST and bool(IMAGE_PATH_RE.match(u.path)) and not u.query and not u.fragment
-
-
-def read_with_deadline(resp, max_bytes, deadline):
-    """Read at most max_bytes, giving up if the whole body has not arrived by
-    `deadline`: urllib's timeout only bounds a single socket read, so a
-    drip-fed response would otherwise never end."""
-    chunks, total = [], 0
-    while True:
-        if time.monotonic() > deadline:
-            raise OverflowError("image took too long")
-        chunk = resp.read(65536)
-        if not chunk:
-            return b"".join(chunks)
-        total += len(chunk)
-        if total > max_bytes:
-            raise OverflowError("image too large")
-        chunks.append(chunk)
 
 
 # A cached image on its own says nothing about where it came from, and a save
@@ -645,7 +624,8 @@ def cached_image(src, width=0):
         with os.fdopen(fd, "wb") as f:
             with ratelimit.slot(msgraph.RATE_KEY, msgraph.RATE_WINDOWS):
                 with _image_opener.open(req, timeout=20) as r:
-                    data = read_with_deadline(r, MAX_IMAGE, deadline)
+                    # Bounded in size and in time: a TimeoutError is an OSError, caught below.
+                    data = provider_io.read_bounded(r, MAX_IMAGE, deadline)
                     if not data:
                         # Graph serves a just-written resource as 200 with an
                         # empty body; caching that would poison the page for good.

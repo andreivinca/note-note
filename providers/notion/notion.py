@@ -27,7 +27,7 @@ import ratelimit  # noqa: E402
 # docstring for why one of each is the point.
 from provider_io import (  # noqa: E402
     out, fail, fail_throttled, fail_transient, load_json, save_private, read_payload,
-    THROTTLED_STATUSES, TRANSIENT_STATUSES,
+    THROTTLED_STATUSES, TRANSIENT_STATUSES, read_bounded,
 )
 import notion_md  # noqa: E402
 
@@ -78,10 +78,10 @@ def api(method, path, data=None, tok=None, transient_5xx=True):
     def once():
         try:
             with urllib.request.urlopen(req, timeout=30) as r:
-                raw = r.read(MAX_BODY + 1)
-                if len(raw) > MAX_BODY:
-                    fail("response larger than %d bytes" % MAX_BODY)
+                raw = read_bounded(r, MAX_BODY)
                 return r.status, (json.loads(raw) if raw else {})
+        except OverflowError as e:
+            fail(str(e))
         except urllib.error.HTTPError as e:
             raw = e.read(MAX_BODY + 1)[:MAX_BODY]
             if e.code in THROTTLED_STATUSES:

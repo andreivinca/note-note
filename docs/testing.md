@@ -305,6 +305,7 @@ python3 providers/sticky/selftest.py      # a cut note opens read-only, never as
 python3 providers/onenote/selftest.py     # which writes may be run again
 python3 lib/notemerge/selftest.py         # shared merging and recovery storage
 python3 providers/onenote/merge_selftest.py # concurrent edits, conflicts and OneNote saves
+python3 providers/onenote/order_selftest.py # section order: the OneDrive download, its limits and the join
 python3 services/microsoft/selftest.py    # 5xx and 401 classification
 ```
 
