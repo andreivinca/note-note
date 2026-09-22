@@ -692,6 +692,8 @@ ShellRoot {
     property int optionalLogins: 0
     property int destructiveLogins: 0
     signal updated()
+    signal signedOut()
+    signal statusFailed(string error)
     function hasScope(scope) { return scope === "Notes.ReadWrite" || (scope === "Files.Read" && filesRead) }
     function loginOptional() { optionalLogins++ }
     function relogin() { destructiveLogins++ }
@@ -720,6 +722,47 @@ ShellRoot {
     scopes: "offline_access User.Read Notes.ReadWrite"
     optionalScopes: "Files.Read"
   }
+
+  // A probe that cannot answer must leave the sign-in as it was and say so;
+  // only an answer of "signed out" (or a sign-out) is the transition that
+  // makes a provider throw its caches away. Each step's answer is chosen by
+  // the stub through the account's owner (tests/transition_selftest.py).
+  property bool accountFinished: false
+  property var accountEvents: []
+  property var accountSteps: [
+    { owner: "signed-in", expect: function() { return probeAccount.signedIn && probeAccount.account === "a" } },
+    { owner: "garbage", expect: function() { return probeAccount.signedIn && test.accountEvents.slice(-1)[0] === "failed:the sign-in status could not be read" } },
+    { owner: "error", expect: function() { return probeAccount.signedIn && test.accountEvents.slice(-1)[0] === "failed:boom" } },
+    { owner: "signed-out", expect: function() { return !probeAccount.signedIn && test.accountEvents.slice(-1)[0] === "signedOut" } },
+    { owner: "signed-out", expect: function() { return test.accountEvents.length === 3 } }
+  ]
+  property int accountStep: 0
+  Microsoft.Account {
+    id: probeAccount
+    script: Platform.env("NOTE_NOTE_TEST_STATUS_SCRIPT")
+    clientId: "test"
+    onSignedOut: test.accountEvents.push("signedOut")
+    onStatusFailed: function(error) { test.accountEvents.push("failed:" + error) }
+    onUpdated: {
+      var step = test.accountSteps[test.accountStep]
+      test.check("account probe step " + test.accountStep + " (" + step.owner + ")", step.expect(), test.accountEvents.join(","))
+      test.accountStep++
+      if (test.accountStep < test.accountSteps.length) {
+        probeAccount.owner = test.accountSteps[test.accountStep].owner
+        probeAccount.refresh()
+      } else {
+        test.accountFinished = true
+      }
+    }
+  }
+  function accountCases() {
+    if (!Platform.env("NOTE_NOTE_TEST_STATUS_SCRIPT")) {
+      test.accountFinished = true
+      return
+    }
+    probeAccount.owner = test.accountSteps[0].owner
+    probeAccount.refresh()
+  }
   function oneNoteCases() {
     var creations = []
     var creationHost = {
@@ -742,6 +785,27 @@ ShellRoot {
           folders.sections[0].footerActions.map(function(action) { return action.path }).join(",") === "newNote,newNotebook")
     folders.destroy()
 
+    // An account answer that is not "signed out" — a probe that failed, a
+    // refresh — leaves the listing alone; only the sign-out transition
+    // throws the listing away. Checked before another provider shares the
+    // fake account below: a destroyed provider still hears signals until the
+    // event loop reclaims it.
+    oneNote.onSections = [{ id: "section", name: "Section", notebookId: "book", notebook: "Book" }]
+    oneNote.pages = [{ id: "page", sectionId: "section", title: "Note" }]
+    var messages = []
+    var relay = function(text) { messages.push(text) }
+    oneNote.statusRequested.connect(relay)
+    oneNoteAccount.statusFailed("boom")
+    oneNoteAccount.updated()
+    check("a failed probe keeps OneNote's pages and says why",
+          oneNote.pages.length === 1 && messages.join("|") === "OneNote: could not check the sign-in — boom")
+    oneNoteAccount.signedIn = false
+    oneNoteAccount.signedOut()
+    oneNoteAccount.updated()
+    check("the sign-out transition clears OneNote's pages", oneNote.pages.length === 0)
+    oneNote.statusRequested.disconnect(relay)
+    oneNoteAccount.signedIn = true
+    oneNote.onSections = []
     var created = oneNoteFactory.createObject(test, {
       host: creationHost, ms: oneNoteAccount
     })
@@ -863,6 +927,7 @@ ShellRoot {
       oneNoteCases()
       processCases()
       localCases()
+      accountCases()
     } catch (error) {
       check("test setup completed", false, error.message + " " + error.stack)
       report()
@@ -873,7 +938,7 @@ ShellRoot {
     repeat: true
     running: true
     onTriggered: {
-      if (test.localFinished && test.watchFinished && test.editorFinished && test.processes === 0 && (!test.appHost || test.appHost.providersLoaded)) {
+      if (test.localFinished && test.watchFinished && test.editorFinished && test.accountFinished && test.processes === 0 && (!test.appHost || test.appHost.providersLoaded)) {
         if (test.appHost) {
           test.check("host reads framed configuration at startup", test.appHost.configReady && test.appHost.providers.length === 0)
           test.hostSearchCases()

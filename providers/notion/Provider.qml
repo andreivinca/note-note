@@ -335,11 +335,20 @@ Item {
     raw: true
     onFinished: function(result) {
       var st = root.parse(result.text || "")
+      if (st.error) {
+        // The setup is whatever it was; an unreadable answer is said, not
+        // taken for "not configured", which would throw the pages away.
+        root.statusRequested(root.name + ": could not check the setup — " + st.error)
+        return
+      }
+      var wasConfigured = root.configured
       root.configured = st.configured === true
       root.workspace = st.workspace || ""
       if (!root.configured) {
-        root.pages = []
-        root.bodies = ({})
+        if (wasConfigured) {
+          root.pages = []
+          root.bodies = ({})
+        }
         rebuild()
         return
       }

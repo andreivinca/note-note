@@ -9,7 +9,8 @@ Item {
   id: root
 
   readonly property string scriptDir: Platform.localPath(Qt.resolvedUrl(".")).replace(/\/$/, "")
-  readonly property string script: scriptDir + "/msgraph.py"
+  // The script every process here runs; a test points it at a stub.
+  property string script: scriptDir + "/msgraph.py"
 
   // Who this sign-in belongs to (a provider id); names the token file, and
   // the entry in the platform's account config where a user may put a
@@ -39,6 +40,12 @@ Item {
   property bool loggingIn: false
 
   signal updated()
+  // The sign-in is gone: a status answer said so, or the user signed out. A
+  // provider throws the account's caches away on this, and only on this —
+  // `updated()` fires for every answer, and a probe that could not answer
+  // at all leaves the state as it was rather than reading as signed out.
+  signal signedOut()
+  signal statusFailed(string error)
   signal codeReceived(string code, string uri)
   signal loginSucceeded()
   signal loginFailed(string error)
@@ -83,14 +90,28 @@ Item {
     environment: root.env
     raw: true
     onFinished: function(result) {
+      var st = null
       try {
-        var st = JSON.parse(result.text || "")
-        root.configured = st.configured === true
-        root.signedIn = st.signedIn === true
-        root.account = st.account || ""
-        root.cacheSession = st.cacheSession || ""
-        root.grantedScope = st.scope || ""
-      } catch (e) { root.configured = false; root.signedIn = false; root.grantedScope = ""; root.cacheSession = "" }
+        st = JSON.parse(result.text || "")
+      } catch (e) {
+        st = null
+      }
+      if (!st || st.error) {
+        // No answer, or the script's own error: the sign-in is whatever it
+        // was, and the reason is said instead of a sign-out being invented.
+        root.statusFailed(st && st.error ? st.error : (result.error || "the sign-in status could not be read"))
+        root.updated()
+        return
+      }
+      var wasSignedIn = root.signedIn
+      root.configured = st.configured === true
+      root.signedIn = st.signedIn === true
+      root.account = st.account || ""
+      root.cacheSession = st.cacheSession || ""
+      root.grantedScope = st.scope || ""
+      if (wasSignedIn && !root.signedIn) {
+        root.signedOut()
+      }
       root.updated()
     }
   }
@@ -121,7 +142,14 @@ Item {
     command: ["python3", root.script, "logout"]
     environment: root.env
     onFinished: {
-      root.signedIn = false; root.account = ""; root.grantedScope = ""; root.cacheSession = ""
+      var wasSignedIn = root.signedIn
+      root.signedIn = false
+      root.account = ""
+      root.grantedScope = ""
+      root.cacheSession = ""
+      if (wasSignedIn) {
+        root.signedOut()
+      }
       root.updated()
       if (root.reloginPending) {
         root.reloginPending = false

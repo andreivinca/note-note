@@ -626,21 +626,24 @@ Item {
       root.loadVersions = ({})
       root.saveVersions = ({})
     }
-    function onUpdated() {
-      if (!root.ms.signedIn) {
-        root.onSections = []
-        root.pages = []
-        root.bodies = ({})
-        root.loadVersions = ({})
-        clearProc.running = true
-        // Nothing queued belongs to the account that just left. The rate
-        // cooldown is deliberately *not* cleared: Microsoft throttles per
-        // app+user, so signing back in does not lift it, and pretending
-        // otherwise would just spend the first request learning that again.
-        if (services && services.requests) {
-          services.requests.cancelOwner(root)
-        }
+    function onSignedOut() {
+      root.onSections = []
+      root.pages = []
+      root.bodies = ({})
+      root.loadVersions = ({})
+      clearProc.running = true
+      // Nothing queued belongs to the account that just left. The rate
+      // cooldown is deliberately *not* cleared: Microsoft throttles per
+      // app+user, so signing back in does not lift it, and pretending
+      // otherwise would just spend the first request learning that again.
+      if (services && services.requests) {
+        services.requests.cancelOwner(root)
       }
+    }
+    function onStatusFailed(error) {
+      root.statusRequested(root.name + ": could not check the sign-in — " + error)
+    }
+    function onUpdated() {
       root.refresh()
     }
   }

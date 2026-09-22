@@ -205,13 +205,17 @@ Item {
 
   Connections {
     target: root.ms
-    function onUpdated() {
-      if (!root.ms.signedIn) {
-        root.notes = []; clearProc.running = true
-        if (services && services.requests) {
-          services.requests.cancelOwner(root)
-        }
+    function onSignedOut() {
+      root.notes = []
+      clearProc.running = true
+      if (services && services.requests) {
+        services.requests.cancelOwner(root)
       }
+    }
+    function onStatusFailed(error) {
+      root.statusRequested(root.name + ": could not check the sign-in — " + error)
+    }
+    function onUpdated() {
       root.refresh()
     }
   }

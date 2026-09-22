@@ -486,9 +486,14 @@ through the provider's own app registration (`clientId`, your
 scopes it asked for — so nothing about one provider's account touches
 another's. It exposes `configured`, `signedIn`, `account`, `hasScope(s)`,
 `login()`, `relogin()`, `logout()`, `refresh()`, `env` (environment for
-processes that run `msgraph.py`-based scripts), `scriptDir`, and the signal
-`updated()`. The host renders the device-code screen for any account it
-created. What providers share is only the code. A user who prefers a
+processes that run `msgraph.py`-based scripts), `scriptDir`, and the signals
+`updated()`, `signedOut()` and `statusFailed(error)`. `updated()` fires for
+every answer; `signedOut()` is the transition — a status answer of signed
+out, or a sign-out — and is the one signal on which to throw the account's
+caches and queued work away. A probe that could not answer leaves the
+sign-in as it was and fires `statusFailed` instead: say it on the status
+line, and do not read it as signed out. The host renders the device-code
+screen for any account it created. What providers share is only the code. A user who prefers a
 registration of their own gives it to your provider alone, in
 `~/.config/omarchy/note-note.json` as
 `{"microsoft": {"<providerId>": {"clientId": "…", "tenant": "…"}}}`.

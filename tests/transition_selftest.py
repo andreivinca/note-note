@@ -56,6 +56,15 @@ def main():
         (config / "config.json").write_text(json.dumps({"providers": {
             name: {"enabled": False} for name in ("local", "notion", "onenote", "sticky")}}))
         (work / "notes").mkdir()
+        # A stand-in for msgraph.py's `status`: what it answers is chosen by
+        # the account's owner, so one stub covers every way a probe can end.
+        (work / "status_stub.py").write_text(
+            "import os, sys\n"
+            "owner = os.environ.get('NOTE_NOTE_MS_ACCOUNT', '')\n"
+            "answers = {'signed-in': '{\"configured\": true, \"signedIn\": true, \"account\": \"a\", \"scope\": \"s\"}',\n"
+            "           'signed-out': '{\"configured\": true, \"signedIn\": false}',\n"
+            "           'garbage': 'not json at all', 'error': '{\"error\": \"boom\"}'}\n"
+            "sys.stdout.write(answers[owner])\n")
         (work / "notes/Broken").write_text("a file, not a notebook")
         (work / "notes/External.md").write_text("---\ntitle: External original\n---\noriginal")
         (work / "notes/Large.md").write_text("漢" * 700000, encoding="utf-8")
@@ -67,6 +76,7 @@ def main():
         env = dict(os.environ, HOME=str(work), XDG_RUNTIME_DIR=str(runtime),
                    XDG_CONFIG_HOME=str(work / "config"), XDG_CACHE_HOME=str(work / "cache"),
                    XDG_STATE_HOME=str(work / "state"), NOTE_NOTE_TEST_DIR=str(work / "notes"),
+                   NOTE_NOTE_TEST_STATUS_SCRIPT=str(work / "status_stub.py"),
                    NOTE_NOTE_TEST_TOOLS=(tool_ui / "tools").as_uri(),
                    NOTE_NOTE_TEST_INVALID_TOOLS=invalid_tools.as_uri(),
                    NOTE_NOTE_TEST_TOOLS_ONLY="1" if "--tools" in sys.argv else "",
