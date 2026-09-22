@@ -1,6 +1,7 @@
 import "../../services/platform"
 import QtQuick
 import "../../services/processes"
+import "../../services/providers"
 import "../../design"
 import "../../design/controls"
 
@@ -8,7 +9,7 @@ import "../../design/controls"
 // default, or — the host's notebookTabs setting — a binder tab per
 // notebook, the way the local folders show. Pages are fetched on demand as
 // Markdown (onenote.py + onenote_md.py) and written back as OneNote HTML.
-Item {
+LaneProvider {
   id: root
 
   readonly property string id: "onenote"
@@ -36,62 +37,24 @@ Item {
   // of OneNote here signs in through. Sticky Notes has one of its own.
   readonly property string microsoftClientId: "1ed713b0-195a-4360-88b4-993f3aeaa262"
 
-  // Every save is a PATCH against Graph, paced and retried by the lane behind
-  // it and counted against an account's budget, so the typing is let settle
-  // first: long enough that a sentence is one request rather than one per
-  // word (noteEdited / saveRequested, PROVIDERS.md).
-  signal saveRequested(string path)
-  function noteEdited(path) { saveSchedule.path = path; saveSchedule.restart() }
-  Timer {
-    id: saveSchedule
-    property string path: ""
-    interval: 1500
-    onTriggered: root.saveRequested(saveSchedule.path)
-  }
-
-  property var host: null
-  property var services: null
   // Assigned by the host from config.providers.onenote.notebookTabs
   // (~/.config/notenote/config.json): each notebook a binder tab of its own
   // when true; the whole tree in one OneNote tab when false, the default.
   property bool notebookTabs: false
-  // This provider's own Microsoft sign-in: own registration, own token file,
-  // own scope.
-  property var ms: null
-  // And its own request lane, keyed to its own Graph budget: everything below
-  // goes through it, in order, and it parks whole when OneNote says it has
-  // had enough (services/requests/, providers/PROVIDERS.md). Sticky Notes has
-  // a lane of its own, so a OneNote throttle never reaches it.
-  property var rq: null
+  readonly property string dir: Platform.localPath(Qt.resolvedUrl(".")).replace(/\/$/, "")
+  script: dir + "/onenote.py"
+  // Keyed to OneNote's own Graph budget: everything below goes through the
+  // lane, in order, and it parks whole when OneNote says it has had enough
+  // (services/requests/, providers/PROVIDERS.md). Sticky Notes has a lane
+  // of its own, so a OneNote throttle never reaches it.
+  laneKey: "graph-onenote"
   Component.onCompleted: {
     if (services && services.microsoft) {
       root.ms = services.microsoft.create(root.id, root.microsoftScopes, root.microsoftClientId)
       root.ms.optionalScopes = "Files.Read"
     }
-    if (services && services.requests) {
-      root.rq = services.requests.queueFor("graph-onenote", root)
-    }
-  }
-  // A provider is destroyed and rebuilt when its settings change, and on
-  // sign-out. What it had not started yet goes with it; what is already
-  // running finishes, since its process is running either way.
-  Component.onDestruction: {
-    if (services && services.requests) {
-      services.requests.cancelOwner(root)
-    }
   }
 
-  readonly property string dir: Platform.localPath(Qt.resolvedUrl(".")).replace(/\/$/, "")
-  // The backend script; a test hands in a stand-in.
-  property string script: dir + "/onenote.py"
-
-  signal updated()
-  signal statusRequested(string text)
-  signal noticeRequested(string title, string text, string code, var actions)
-  signal noticeCleared()
-  signal viewRequested(string title, var component, var props)
-  signal viewCleared()
-  signal persistRequested()
   // Graph does not reliably bump a page's lastModifiedDateTime, so the open
   // page is re-read on poll and reported when its text differs.
   signal noteChanged(string path)
@@ -103,7 +66,6 @@ Item {
   property var loadVersions: ({})
   property var saveVersions: ({})
   property var expanded: []      // notebook/section ids the user opened
-  property var sections: []
   property bool searchInventoryReady: false
   property bool searchInventoryComplete: false
   readonly property bool ready: ms && ms.signedIn && ms.hasScope("Notes.ReadWrite")
@@ -505,32 +467,10 @@ Item {
   }
 
   // ── running the script ──────────────────────────────────────────────
-  // One process per job, made when the job runs and destroyed when it
-  // answers, so the callback travels with the process instead of living in a
-  // single `saveCb`-shaped slot that the next save would overwrite. (That
-  // slot is where a second save used to drop the first one's answer.)
-  ProcessRunner { id: scriptRunner }
+  // The search cache's runs, outside the lane (SearchCache.qml).
   ProcessRunner { id: searchRunner }
-  readonly property bool busy: scriptRunner.active > 0
-  // One provider to a lane, so the lane's accepted writes are this one's.
-  readonly property bool writeBusy: root.rq ? root.rq.writeDepth > 0 : false
-
-  function runScript(args, payload, ctx) {
-    root.runProcess(scriptRunner, args, payload || undefined, function(result) { ctx.done(result) })
-  }
-
   function runLocal(args, payload, callback) {
     return root.runProcess(searchRunner, args, payload, callback)
-  }
-
-  function runProcess(runner, args, payload, callback) {
-    var session = root.ms ? root.ms.cacheSession : ""
-    return runner.run({ command: ["python3", root.script].concat(args),
-                       environment: root.ms ? root.ms.env : ({}),
-                       payload: payload,
-                       timeoutMs: 600000 }, function(result) {
-      callback(session === (root.ms ? root.ms.cacheSession : "") ? result : { error: "the signed-in account changed" })
-    })
   }
 
   function refresh() {
@@ -678,7 +618,7 @@ Item {
       root.pages = []
       root.bodies = ({})
       root.loadVersions = ({})
-      clearProc.start()
+      root.clearCache()
       // Nothing queued belongs to the account that just left. The rate
       // cooldown is deliberately *not* cleared: Microsoft throttles per
       // app+user, so signing back in does not lift it, and pretending
@@ -741,10 +681,6 @@ Item {
   // lane emptied on sign-out, or this provider going — means nobody will, and
   // that is a failure the host must hear: an accepted save finishes or fails
   // out loud (business-requirements.md), never silently.
-  function unsentSave(info) {
-    return (info && info.cancelled) ? { error: "not saved — the request was cancelled" } : {}
-  }
-
   function save(path, title, body, cb, options) {
     var id = idOf(path)
     if (!root.rq) {
@@ -865,8 +801,6 @@ Item {
       })
   }
 
-  function setOrder(sectionKey, paths) {}
-
   // Polling, on a diet. Every third tick (so once a minute) this costs at
   // most two requests: the open page, and the pages of the section it is in.
   // It used to re-list *every* expanded section — up to eleven requests a
@@ -932,8 +866,6 @@ Item {
     root.noteChanged(path)
   }
 
-  function parse(text) { try { return JSON.parse(text) } catch (e) { return { error: "unexpected reply" } } }
-
   // The cache, read straight off disk so the sidebar fills instantly — and
   // still fills while the account is parked, which is the point of reading it
   // outside the lane.
@@ -964,5 +896,4 @@ Item {
       root.rebuild()
     }
   }
-  ProcessTask { id: clearProc; environment: root.ms ? root.ms.env : ({}); command: ["python3", root.script, "clear-cache"] }
 }

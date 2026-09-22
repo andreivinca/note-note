@@ -1,13 +1,14 @@
 import "../../services/platform"
 import QtQuick
 import "../../services/processes"
+import "../../services/providers"
 import "../../design"
 import "../../design/controls"
 
 // Notion: the pages shared with an internal integration, through the
 // official API (notion.py). Setup is a pasted integration secret, stored by
 // the provider itself; blocks are shown and edited as Markdown.
-Item {
+LaneProvider {
   id: root
 
   readonly property string id: "notion"
@@ -26,50 +27,16 @@ Item {
                                 "h1", "h2", "h3", "p", "ul", "ol", "todo", "indent", "outdent",
                                 "quote", "codeblock", "rule", "link"]
 
-  // A save is a request against Notion's API, and one that rewrites the
-  // page's blocks rather than patching a character, so the typing is let
-  // settle first (noteEdited / saveRequested, PROVIDERS.md).
-  signal saveRequested(string path)
-  function noteEdited(path) { saveSchedule.path = path; saveSchedule.restart() }
-  Timer {
-    id: saveSchedule
-    property string path: ""
-    interval: 1500
-    onTriggered: root.saveRequested(saveSchedule.path)
-  }
-
-  property var host: null
-  property var services: null
-  // This provider's own request lane, keyed to Notion's own limit — a
-  // Microsoft throttle has nothing to do with it (providers/PROVIDERS.md).
-  property var rq: null
-  Component.onCompleted: {
-    if (services && services.requests) {
-      root.rq = services.requests.queueFor("notion", root)
-    }
-  }
-  Component.onDestruction: {
-    if (services && services.requests) {
-      services.requests.cancelOwner(root)
-    }
-  }
-
   readonly property string dir: Platform.localPath(Qt.resolvedUrl(".")).replace(/\/$/, "")
-  readonly property string script: dir + "/notion.py"
-
-  signal updated()
-  signal statusRequested(string text)
-  signal noticeRequested(string title, string text, string code, var actions)
-  signal noticeCleared()
-  signal viewRequested(string title, var component, var props)
-  signal viewCleared()
-  signal persistRequested()
+  script: dir + "/notion.py"
+  // Keyed to Notion's own limit: a Microsoft throttle has nothing to do
+  // with it (providers/PROVIDERS.md).
+  laneKey: "notion"
 
   property bool configured: false
   property string workspace: ""
   property var pages: []          // [{ id, title, parent, edited }]
   property var bodies: ({})       // id -> { title, body, editable }
-  property var sections: []
 
   function idOf(path) { return path.substring(root.id.length + 1) }
   function pathOf(id) { return root.id + ":" + id }
@@ -119,10 +86,6 @@ Item {
     }
     return root.pages.length ? "parent:" + root.pages[0].id : ""
   }
-  function restoreState(obj) {}
-  function saveState() { return {} }
-  function toggleTree(id) {}
-  function setOrder(sectionKey, paths) {}
   // One search request per minute while open.
   property int pollTick: 0
   function poll() {
@@ -211,15 +174,6 @@ Item {
           cb(loaded)
         }
       })
-  }
-
-  // A save the lane never sent. Superseded means a newer save of the same
-  // note carries this one's intent and answers for it: `{}`. Cancelled — the
-  // lane emptied on sign-out, or this provider going — means nobody will, and
-  // that is a failure the host must hear: an accepted save finishes or fails
-  // out loud (business-requirements.md), never silently.
-  function unsentSave(info) {
-    return (info && info.cancelled) ? { error: "not saved — the request was cancelled" } : {}
   }
 
   // The model follows the backend, never runs ahead of it: a page's title
@@ -326,22 +280,6 @@ Item {
           cb(r.error ? { error: r.error } : {})
         }
       })
-  }
-
-  function parse(text) { try { return JSON.parse(text) } catch (e) { return { error: "unexpected reply" } } }
-
-  // One process per job, so its callback travels with it (the same shape as
-  // providers/onenote/Provider.qml).
-  ProcessRunner { id: scriptRunner }
-  readonly property bool busy: scriptRunner.active > 0
-  // One provider to a lane, so the lane's accepted writes are this one's.
-  readonly property bool writeBusy: root.rq ? root.rq.writeDepth > 0 : false
-
-  function runScript(args, payload, ctx) {
-    scriptRunner.run({ command: ["python3", root.script].concat(args),
-                       environment: ({}),
-                       payload: payload || undefined,
-                       timeoutMs: 600000 }, function(result) { ctx.done(result) })
   }
 
   // ── processes ───────────────────────────────────────────────────────

@@ -1,10 +1,11 @@
 import "../../services/platform"
 import QtQuick
 import "../../services/processes"
+import "../../services/providers"
 
 // Microsoft Sticky Notes: items in the Outlook mailbox's Notes folder, read
 // and written online through Graph (sticky.py). Needs services.microsoft.
-Item {
+LaneProvider {
   id: root
 
   readonly property string id: "sticky"
@@ -22,54 +23,19 @@ Item {
   // of Sticky Notes here signs in through. OneNote has one of its own.
   readonly property string microsoftClientId: "867770a1-477d-4864-9e09-8e3019ca336c"
 
-  // A save is a Graph request like any other, and a sticky note is short
-  // enough that waiting for the typing to stop costs the user nothing
-  // (noteEdited / saveRequested, PROVIDERS.md).
-  signal saveRequested(string path)
-  function noteEdited(path) { saveSchedule.path = path; saveSchedule.restart() }
-  Timer {
-    id: saveSchedule
-    property string path: ""
-    interval: 1500
-    onTriggered: root.saveRequested(saveSchedule.path)
-  }
-
-  property var host: null
-  property var services: null
-  // This provider's own Microsoft sign-in: own registration, own token file,
-  // own scope.
-  property var ms: null
-  // And its own request lane. Mail's limits are far above OneNote's, so this
-  // lane exists mostly to keep sticky notes moving *while* OneNote is parked:
-  // separate keys, separate cooldowns (providers/PROVIDERS.md).
-  property var rq: null
+  readonly property string dir: Platform.localPath(Qt.resolvedUrl(".")).replace(/\/$/, "")
+  script: dir + "/sticky.py"
+  // Mail's limits are far above OneNote's, so this lane exists mostly to
+  // keep sticky notes moving *while* OneNote is parked: separate keys,
+  // separate cooldowns (providers/PROVIDERS.md).
+  laneKey: "graph-mail"
   Component.onCompleted: {
     if (services && services.microsoft) {
       root.ms = services.microsoft.create(root.id, root.microsoftScopes, root.microsoftClientId)
     }
-    if (services && services.requests) {
-      root.rq = services.requests.queueFor("graph-mail", root)
-    }
   }
-  Component.onDestruction: {
-    if (services && services.requests) {
-      services.requests.cancelOwner(root)
-    }
-  }
-
-  readonly property string dir: Platform.localPath(Qt.resolvedUrl(".")).replace(/\/$/, "")
-  readonly property string script: dir + "/sticky.py"
-
-  signal updated()
-  signal statusRequested(string text)
-  signal noticeRequested(string title, string text, string code, var actions)
-  signal noticeCleared()
-  signal viewRequested(string title, var component, var props)
-  signal viewCleared()
-  signal persistRequested()
 
   property var notes: []        // [{ id, title, body, modified }]
-  property var sections: []
   readonly property bool ready: ms && ms.signedIn && ms.hasScope("Mail.ReadWrite")
 
   function idOf(path) { return path.substring(root.id.length + 1) }
@@ -118,9 +84,6 @@ Item {
 
   function crumb(path) { return "Microsoft Sticky Notes" }
   function createTargetFor(path) { return root.ready ? "new" : "" }
-  function restoreState(obj) {}
-  function saveState() { return {} }
-  function toggleTree(id) {}
 
   function action(id) {
     if (!ms) {
@@ -207,7 +170,7 @@ Item {
     target: root.ms
     function onSignedOut() {
       root.notes = []
-      clearProc.start()
+      root.clearCache()
       if (services && services.requests) {
         services.requests.cancelOwner(root)
       }
@@ -232,15 +195,6 @@ Item {
       return
     }
     cb({ title: "", body: n.body, editable: true, version: n.modified || "" })
-  }
-
-  // A save the lane never sent. Superseded means a newer save of the same
-  // note carries this one's intent and answers for it: `{}`. Cancelled — the
-  // lane emptied on sign-out, or this provider going — means nobody will, and
-  // that is a failure the host must hear: an accepted save finishes or fails
-  // out loud (business-requirements.md), never silently.
-  function unsentSave(info) {
-    return (info && info.cancelled) ? { error: "not saved — the request was cancelled" } : {}
   }
 
   // The model follows the backend, never runs ahead of it: a note's text
@@ -342,25 +296,8 @@ Item {
       })
   }
 
-  function setOrder(sectionKey, paths) {}
   // One listing request per poll; nothing else is needed to spot changes.
   function poll() { root.listNotes() }
-
-  function parse(text) { try { return JSON.parse(text) } catch (e) { return { error: "unexpected reply" } } }
-
-  // One process per job, so its callback travels with it (the same shape as
-  // providers/onenote/Provider.qml).
-  ProcessRunner { id: scriptRunner }
-  readonly property bool busy: scriptRunner.active > 0
-  // One provider to a lane, so the lane's accepted writes are this one's.
-  readonly property bool writeBusy: root.rq ? root.rq.writeDepth > 0 : false
-
-  function runScript(args, payload, ctx) {
-    scriptRunner.run({ command: ["python3", root.script].concat(args),
-                       environment: root.ms ? root.ms.env : ({}),
-                       payload: payload || undefined,
-                       timeoutMs: 600000 }, function(result) { ctx.done(result) })
-  }
 
   ProcessTask {
     id: cachedProc
@@ -375,5 +312,4 @@ Item {
       root.rebuild()
     }
   }
-  ProcessTask { id: clearProc; environment: root.ms ? root.ms.env : ({}); command: ["python3", root.script, "clear-cache"] }
 }

@@ -710,6 +710,42 @@ ShellRoot {
     function relogin() { destructiveLogins++ }
   }
   OneNote.Provider { id: oneNote; ms: oneNoteAccount }
+  // An account of its own, so switching it reaches no other provider.
+  QtObject {
+    id: stubAccount
+    property bool configured: true
+    property bool signedIn: true
+    property bool loggingIn: false
+    property string account: "test"
+    property string cacheSession: ""
+    property var env: ({})
+    signal updated()
+    signal signedOut()
+    signal statusFailed(string error)
+    function hasScope(scope) { return true }
+  }
+  Sticky.Provider {
+    id: stickyStub
+    ms: stubAccount
+    script: Platform.env("NOTE_NOTE_TEST_ONENOTE_SCRIPT")
+  }
+  // A script's answer is for the account the request was made under: one
+  // that lands after the account changed is refused (LaneProvider.qml).
+  function laneProviderCases() {
+    if (!Platform.env("NOTE_NOTE_TEST_ONENOTE_SCRIPT")) {
+      return
+    }
+    test.processes++
+    stickyStub.runScript(["list"], "", { done: function(result) {
+      check("a script answer for another account is refused", result.error === "the signed-in account changed")
+      stubAccount.cacheSession = ""
+      stickyStub.runScript(["list"], "", { done: function(again) {
+        check("a script answer for the same account is taken", !again.error && Array.isArray(again.sections))
+        test.processes--
+      } })
+    } })
+    stubAccount.cacheSession = "switched"
+  }
   // Driven by a stand-in script: the listing lands first, in the order the
   // last pass left, and the pass that follows places the sections.
   OneNote.Provider {
@@ -1090,6 +1126,7 @@ ShellRoot {
       pureCases()
       oneNoteCases()
       orderCases()
+      laneProviderCases()
       processCases()
       localCases()
       remoteModelCases()

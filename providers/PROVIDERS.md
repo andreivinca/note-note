@@ -201,7 +201,8 @@ them.
   you could not send at all — your lane emptied by a sign-out, your provider
   being turned off — answers `{ error }`: nobody else will write that text,
   and the host marks the note unsaved and says so rather than showing it as
-  saved (see `unsentSave` in any of the request-lane providers). The host
+  saved (see `unsentSave` in `services/providers/LaneProvider.qml`, the base
+  the built-in request-lane providers extend). The host
   counts saves in flight per note, and a save that is never answered is one
   that looks unfinished for ever.
   Change your own model when the backend has changed, not before: the host
@@ -227,8 +228,9 @@ them.
   until something you are waiting for arrives — and emit `saveRequested(path)`
   when you want the write. It is called on every edit, so debouncing is the
   usual shape and the one every built-in provider takes: see the
-  `saveRequested` signal, `noteEdited` and the `Timer` beside them near the
-  top of any built-in `Provider.qml`.
+  `saveRequested` signal, `noteEdited` and the `Timer` beside them in
+  `services/providers/LaneProvider.qml` (the local provider has its own,
+  with a shorter pause, near the top of its `Provider.qml`).
   Implement neither this nor `saveRequested` and your notes are written on the
   host's own default pause (1500 ms), so a provider that does not care about
   the question still autosaves.
