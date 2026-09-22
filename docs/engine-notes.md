@@ -442,6 +442,13 @@ class is set: extended property `String 0x001A` = `IPM.StickyNote`.
   section IDs; it never introduces manual/local positions. See
   [OneNote section order](onenote-section-order.md) for the live evidence,
   parser/cache design and unsupported or ambiguous cases.
+- **A quote, a code block, inline code and a rule do not round-trip.**
+  `onenote_md.py` writes each as a look (an inset grey paragraph, a
+  Consolas span, a line of dashes) that its reader has no reading for, so
+  they came back as plain text after a save. The provider withholds those
+  four tools (`tools` in Provider.qml), and `onenote.py` refuses a save
+  holding one before staging it — after staging the merge store has
+  normalised the draft, which is why the old guard never fired.
 - Page images need the bearer token and are only ever fetched from the
   resource endpoint — see [security.md](security.md) rule 4.
 

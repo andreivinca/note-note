@@ -24,6 +24,13 @@ Item {
   // with the save (onenote.py).
   readonly property bool canImages: true
   readonly property var microsoftScopes: ["Notes.ReadWrite"]
+  // What the page can hold (PROVIDERS.md). Not a quote, a code block, inline
+  // code or a rule: onenote_md.py writes each as a look its reader has no
+  // reading for, so they would come back as plain text — and a save holding
+  // one is refused (onenote.py, keeps_formatting) rather than flattened.
+  readonly property var tools: ["bold", "italic", "underline", "strikeout", "highlight", "textColor",
+                                "h1", "h2", "h3", "p", "ul", "ol", "todo", "indent", "outdent",
+                                "table", "link", "currentMonth", "nextMonth", "customMonth"]
   // This provider's own app registration: an Entra public client for
   // personal and work accounts, registered by the author, that every user
   // of OneNote here signs in through. Sticky Notes has one of its own.

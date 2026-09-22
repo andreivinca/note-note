@@ -1,8 +1,12 @@
 """OneNote page HTML <-> Markdown, in the dialect Qt's TextEdit reads and
 writes (GitHub-style task lists, tables, `*italic*`, `_underline_`).
 
-Only what round-trips is converted; anything else marks the page as not
-editable (see convert()["editable"]) so the UI opens it read-only.
+Reading, only what round-trips is converted; anything else marks the page
+as not editable (see convert()["editable"]) so the UI opens it read-only.
+Writing, four Markdown constructs are rendered as looks the reader has no
+reading for — a quote, a code block, inline code, a rule (UNKEPT_KINDS) —
+so the provider does not offer their tools, and a save holding one is
+refused rather than flattened (unkept_formatting, onenote.py).
 """
 import html as _html
 import re
@@ -802,6 +806,31 @@ def markdown_to_runs(md, image_ref=None):
     if text:
         runs.append({"kind": "text", "html": "".join(text)})
     return runs
+
+
+# What the HTML below writes as a look its reader (Converter) has no reading
+# for: each comes back from OneNote as plain text. The provider does not
+# offer their tools, and a save holding one is refused rather than flattened
+# (onenote.py). Named by the parser's token types, as the user knows them.
+UNKEPT_KINDS = {"block_quote": "a quote", "block_code": "a code block",
+                "codespan": "inline code", "thematic_break": "a rule"}
+
+
+def unkept_formatting(md):
+    """The names of every construct in this Markdown that a save would
+    flatten, in document order and without repeats — empty when the page
+    can hold all of it."""
+    found = []
+
+    def walk(tokens):
+        for token in tokens or []:
+            name = UNKEPT_KINDS.get(token["type"])
+            if name and name not in found:
+                found.append(name)
+            walk(token.get("children"))
+
+    walk(_parse(md))
+    return found
 
 
 def markdown_to_onenote_html(md, image_ref=None):

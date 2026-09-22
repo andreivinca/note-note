@@ -962,10 +962,21 @@ def write_page(page_id, note, remote, current):
     return warning
 
 
+def refuse_unkept_formatting(payload):
+    """A save that OneNote would flatten is refused before it is staged: the
+    merge store normalises a staged draft, so a check after staging could
+    never see the loss. The draft stays with the editor, unsaved."""
+    lost = onenote_md.unkept_formatting(payload.get("body", ""))
+    if lost:
+        fail("this page cannot keep %s; take it out to save — your draft was kept"
+             % " or ".join(lost))
+
+
 def cmd_onenote_update(page_id, path):
     payload = read_payload(path)
     if not isinstance(payload, dict):
         fail("cannot read payload")
+    refuse_unkept_formatting(payload)
     with merge_store(page_id) as journal:
         journal.stage(payload.get("view", ""), payload)
         remote, current = read_page(page_id)

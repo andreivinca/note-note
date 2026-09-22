@@ -278,6 +278,25 @@ class SaveTests(unittest.TestCase):
         with self.store() as journal:
             self.assertEqual(journal.recover()["body"], "- [ ] Same")
 
+    def test_formatting_the_page_cannot_keep_is_refused_before_staging(self):
+        # A quote, a code block, inline code and a rule are written as looks
+        # the reader cannot read back; they used to be flattened silently,
+        # because the guard ran on a draft the merge store had normalised.
+        self.remote = ('<html><head><title>Title</title></head><body><div>'
+                       '<p id="p:one">One</p></div></body></html>')
+        loaded = self.load()
+        for body, kinds in (("> One", "a quote"), ("One `x`", "inline code"),
+                            ("One\n\n```\nx\n```", "a code block"), ("One\n\n---\n\n> x", "a rule or a quote")):
+            with self.subTest(body):
+                self.calls.clear()
+                saved = self.save(note(body), loaded["view"])
+                self.assertIn("cannot keep " + kinds, saved.get("error", ""))
+                self.assertFalse(any(method == "PATCH" for method, *_ in self.calls))
+        with self.store() as journal:
+            self.assertIsNone(journal.recover())
+        saved = self.save(note("One **kept**"), loaded["view"])
+        self.assertTrue(saved.get("ok"), saved)
+
     def test_nested_table_insertion_preserves_parent_and_neighbour_ids(self):
         self.remote = ('<html><head><title>Title</title></head><body><table id="table:outer">'
                        '<tr><td><p id="p:head1">Parent</p></td><td><p id="p:head2">Neighbour</p></td></tr>'
