@@ -114,8 +114,9 @@ public:
     Q_INVOKABLE void endEditBlock()
     {
         QTextDocument *doc = m_document ? m_document->textDocument() : nullptr;
-        if (!doc || m_editDepth <= 0)
+        if (!doc || m_editDepth <= 0) {
             return;
+        }
         QTextCursor(doc).endEditBlock();
         --m_editDepth;
     }
@@ -186,8 +187,9 @@ public:
     {
         QVariantList out;
         QTextDocument *doc = m_document ? m_document->textDocument() : nullptr;
-        if (!doc)
+        if (!doc) {
             return out;
+        }
         for (QTextBlock block = doc->begin(); block.isValid(); block = block.next()) {
             const QTextBlockFormat format = block.blockFormat();
             QVariantMap entry;
@@ -225,21 +227,24 @@ public:
     {
         QVariantList out;
         QTextDocument *doc = m_document ? m_document->textDocument() : nullptr;
-        if (!doc)
+        if (!doc) {
             return out;
+        }
         for (QTextBlock block = doc->begin(); block.isValid(); block = block.next()) {
             for (QTextBlock::iterator it = block.begin(); !it.atEnd(); ++it) {
                 const QTextFragment fragment = it.fragment();
-                if (!fragment.isValid() || !fragment.charFormat().isImageFormat())
+                if (!fragment.isValid() || !fragment.charFormat().isImageFormat()) {
                     continue;
+                }
                 const QTextImageFormat format = fragment.charFormat().toImageFormat();
                 const QSizeF natural = naturalSize(doc, format);
                 qreal width = format.hasProperty(QTextFormat::ImageWidth) ? format.width() : 0;
                 qreal height = format.hasProperty(QTextFormat::ImageHeight) ? format.height() : 0;
-                if (width > 0 && height <= 0 && natural.width() > 0)
+                if (width > 0 && height <= 0 && natural.width() > 0) {
                     height = natural.height() * width / natural.width();
-                else if (height > 0 && width <= 0 && natural.height() > 0)
+                } else if (height > 0 && width <= 0 && natural.height() > 0) {
                     width = natural.width() * height / natural.height();
+                }
                 if (width <= 0 && height <= 0) {
                     width = natural.width();
                     height = natural.height();
@@ -272,23 +277,26 @@ public:
     Q_INVOKABLE bool setImageWidth(int position, qreal width, bool join = false)
     {
         QTextDocument *doc = m_document ? m_document->textDocument() : nullptr;
-        if (!doc || width <= 0 || position < 0 || position >= doc->characterCount())
+        if (!doc || width <= 0 || position < 0 || position >= doc->characterCount()) {
             return false;
+        }
         QTextCursor cursor(doc);
         cursor.setPosition(position);
         cursor.setPosition(position + 1, QTextCursor::KeepAnchor);
         // charFormat() answers for the character before position(), which
         // with this selection is the image character itself.
         const QTextCharFormat current = cursor.charFormat();
-        if (!current.isImageFormat())
+        if (!current.isImageFormat()) {
             return false;
+        }
         QTextImageFormat format = current.toImageFormat();
         format.setWidth(width);
         format.clearProperty(QTextFormat::ImageHeight);
-        if (join)
+        if (join) {
             cursor.joinPreviousEditBlock();
-        else
+        } else {
             cursor.beginEditBlock();
+        }
         cursor.setCharFormat(format);
         cursor.endEditBlock();
         return true;
@@ -379,13 +387,15 @@ public:
         // Mirrors LINE_HEIGHT_PCT in qthtml/dialect.py.
         constexpr qreal percent = 130;
         QTextDocument *doc = m_document ? m_document->textDocument() : nullptr;
-        if (!doc)
+        if (!doc) {
             return;
+        }
         for (QTextBlock block = doc->begin(); block.isValid(); block = block.next()) {
             QTextBlockFormat format = block.blockFormat();
             if (format.lineHeightType() == QTextBlockFormat::ProportionalHeight
-                && qFuzzyCompare(format.lineHeight(), percent))
+                && qFuzzyCompare(format.lineHeight(), percent)) {
                 continue;
+            }
             format.setLineHeight(percent, QTextBlockFormat::ProportionalHeight);
             QTextCursor cursor(block);
             cursor.joinPreviousEditBlock();
@@ -493,10 +503,12 @@ private:
     {
         const QVariant resource =
                 doc->resource(QTextDocument::ImageResource, QUrl(format.name()));
-        if (resource.canConvert<QImage>())
+        if (resource.canConvert<QImage>()) {
             return resource.value<QImage>().size();
-        if (resource.canConvert<QPixmap>())
+        }
+        if (resource.canConvert<QPixmap>()) {
             return resource.value<QPixmap>().size();
+        }
         return QSizeF();
     }
 
