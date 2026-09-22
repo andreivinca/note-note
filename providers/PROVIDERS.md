@@ -204,6 +204,12 @@ them.
   saved (see `unsentSave` in any of the request-lane providers). The host
   counts saves in flight per note, and a save that is never answered is one
   that looks unfinished for ever.
+  Change your own model when the backend has changed, not before: the host
+  keeps the draft of a save in flight and shows it if the note is reopened
+  meanwhile, so nothing waits on your model — while a model that moves
+  first serves a failed save's text as the stored note and shows a failed
+  delete as done. The local provider commits after the file is written;
+  Sticky Notes and Notion after Graph or Notion has answered.
   A `body` from a provider with `canImages` may contain `![alt](file:///…)`
   pointing either at a file the provider itself cached on `load()` (the same
   picture, already on the backend) or at a freshly pasted file staged in
@@ -247,7 +253,9 @@ them.
   for everyone (a provider that implements `defaultNote` is not remembered by
   the host as well: the entry would never be read).
 - `create(target, cb)` → `cb({ path, error })`
-- `remove(path, cb)` → `cb({ error })`
+- `remove(path, cb)` → `cb({ error })`. A delete the lane never sent — cancelled
+  by a sign-out or the provider going — answers `{ error }` like an unsent
+  save: nothing removed the note, and `{}` would show it as gone.
 - `createSection(name, cb)` → `cb({ key, target, error })`. `key` is the new
   section's key; the host opens it as the active tab. `target` is optional — the
   create target for a first note in it (the same string your `new` row carries),

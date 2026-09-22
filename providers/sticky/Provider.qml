@@ -243,12 +243,14 @@ Item {
     return (info && info.cancelled) ? { error: "not saved — the request was cancelled" } : {}
   }
 
+  // The model follows the backend, never runs ahead of it: a note's text
+  // changes here when Graph has taken it, and a note leaves here when Graph
+  // has removed it. The host keeps the draft of a save in flight and shows
+  // it if the note is reopened meanwhile (services/notes/NoteSession.qml),
+  // so nothing is lost by waiting — while a model that moved first served a
+  // failed save's text as the stored note, and showed a failed delete as
+  // done.
   function save(path, title, body, cb) {
-    var n = noteAt(path)
-    if (n) {
-      n.body = body
-    }
-    rebuild()
     if (!root.rq) {
       if (cb) {
         cb({ error: "not ready" })
@@ -267,6 +269,13 @@ Item {
             cb(root.unsentSave(info))
           }
           return
+        }
+        if (!r.error) {
+          var saved = noteAt(path)
+          if (saved) {
+            saved.body = body
+          }
+          rebuild()
         }
         if (cb) {
           cb(r.error ? { error: r.error } : {})
@@ -307,20 +316,28 @@ Item {
   }
 
   function remove(path, cb) {
-    var id = idOf(path)
-    root.notes = root.notes.filter(function(n) { return n.id !== id })
-    rebuild()
     if (!root.rq) {
       if (cb) {
         cb({ error: "not ready" })
       }
       return
     }
+    var id = idOf(path)
     root.rq.enqueue({ key: "note:" + id, mode: "replace", priority: 0, owner: root, flush: true, label: "delete" },
       function(ctx) { root.runScript(["delete", id], "", ctx) },
       function(r) {
+        if (!r) {
+          if (cb) {
+            cb({ error: "not deleted — the request was cancelled" })
+          }
+          return
+        }
+        if (!r.error) {
+          root.notes = root.notes.filter(function(n) { return n.id !== id })
+          rebuild()
+        }
         if (cb) {
-          cb(r && r.error ? { error: r.error } : {})
+          cb(r.error ? { error: r.error } : {})
         }
       })
   }

@@ -9,6 +9,8 @@ import "app/services/processes"
 import "app/services/files"
 import "app/providers/local" as Local
 import "app/providers/onenote" as OneNote
+import "app/providers/sticky" as Sticky
+import "app/providers/notion" as Notion
 import "app/services/microsoft" as Microsoft
 import "app/services/notes/sidebar.js" as Sidebar
 import "app/services/providers/settings.js" as Settings
@@ -717,6 +719,84 @@ ShellRoot {
   }
   Component { id: oneNoteFactory; OneNote.Provider {} }
   Component { id: localFactory; Local.Provider {} }
+  Component { id: stickyFactory; Sticky.Provider {} }
+  Component { id: notionFactory; Notion.Provider {} }
+
+  // A lane that records what it is handed and lets the test answer it.
+  QtObject {
+    id: recordingLane
+    property var jobs: []
+    property int revision: 0
+    function enqueue(job, run, done) { recordingLane.jobs.push({ job: job, done: done }) }
+    function pendingFor(owner, writes) { return 0 }
+    function cancelOwner(owner) {}
+    function settle(answer) { recordingLane.jobs.shift().done(answer, { cancelled: answer === null }) }
+  }
+  QtObject {
+    id: recordingAccount
+    property bool configured: true
+    property bool signedIn: true
+    property bool loggingIn: false
+    property string account: "test"
+    property string cacheSession: ""
+    property string grantedScope: "Mail.ReadWrite"
+    property var env: ({})
+    signal updated()
+    signal signedOut()
+    signal statusFailed(string error)
+    function hasScope(scope) { return true }
+    function refresh() {}
+  }
+  readonly property var recordingServices: ({
+    requests: { queueFor: function(key, provider) { return recordingLane }, cancelOwner: function(owner) {} },
+    microsoft: { create: function(owner, scopes, clientId) { return recordingAccount } }
+  })
+
+  // A remote provider's model follows the backend: a save changes the
+  // stored note when the backend has taken it, a delete removes it when the
+  // backend has, a cancelled delete is a failure, and a failed one leaves
+  // the note where it was.
+  function remoteModelCases() {
+    var sticky = stickyFactory.createObject(test, { services: test.recordingServices })
+    sticky.notes = [{ id: "a", title: "", body: "old", modified: "1" }]
+    sticky.rebuild()
+    var answers = []
+    sticky.save("sticky:a", "", "new", function(result) { answers.push(result) })
+    check("a Sticky save leaves the model alone until the backend answers", sticky.notes[0].body === "old" && recordingLane.jobs.length === 1)
+    recordingLane.settle({ error: "refused" })
+    check("a failed Sticky save keeps the stored text", sticky.notes[0].body === "old" && answers[0].error === "refused")
+    sticky.save("sticky:a", "", "new", function(result) { answers.push(result) })
+    recordingLane.settle({ ok: true })
+    check("a Sticky save that landed updates the stored text", sticky.notes[0].body === "new" && !answers[1].error)
+    sticky.remove("sticky:a", function(result) { answers.push(result) })
+    check("a Sticky delete keeps the note until the backend answers", sticky.notes.length === 1)
+    recordingLane.settle(null)
+    check("a cancelled Sticky delete is a failure and keeps the note", sticky.notes.length === 1 && /cancelled/.test(answers[2].error))
+    sticky.remove("sticky:a", function(result) { answers.push(result) })
+    recordingLane.settle({ ok: true })
+    check("a Sticky delete that landed removes the note", sticky.notes.length === 0 && !answers[3].error)
+    sticky.destroy()
+
+    var notion = notionFactory.createObject(test, { services: test.recordingServices })
+    notion.pages = [{ id: "p", title: "Old", parent: "", edited: "1" }]
+    notion.bodies = ({ p: { title: "Old", body: "old", editable: true, version: "" } })
+    notion.rebuild()
+    var replies = []
+    notion.save("notion:p", "New", "new", function(result) { replies.push(result) })
+    check("a Notion save leaves the model alone until the backend answers", notion.pages[0].title === "Old" && notion.bodies.p.body === "old")
+    recordingLane.settle({ error: "refused" })
+    check("a failed Notion save keeps the stored page", notion.pages[0].title === "Old" && replies[0].error === "refused")
+    notion.save("notion:p", "New", "new", function(result) { replies.push(result) })
+    recordingLane.settle({ ok: true })
+    check("a Notion save that landed updates the stored page", notion.pages[0].title === "New" && notion.bodies.p.body === "new")
+    notion.remove("notion:p", function(result) { replies.push(result) })
+    recordingLane.settle(null)
+    check("a cancelled Notion delete is a failure and keeps the page", notion.pages.length === 1 && /cancelled/.test(replies[2].error))
+    notion.remove("notion:p", function(result) { replies.push(result) })
+    recordingLane.settle({ ok: true })
+    check("a Notion delete that landed removes the page", notion.pages.length === 0 && !replies[3].error)
+    notion.destroy()
+  }
   Microsoft.Account {
     id: scopeAccount
     scopes: "offline_access User.Read Notes.ReadWrite"
@@ -944,6 +1024,7 @@ ShellRoot {
       oneNoteCases()
       processCases()
       localCases()
+      remoteModelCases()
       accountCases()
     } catch (error) {
       check("test setup completed", false, error.message + " " + error.stack)

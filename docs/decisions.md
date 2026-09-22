@@ -800,7 +800,10 @@ reconciliation follows model publication in a separate event-loop turn.
 
 All local mutations use one queue, including image staging, ordinary writes,
 creation, ordering and deletion. Python commits files atomically and returns
-explicit success or failure before the model is changed. Editable reads use
+explicit success or failure before the model is changed — and the remote
+providers follow the same rule: Sticky Notes and Notion change their model
+when the backend has answered, since the host keeps a draft of every save in
+flight, and a cancelled delete answers with an error like an unsent save. Editable reads use
 `read_document`'s JSON frame: byte limits and errors cannot become blank or
 truncated editable notes. Inotify events are coalesced and reconciled using
 nanosecond file versions, with periodic refresh as recovery.

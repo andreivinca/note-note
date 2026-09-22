@@ -220,24 +220,20 @@ Item {
     return (info && info.cancelled) ? { error: "not saved — the request was cancelled" } : {}
   }
 
+  // The model follows the backend, never runs ahead of it: a page's title
+  // and body change here when Notion has taken them, and a page leaves here
+  // when Notion has removed it. The host keeps the draft of a save in
+  // flight (services/notes/NoteSession.qml), so nothing waits on this — but
+  // a model that moved first served a failed save's text as the page, and
+  // showed a failed delete as done.
   function save(path, title, body, cb) {
-    var id = idOf(path), b = root.bodies
-    b[id] = { title: title, body: body, editable: true, version: "" }
-    root.bodies = b
-    var pgs = root.pages.slice()
-    for (var i = 0; i < pgs.length; i++) {
-      if (pgs[i].id === id) {
-        pgs[i] = { id: id, title: title, parent: pgs[i].parent, edited: pgs[i].edited }
-      }
-    }
-    root.pages = pgs
-    rebuild()
     if (!root.rq) {
       if (cb) {
         cb({ error: "not ready" })
       }
       return
     }
+    var id = idOf(path)
     var payload = JSON.stringify({ title: title, body: body })
     root.rq.enqueue({ key: "page:" + id, mode: "replace", priority: 0, owner: root, flush: true, label: "save" },
       function(ctx) { root.runScript(["update", id, "-"], payload, ctx) },
@@ -247,6 +243,15 @@ Item {
             cb(root.unsentSave(info))
           }
           return
+        }
+        if (!r.error) {
+          var b = root.bodies
+          b[id] = { title: title, body: body, editable: true, version: "" }
+          root.bodies = b
+          root.pages = root.pages.map(function(page) {
+            return page.id === id ? { id: id, title: title, parent: page.parent, edited: page.edited } : page
+          })
+          rebuild()
         }
         if (cb) {
           cb(r.error ? { error: r.error } : {})
@@ -295,20 +300,28 @@ Item {
   }
 
   function remove(path, cb) {
-    var id = idOf(path)
-    root.pages = root.pages.filter(function(p) { return p.id !== id })
-    rebuild()
     if (!root.rq) {
       if (cb) {
         cb({ error: "not ready" })
       }
       return
     }
+    var id = idOf(path)
     root.rq.enqueue({ key: "page:" + id, mode: "replace", priority: 0, owner: root, flush: true, label: "delete" },
       function(ctx) { root.runScript(["delete", id], "", ctx) },
       function(r) {
+        if (!r) {
+          if (cb) {
+            cb({ error: "not deleted — the request was cancelled" })
+          }
+          return
+        }
+        if (!r.error) {
+          root.pages = root.pages.filter(function(p) { return p.id !== id })
+          rebuild()
+        }
         if (cb) {
-          cb(r && r.error ? { error: r.error } : {})
+          cb(r.error ? { error: r.error } : {})
         }
       })
   }
