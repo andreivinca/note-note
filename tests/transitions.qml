@@ -50,6 +50,26 @@ ShellRoot {
     app.providers = []
     app.setFilter("")
   }
+  // Two notebooks whose names hash to the same palette slot must not share a
+  // colour; a colour the provider named is a brand and stays as given.
+  function hostColourCases() {
+    var app = test.appHost
+    var local = { id: "local", name: "Notes", sections: [
+      { key: "travel", name: "Travel", rows: [], footerActions: [] },
+      { key: "projects", name: "Projects", rows: [], footerActions: [] },
+      { key: "finance", name: "Finance", rows: [], footerActions: [] }] }
+    var branded = { id: "branded", name: "Branded", sections: [
+      { key: "s", name: "Branded", color: "#7719AA", rows: [], footerActions: [] }] }
+    app.providers = [local, branded]
+    app.activeSection = "local/travel"
+    app.rebuildRows()
+    var colours = app.tabs.map(function(tab) { return tab.color })
+    check("notebooks with colliding names get distinct colours",
+          colours.length === 4 && new Set(colours).size === 4, colours.join(","))
+    check("a provider-named colour is kept as given", app.tabs[3].color === "#7719AA")
+    app.providers = []
+    app.rebuildRows()
+  }
   function hostFooterCases() {
     var app = test.appHost
     var calls = []
@@ -850,6 +870,7 @@ ShellRoot {
           test.check("host reads framed configuration at startup", test.appHost.configReady && test.appHost.providers.length === 0)
           test.hostSearchCases()
           test.hostFooterCases()
+          test.hostColourCases()
         }
         test.completionChecks.forEach(function(check) { check() })
         test.check("runner releases every process", runner.active === 0)

@@ -1092,28 +1092,27 @@ Item {
   // is the only thing that sees every tab at once. A provider that named its
   // own colour keeps it — a brand is not ours to move.
   function decollide(tabs) {
-    var taken = {
-    }, i, j, c;
-    for (; i < tabs.length; i++) {
-      if (tabs[i].color)
-        taken[TabColors.pastelize(tabs[i].color)] = true;
-
-    }
-    for (; i < tabs.length; i++) {
-      if (tabs[i].color)
-        continue;
-
-      var from = TabColors.indexFor(tabs[i].name);
-      for (; j < TabColors.PALETTE.length; j++) {
-        c = TabColors.PALETTE[(from + j) % TabColors.PALETTE.length];
-        if (!taken[TabColors.pastelize(c)])
-          break;
-
+    var taken = {}, i, j, c
+    for (i = 0; i < tabs.length; i++) {
+      if (tabs[i].color) {
+        taken[TabColors.pastelize(tabs[i].color)] = true
       }
-      taken[TabColors.pastelize(c)] = true;
-      tabs[i].color = c;
     }
-    return tabs;
+    for (i = 0; i < tabs.length; i++) {
+      if (tabs[i].color) {
+        continue
+      }
+      var from = TabColors.indexFor(tabs[i].name)
+      for (j = 0; j < TabColors.PALETTE.length; j++) {
+        c = TabColors.PALETTE[(from + j) % TabColors.PALETTE.length]
+        if (!taken[TabColors.pastelize(c)]) {
+          break
+        }
+      }
+      taken[TabColors.pastelize(c)] = true
+      tabs[i].color = c
+    }
+    return tabs
   }
 
   function invalidateContentSearch(provider) {
