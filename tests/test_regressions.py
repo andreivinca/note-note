@@ -113,6 +113,35 @@ class Files(unittest.TestCase):
         self.note.write_bytes(b"before\xffafter")
         self.assertEqual(readfile.read_document(self.note, 100)["kind"], "invalid-encoding")
 
+    def test_every_private_file_goes_through_the_one_writer(self):
+        # provider_io, ratelimit and the local notes share fileio.write_atomic:
+        # 0600 in a 0700 directory whatever the file had before, fsync before
+        # the rename, and never through a symlink.
+        import provider_io
+        import ratelimit
+        base = Path(self.work.name)
+        target = base / "private" / "tokens.json"
+        with patch.object(fileio.os, "fsync", wraps=os.fsync) as fsync:
+            provider_io.save_private(str(target), {"k": 1})
+            with patch.dict(os.environ, {"NOTE_NOTE_RATE_DIR": str(base / "rate")}):
+                ratelimit._save("key", ratelimit._State(stamps=[], cooldownUntil=0.0, holders=[]))
+        self.assertEqual(fsync.call_count, 2)
+        self.assertEqual(json.loads(target.read_text()), {"k": 1})
+        self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(target.parent.stat().st_mode & 0o777, 0o700)
+        self.assertEqual((base / "rate" / "key.json").stat().st_mode & 0o777, 0o600)
+        target.chmod(0o644)
+        provider_io.save_private(str(target), {"k": 2})
+        self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+        link = base / "link.json"
+        link.symlink_to(target)
+        with self.assertRaises(OSError):
+            provider_io.save_private(str(link), {"k": 3})
+        self.assertEqual(json.loads(target.read_text()), {"k": 2})
+        self.assertEqual([path.name for path in base.rglob("*") if path.suffix == ".tmp"], [])
+        fileio.write_atomic(base / "picture.bin", b"\x00\xff", mode=0o600)
+        self.assertEqual((base / "picture.bin").read_bytes(), b"\x00\xff")
+
     def test_failed_commit_preserves_original_and_cleans_temporary(self):
         with patch.object(fileio.os, "replace", side_effect=OSError("disk full")):
             with self.assertRaisesRegex(OSError, "disk full"):

@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "..", "lib"))
 sys.path.insert(0, HERE)
 import msgraph  # noqa: E402
 import provider_io  # noqa: E402
+import fileio  # noqa: E402
 import ratelimit  # noqa: E402
 from msgraph import (graph, http, fail, fail_throttled, out, load_json, save_private,  # noqa: E402
                      read_payload, access_token, TRANSIENT_STATUSES, CACHE_DIR, GRAPH)
@@ -662,7 +663,7 @@ def cached_image(src, width=0):
     rescale or re-encode. `width` is only recorded (via the caller) so a save
     can write the same display width back into the page.
     """
-    import hashlib, tempfile
+    import hashlib
     if not image_allowed(src):
         return None
     if _image_budget[1] >= MAX_PAGE_IMAGES or (_image_budget[0] and time.monotonic() > _image_budget[0]):
@@ -680,25 +681,24 @@ def cached_image(src, width=0):
     # none: the only caller is `cmd_onenote_page`, whose `graph_raw` fetch of
     # the page content has already met any 401 and forced the refresh.
     req = urllib.request.Request(src, headers={"Authorization": "Bearer " + access_token()})
-    fd, tmp = tempfile.mkstemp(prefix=".", suffix=".tmp", dir=ONENOTE_IMG_DIR)   # fresh, 0600, never a symlink
     pause = 0.0        # a throttle met here, recorded once the slot is released
     try:
         deadline = _image_budget[0] or (time.monotonic() + IMAGE_BUDGET_SECONDS)
         # An image is a Graph request like any other and is paced like one:
         # forty of them is what a picture-heavy page costs, and that is most
         # of a minute's budget on its own.
-        with os.fdopen(fd, "wb") as f:
-            with ratelimit.slot(msgraph.RATE_KEY, msgraph.RATE_WINDOWS):
-                with _image_opener.open(req, timeout=20) as r:
-                    # Bounded in size and in time: a TimeoutError is an OSError, caught below.
-                    data = provider_io.read_bounded(r, MAX_IMAGE, deadline)
-                    if not data:
-                        # Graph serves a just-written resource as 200 with an
-                        # empty body; caching that would poison the page for good.
-                        raise OverflowError("empty image response")
-                    f.write(data)
+        with ratelimit.slot(msgraph.RATE_KEY, msgraph.RATE_WINDOWS):
+            with _image_opener.open(req, timeout=20) as r:
+                # Bounded in size and in time: a TimeoutError is an OSError, caught below.
+                data = provider_io.read_bounded(r, MAX_IMAGE, deadline)
+                if not data:
+                    # Graph serves a just-written resource as 200 with an
+                    # empty body; caching that would poison the page for good.
+                    raise OverflowError("empty image response")
         _image_budget[1] += 1
-        os.replace(tmp, path)
+        # Committed whole and private (fileio.write_atomic): a reader never
+        # meets half a picture.
+        fileio.write_atomic(path, data, mode=0o600)
         prune_image_cache()
         return "file://" + path
     except ratelimit.Throttled:
@@ -707,10 +707,6 @@ def cached_image(src, width=0):
         if e.code in (429, 503):
             pause = msgraph.wait_asked_by(e)
     except (urllib.error.URLError, OSError, OverflowError):
-        pass
-    try:
-        os.remove(tmp)
-    except OSError:
         pass
     if pause:
         # The rest of this page's images would earn the same answer, and so

@@ -29,10 +29,12 @@ can replace or grow either file between the check and load"*).
 
 ### 2. Never write through a predictable temp path
 
-- Use `tempfile.mkstemp(dir=<target dir>)` — a fresh `O_CREAT|O_EXCL`, 0600
-  file that cannot be an existing file or a symlink — then `os.replace()` onto
-  the target. `open(path + ".tmp", "w")` is how a symlink attack redirects a
-  truncation.
+- Write through `fileio.write_atomic` (lib/fileio.py), the one writer: a
+  fresh `O_CREAT|O_EXCL`, 0600 temporary from `tempfile.mkstemp(dir=<target
+  dir>)` that cannot be an existing file or a symlink, fsynced, then
+  `os.replace()` onto a target that must be a regular file or absent.
+  `open(path + ".tmp", "w")` is how a symlink attack redirects a truncation;
+  a second copy of the writer is how the next fix misses one of them.
 - Credential and cache directories are created `0700`, files `0600`. Anything
   another program produced for us (e.g. an ImageMagick output) gets an
   explicit `chmod 0600` before it is kept.
@@ -221,7 +223,8 @@ replying to the reviewer.
       `FileView` read, no `head` on a mutable path).
 - [ ] Every new HTTP call has a byte ceiling *and* a deadline; every loop over
       pages has a collection cap.
-- [ ] Every new file write uses `mkstemp` + `replace`, 0600, in a 0700 dir.
+- [ ] Every new file write goes through `fileio.write_atomic` (or
+      `save_private` over it), 0600, in a 0700 dir.
 - [ ] No payload, secret or note body is written to `/tmp` or
       `$XDG_RUNTIME_DIR`; scripts receive them on stdin with the four-step
       sequence.
@@ -231,7 +234,7 @@ replying to the reviewer.
       as argv (never string interpolation).
 - [ ] New caches are pruned by count and bytes.
 - [ ] Any new rate/pacing state under `~/.cache/omarchy/note-note-rate/` keeps
-      the same shape as the rest: 0700 dir, 0600 files, `mkstemp` + `replace`,
+      the same shape as the rest: 0700 dir, 0600 files, `fileio.write_atomic`,
       and read with a byte ceiling (`ratelimit.MAX_STATE_BYTES`) — a budget
       that cannot be read must fail *open*, never block the request.
 - [ ] `omarchy plugin validate .` passes; `README` "Limits" and this file are

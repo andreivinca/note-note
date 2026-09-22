@@ -21,7 +21,7 @@ cold listing runs at full speed and only a genuinely heavy hour is paced. A
 separate **concurrency** cap bounds how many requests one key may have in
 flight across every process at once — Microsoft allows five per app+user.
 
-Standard library only, and importable by an external provider:
+Standard library and lib/fileio.py beside it, importable by an external provider:
 
     import ratelimit
     with ratelimit.slot("my-api", [(60, 100)]):
@@ -32,9 +32,10 @@ import errno
 import fcntl
 import json
 import os
-import tempfile
 import time
 import uuid
+
+import fileio
 
 HOME = os.path.expanduser("~")
 CACHE_DIR = os.environ.get("NOTE_NOTE_CACHE_DIR") or os.path.join(os.environ.get("XDG_CACHE_HOME", HOME + "/.cache"), "omarchy")
@@ -149,19 +150,8 @@ def _load(key):
 def _save(key, st):
     d = _dir()
     os.makedirs(d, mode=0o700, exist_ok=True)
-    path = state_path(key)
-    fd, tmp = tempfile.mkstemp(prefix=".", suffix=".tmp", dir=d)
-    try:
-        with os.fdopen(fd, "w") as f:
-            json.dump({"stamps": st["stamps"], "holders": st["holders"],
-                       "cooldownUntil": st["cooldownUntil"]}, f)
-        os.replace(tmp, path)
-    except BaseException:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
-        raise
+    fileio.write_atomic(state_path(key), json.dumps({"stamps": st["stamps"], "holders": st["holders"],
+                                                    "cooldownUntil": st["cooldownUntil"]}), mode=0o600)
 
 
 @contextlib.contextmanager

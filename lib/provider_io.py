@@ -23,6 +23,8 @@ imports this.
 """
 import json, os, sys, time, urllib.request
 
+import fileio
+
 
 def out(obj):
     sys.stdout.write(json.dumps(obj) + "\n")
@@ -62,22 +64,10 @@ def load_json(path, default):
 
 
 def save_private(path, obj):
-    """Write a private file atomically: a fresh O_EXCL temp file (mkstemp,
-    0600, never a pre-existing path or symlink), then rename over the target."""
-    import tempfile
-    d = os.path.dirname(path)
-    os.makedirs(d, mode=0o700, exist_ok=True)   # the files themselves are 0600
-    fd, tmp = tempfile.mkstemp(prefix=".", suffix=".tmp", dir=d)
-    try:
-        with os.fdopen(fd, "w") as f:
-            json.dump(obj, f)
-        os.replace(tmp, path)
-    except BaseException:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
-        raise
+    """A private JSON file, committed whole (fileio.write_atomic): 0600 in a
+    0700 directory, whatever the file had before."""
+    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+    fileio.write_atomic(path, json.dumps(obj), mode=0o600)
 
 
 def read_payload(path):
