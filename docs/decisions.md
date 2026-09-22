@@ -551,7 +551,10 @@ abandoned for it.
 (`sh cpp/build.sh` — on Arch the headers ship with `qt6-declarative`) and
 loaded through a directory import behind a `Loader` (ui/NativeBlocks.qml);
 when the library is absent the Loader errors and the editor keeps using the
-HTML scan (ui/QuoteBars.js). `cpp/selftest.py` runs every round-trip case
+HTML scan (ui/QuoteBars.js). A module built from older sources is refused
+the same way, whole: it carries an interface version (`TextBlocks::Version`,
+`Dialect.NATIVE_VERSION`) that the editor checks once at load, so the editor
+never half-uses a module, feeling for each method. `cpp/selftest.py` runs every round-trip case
 through a real document and asserts the two find the same bars, so the
 fallback cannot drift from the native truth unnoticed.
 

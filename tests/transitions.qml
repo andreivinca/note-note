@@ -758,6 +758,13 @@ ShellRoot {
   // backend has, a cancelled delete is a failure, and a failed one leaves
   // the note where it was.
   Ui.NoteEditor { id: noticeEditor; visible: false }
+  Ui.NoteEditor { id: staleInspectorEditor; visible: false; inspectorUrl: Qt.resolvedUrl("app/tests/StaleInspector.qml") }
+  // The native inspector is taken whole or not at all: the built module
+  // speaks the editor's version, a module of another version is refused.
+  function inspectorCases() {
+    check("the built native inspector speaks the editor's version", noticeEditor.canColorText)
+    check("a native inspector of another version is refused whole", !staleInspectorEditor.canColorText)
+  }
   Component { id: blankView; Item {} }
   // A notice clears only itself: the serial it was shown under names it,
   // and a newer notice is left standing; a view carries its own title.
@@ -1044,6 +1051,7 @@ ShellRoot {
       localCases()
       remoteModelCases()
       noticeCases()
+      inspectorCases()
       accountCases()
     } catch (error) {
       check("test setup completed", false, error.message + " " + error.stack)

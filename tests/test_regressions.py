@@ -324,6 +324,9 @@ class Content(unittest.TestCase):
             self.assertEqual(json.loads(match[1]), getattr(dialect, name), name)
         native = (ROOT / "cpp/textblocks.h").read_text()
         self.assertEqual(int(re.search(r"constexpr qreal percent = (\d+)", native)[1]), dialect.LINE_HEIGHT_PCT)
+        # The editor and the native module agree on the interface version.
+        self.assertEqual(int(re.search(r"var NATIVE_VERSION = (\d+)", js)[1]),
+                         int(re.search(r"static constexpr int Version = (\d+);", native)[1]))
         # The markers the inline tools type inside a code block are the reader's.
         markers = dict(re.findall(r'(\w+): "([^"]+)"', re.search(r"var INLINE_MARKERS = \{([^}]*)\}", js)[1]))
         expected = {"strike": "strikeout"}

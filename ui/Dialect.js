@@ -6,6 +6,10 @@ var QUOTE_PX = 40
 var CODE_PAD_PX = 14
 var MAX_IMAGE_DISPLAY = 640
 var LINE_HEIGHT_PCT = 130
+// The native text inspector's interface the editor was written against
+// (cpp/textblocks.h, TextBlocks::Version): a built module of another
+// version is refused whole at load.
+var NATIVE_VERSION = 1
 
 // The invisible characters the editor itself plants, mirrored from
 // services/markdown/qthtml/dialect.py: Markdown has no empty paragraph, so a

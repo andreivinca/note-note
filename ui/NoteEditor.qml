@@ -46,6 +46,9 @@ Item {
   // The clipboard service (services/clipboard/Clipboard.qml), for pasting a
   // picture. Only providers that can store one accept it.
   property var clipboard: null
+  // The native text inspector's QML (cpp/textblocks.h): the platform's, or
+  // a stand-in a test hands in.
+  property url inspectorUrl: Platform.textInspectorUrl
   property bool canImages: false
   // The note's own directory, for notes that name their images by a relative
   // path (the local provider's `.assets/`): the document resolves the links
@@ -285,10 +288,7 @@ Item {
     }
     settingText = true
     area.text = root.plain ? document : Dialect.documentHtml(document)
-    if (nativeBlocks.item) {
-      nativeBlocks.item.document = area.textDocument
-      root.configureLinkDisplay()
-    }
+    root.configureLinkDisplay()
     settingText = false
     showTop()
   }
@@ -485,9 +485,6 @@ Item {
   // (_merge_code). Empty for a note too long to scan.
   function codeRuns() {
     if (nativeBlocks.item) {
-      if (!nativeBlocks.item.document) {
-        nativeBlocks.item.document = area.textDocument
-      }
       return QuoteBars.runsFromBlocks(nativeBlocks.item.blocks()).code
     }
     if (area.length > 0 && area.length <= 200000) {
@@ -534,9 +531,6 @@ Item {
   function typeInCode(from, to, text) {
     var end
     if (nativeBlocks.item) {
-      if (!nativeBlocks.item.document) {
-        nativeBlocks.item.document = area.textDocument
-      }
       end = nativeBlocks.item.insertPlainText(from, to, text)
       if (end < 0) {
         return end
@@ -676,9 +670,6 @@ Item {
     if (root.readOnly || root.plain || area.selectionStart !== area.selectionEnd || !nativeBlocks.item) {
       return false
     }
-    if (!nativeBlocks.item.document) {
-      nativeBlocks.item.document = area.textDocument
-    }
     var position = nativeBlocks.item.deleteParagraphBoundary(area.cursorPosition)
     if (position < 0) {
       return false
@@ -689,12 +680,8 @@ Item {
   }
 
   function deletePreviousTable() {
-    if (root.readOnly || root.plain || area.selectionStart !== area.selectionEnd
-        || !nativeBlocks.item || typeof nativeBlocks.item.deletePreviousTable !== "function") {
+    if (root.readOnly || root.plain || area.selectionStart !== area.selectionEnd || !nativeBlocks.item) {
       return false
-    }
-    if (!nativeBlocks.item.document) {
-      nativeBlocks.item.document = area.textDocument
     }
     var position = nativeBlocks.item.deletePreviousTable(area.cursorPosition)
     if (position < 0) {
@@ -722,7 +709,6 @@ Item {
     if (!nativeBlocks.item) {
       return -1
     }
-    nativeBlocks.item.document = area.textDocument
     return nativeBlocks.item.insertFormattedText(from, to, text, styles)
   }
 
@@ -730,7 +716,6 @@ Item {
     if (!nativeBlocks.item) {
       return false
     }
-    nativeBlocks.item.document = area.textDocument
     return nativeBlocks.item.setTextColor(from, to, color)
   }
 
@@ -739,9 +724,6 @@ Item {
     if (!nb) {
       edit()
       return
-    }
-    if (!nb.document) {
-      nb.document = area.textDocument
     }
     nb.beginEditBlock(!!joinPrevious)
     try { edit() } finally { nb.endEditBlock() }
@@ -884,11 +866,8 @@ Item {
   }
 
   function tableContext() {
-    if (!nativeBlocks.item || typeof nativeBlocks.item.tableInfo !== "function") {
+    if (!nativeBlocks.item) {
       return null
-    }
-    if (!nativeBlocks.item.document) {
-      nativeBlocks.item.document = area.textDocument
     }
     return nativeBlocks.item.tableInfo(area.cursorPosition)
   }
@@ -958,16 +937,30 @@ Item {
       decorTimer.restart()
     }
   }
+  // One handshake at load: a module built from older sources is refused
+  // whole, with a line that says what to do, not half-used behind a
+  // feature test at every call. The document is wired here once, too:
+  // a TextEdit keeps one document for its life, whatever text it is given.
   Loader {
     id: nativeBlocks
-    source: Platform.textInspectorUrl
-    onStatusChanged: if (status === Loader.Error) {
-      console.log("note-note: native text inspector not built (sh cpp/build.sh); scanning HTML instead")
+    source: root.inspectorUrl
+    onLoaded: {
+      if (item.version !== Dialect.NATIVE_VERSION) {
+        console.log("note-note: native text inspector built from older sources (sh cpp/build.sh); scanning HTML instead")
+        nativeBlocks.active = false
+        return
+      }
+      item.document = area.textDocument
+    }
+    onStatusChanged: {
+      if (status === Loader.Error) {
+        console.log("note-note: native text inspector not built (sh cpp/build.sh); scanning HTML instead")
+      }
     }
   }
 
   function configureLinkDisplay() {
-    if (!nativeBlocks || !nativeBlocks.item) {
+    if (!nativeBlocks.item) {
       return
     }
     var wasNormalizing = root.normalizing
@@ -1006,9 +999,6 @@ Item {
     if (root.normalizing || root.replayingHistory || root.plain || root.readOnly || !nativeBlocks.item) {
       return
     }
-    if (!nativeBlocks.item.document) {
-      nativeBlocks.item.document = area.textDocument
-    }
     root.normalizing = true
     nativeBlocks.item.normalizeListMargins()
     nativeBlocks.item.normalizeLineHeights()
@@ -1035,9 +1025,6 @@ Item {
     // characters and still be one checkbox block (docs/engine-notes.md),
     // and that box deserves its drawn face too.
     if (nativeBlocks.item) {
-      if (!nativeBlocks.item.document) {
-        nativeBlocks.item.document = area.textDocument
-      }
       var bs = nativeBlocks.item.blocks()
       runs = QuoteBars.runsFromBlocks(bs)
       boxes = QuoteBars.boxesFromBlocks(bs)
@@ -1119,9 +1106,6 @@ Item {
     if (root.readOnly || root.plain || !nativeBlocks.item) {
       return
     }
-    if (!nativeBlocks.item.document) {
-      nativeBlocks.item.document = area.textDocument
-    }
     if (!nativeBlocks.item.setImageWidth(position, width)) {
       return
     }
@@ -1136,9 +1120,6 @@ Item {
   function fitImageAt(pos) {
     if (!nativeBlocks.item) {
       return  // pasted large, capped on reload
-    }
-    if (!nativeBlocks.item.document) {
-      nativeBlocks.item.document = area.textDocument
     }
     var text = area.getText(pos, Math.min(pos + 4, area.length)), i = text.indexOf(root.objectChar)
     if (i < 0) {
@@ -1249,9 +1230,6 @@ Item {
     var t = area.getText(0, area.length)
     var kind = "", next = "", start = -1, end = -1
     if (nativeBlocks.item) {
-      if (!nativeBlocks.item.document) {
-        nativeBlocks.item.document = area.textDocument
-      }
       var bs = nativeBlocks.item.blocks()
       for (var i = 0; i < bs.length; i++) {
         if (pos < bs[i].position || pos > bs[i].end) {
@@ -1326,7 +1304,7 @@ Item {
   // a new row, caret in its first cell. That empty line is the one block
   // bounded by a paragraph separator and the table's end character.
   function tableReturn() {
-    if (nativeBlocks.item && typeof nativeBlocks.item.appendTableRow === "function") {
+    if (nativeBlocks.item) {
       var target = nativeBlocks.item.appendTableRow(area.cursorPosition)
       if (target < 0) {
         return false
@@ -1369,7 +1347,7 @@ Item {
   function leaveTableRow() {
     withMarkdown(function(lines) {
       if (lines.some(function(line) { return /^\s*<table[ >]/.test(line) })) {
-        root.statusRequested("Rebuild the native text helper to edit nested table rows and columns")
+        root.statusRequested("Build the native text helper to edit nested table rows and columns")
         return
       }
       // Qt can omit an empty paragraph at a cell's start when exporting

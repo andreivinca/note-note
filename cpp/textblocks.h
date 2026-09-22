@@ -25,8 +25,11 @@
 // The module is OPTIONAL. It is built locally (`sh cpp/build.sh`) against
 // the system Qt and loaded by a directory import (ui/NativeBlocks.qml);
 // when the library is absent the editor falls back to the HTML scan
-// (ui/QuoteBars.js) and images simply have no resize handle.
-// cpp/selftest.py asserts the fallback and the inspector agree.
+// (ui/QuoteBars.js) and images simply have no resize handle. A module
+// built from older sources is refused the same way, whole: the editor
+// checks `version` once at load (ui/Dialect.js, NATIVE_VERSION) instead of
+// feeling for each method. cpp/selftest.py asserts the fallback and the
+// inspector agree.
 #pragma once
 
 #include "textlinks.h"
@@ -54,6 +57,11 @@ class TextBlocks : public QObject
     QML_ELEMENT
     Q_PROPERTY(QQuickTextDocument *document READ document WRITE setDocument NOTIFY documentChanged)
     Q_PROPERTY(int linkRevision READ linkRevision NOTIFY linksChanged)
+    // The interface this module offers. Bump it with any change to an
+    // invokable's name, arguments or answer; the editor refuses a module
+    // of another version at load.
+    Q_PROPERTY(int version READ version CONSTANT)
+    static constexpr int Version = 1;
 
 public:
     Q_INVOKABLE int insertFormattedText(int from, int to, const QString &text, const QVariantMap &styles);
@@ -72,6 +80,7 @@ public:
     }
 
     int linkRevision() const { return m_linkRevision; }
+    int version() const { return Version; }
 
     QQuickTextDocument *document() const { return m_document; }
     void setDocument(QQuickTextDocument *document)
