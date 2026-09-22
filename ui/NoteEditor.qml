@@ -617,9 +617,9 @@ Item {
   // non-breaking space in front of it is invisible and enough. The loader
   // does the same on the way in; the converter strips it on the way out.
   readonly property string objectChar: "\ufffc"
-  // Mirrors IMAGE_LEAD in services/markdown/qthtml/dialect.py \u2014 the loader,
-  // the writer and these live-edit guards must all plant the same character.
-  readonly property string imageLead: "\u00a0"
+  // The loader, the writer (dialect.IMAGE_LEAD) and these live-edit guards
+  // must all plant the same character.
+  readonly property string imageLead: Dialect.IMAGE_LEAD
   function inListItem(pos) { return /<li\b/.test(area.getFormattedText(pos, Math.min(pos + 1, area.length))) }
   function atBlockStart(pos) { return pos === 0 || area.getText(pos - 1, pos) === root.sep }
   function guardImageAt(pos) {
@@ -1205,7 +1205,7 @@ Item {
       var head = onEmpty ? lines.slice(0, i).concat(md.split("\n"))
                          : lines.slice(0, at + 1).concat([""], md.split("\n"))
       if (atEnd) {
-        replaceDoc(head.concat(["", " "]).join("\n"), -1,
+        replaceDoc(head.concat(["", Dialect.BLANK_PARAGRAPH]).join("\n"), -1,
                    function() { finishLanding(area.length - 1) })
         return
       }
@@ -1290,7 +1290,7 @@ Item {
       return null
     }
     var text = t.substring(start, end)
-    return { kind: kind, empty: text === "" || text === root.imageLead, last: next !== kind }
+    return { kind: kind, empty: text === "" || text === Dialect.BLANK_PARAGRAPH, last: next !== kind }
   }
 
   // Code and quotes leave only from their run's last line (an empty line
@@ -1359,7 +1359,7 @@ Item {
       return false
     }
     var body = t.substring(start, end)
-    if (body !== "" && body !== root.imageLead) {
+    if (body !== "" && body !== Dialect.BLANK_PARAGRAPH) {
       return false
     }
     root.leaveTableRow()
@@ -1416,16 +1416,16 @@ Item {
           // (stepPastBlock). Taken out, the line's block number went to
           // the blank while the block still rendered under it, and the
           // caret landed back inside the code.
-          out.splice(code.end + 1, 0, "", " ", "")
+          out.splice(code.end + 1, 0, "", Dialect.BLANK_PARAGRAPH, "")
           target++
         } else {
           // the line comes out, and the blank goes in after the closing
           // fence, taking the block number the line had
           out.splice(i, 1)
-          out.splice(code.end, 0, "", " ", "")
+          out.splice(code.end, 0, "", Dialect.BLANK_PARAGRAPH, "")
         }
       } else if (kind === "list") {
-        out.splice(i, 1, "", " ", "")
+        out.splice(i, 1, "", Dialect.BLANK_PARAGRAPH, "")
       }
       // a quote's empty line already reads back as a blank paragraph
       // (kept in the map now, stripped only from an unused landing at save
@@ -1445,7 +1445,7 @@ Item {
     withMarkdown(function(lines, map) {
       var end = blockEndLine(lines, caretLine(map))
       var out = lines.slice()
-      out.splice(end + 1, 0, "", " ", "")
+      out.splice(end + 1, 0, "", Dialect.BLANK_PARAGRAPH, "")
       landOn(out, lastBlockThrough(map, end) + 1, seed)
     })
   }
@@ -1462,7 +1462,7 @@ Item {
   // A seed — typing on a rule — replaces it with literal text instead.
   // Called inside the document replacement's undo transaction.
   function finishLanding(from, seed) {
-    var filler = area.getText(0, area.length).charAt(from) === root.imageLead
+    var filler = area.getText(0, area.length).charAt(from) === Dialect.BLANK_PARAGRAPH
     var to = from + (filler ? 1 : 0)
     if (seed) {
       // Insert first to keep the landing paragraph's format.

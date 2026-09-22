@@ -19,6 +19,9 @@ _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 
 from mdtext import escape_text, escape_line_start, escape_table_cell  # noqa: E402
 from mdtext import escape_image_alt, escape_link_destination  # noqa: E402
 from parse import parse as _parse  # noqa: E402
+# A blank line is a paragraph holding this character in every backend's
+# Markdown; OneNote's is a bare <br /> (Converter.block).
+from qthtml.dialect import BLANK_PARAGRAPH  # noqa: E402
 import htmltables  # noqa: E402
 import textcolor  # noqa: E402
 
@@ -31,7 +34,6 @@ TAG_PREFIX = {
 PREFIX_TAG = {v.strip(): k for k, v in TAG_PREFIX.items()}
 BLOCK_TAGS = {"p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "table", "tr", "td", "th", "br", "cite", "body", "html", "head", "title"}
 LOSSY_TAGS = {"object", "iframe", "video", "audio", "math", "svg"}
-GAP = "\u00a0"   # an empty line, see Converter.block("br")
 # OneNote's own paragraphs are written with zero margins; without a style it
 # applies 5.5pt above and below, which reads as extra spacing on every line.
 P_STYLE = ' style="margin-top:0pt;margin-bottom:0pt"'
@@ -272,7 +274,7 @@ class Converter:
             if self.lines:
                 if self.lines[-1] != "":
                     self.lines.append("")
-                self.lines.append(GAP)
+                self.lines.append(BLANK_PARAGRAPH)
                 self.lines.append("")
             self.last = None
             return
@@ -344,11 +346,11 @@ class Converter:
     def result(self):
         out, blank = [], True
         for l in self.lines:
-            if l.strip() or l == GAP:
-                out.append(l if l == GAP else l[:len(l.rstrip()) + (2 if l.endswith("  ") else 0)]); blank = False
+            if l.strip() or l == BLANK_PARAGRAPH:
+                out.append(l if l == BLANK_PARAGRAPH else l[:len(l.rstrip()) + (2 if l.endswith("  ") else 0)]); blank = False
             elif not blank:
                 out.append(""); blank = True
-        while out and out[-1] in ("", GAP):
+        while out and out[-1] in ("", BLANK_PARAGRAPH):
             out.pop()
         return "\n".join(out)
 
@@ -519,7 +521,7 @@ def _render_blocks(tokens, out, depth=0, image_ref=None):
             continue
         if ty == "paragraph":
             text = walk_text_local(t.get("children"))
-            if text.strip() == "" and GAP in text:
+            if text.strip() == "" and BLANK_PARAGRAPH in text:
                 out.append("<br/>")               # an explicit empty line
                 continue
             if _lone_image(t):

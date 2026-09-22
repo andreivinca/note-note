@@ -318,6 +318,10 @@ class Content(unittest.TestCase):
             match = re.search(r"var " + name + r" = (\d+)", js)
             self.assertIsNotNone(match, name)
             self.assertEqual(int(match[1]), getattr(dialect, name), name)
+        for name in ("BLANK_PARAGRAPH", "IMAGE_LEAD", "EMPTY_ITEM"):
+            match = re.search(r'var ' + name + r' = ("[^"]*")', js)
+            self.assertIsNotNone(match, name)
+            self.assertEqual(json.loads(match[1]), getattr(dialect, name), name)
         native = (ROOT / "cpp/textblocks.h").read_text()
         self.assertEqual(int(re.search(r"constexpr qreal percent = (\d+)", native)[1]), dialect.LINE_HEIGHT_PCT)
         # The markers the inline tools type inside a code block are the reader's.

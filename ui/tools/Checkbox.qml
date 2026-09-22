@@ -1,5 +1,6 @@
 import QtQuick
 import "../editing"
+import "../Dialect.js" as Dialect
 
 Tool {
   id: tool
@@ -9,7 +10,7 @@ Tool {
 
   function execute() {
     editor.transformBlocks(function(line) {
-      return line.indent + (/\[[ xX]\]/.test(line.prefix) ? "" : "- [ ] ") + (line.content || "\u00a0")
+      return line.indent + (/\[[ xX]\]/.test(line.prefix) ? "" : "- [ ] ") + (line.content || Dialect.EMPTY_ITEM)
     }, { list: true })
   }
 }

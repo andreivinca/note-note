@@ -13,6 +13,8 @@ import sys as _sys
 _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "services", "markdown"))
 from mdtext import escape_text, escape_line_start, code_span, code_fence  # noqa: E402
 from parse import parse as _parse  # noqa: E402
+# A blank line is a paragraph holding this character in every backend's Markdown.
+from qthtml.dialect import BLANK_PARAGRAPH  # noqa: E402
 SUPPORTED = {"paragraph", "heading_1", "heading_2", "heading_3", "bulleted_list_item",
              "numbered_list_item", "to_do", "quote", "code", "divider"}
 # The one highlight the writer can put back; every other colour is lost.
@@ -175,7 +177,7 @@ def blocks_to_markdown(blocks, depth=0):
             first = (body.get("rich_text") or [{}])[0]
             ann = first.get("annotations") or {}
             plain_start = not ann.get("bold") and not ann.get("italic") and not ann.get("code") and not first.get("href")
-            lines.append((pad + (escape_line_start(text) if plain_start else text)) if text else pad + " ")
+            lines.append((pad + (escape_line_start(text) if plain_start else text)) if text else pad + BLANK_PARAGRAPH)
         elif t == "bulleted_list_item":
             if prev not in ("bulleted_list_item", "numbered_list_item", "to_do") and lines and lines[-1] != "":
                 lines.append("")
@@ -213,7 +215,7 @@ def blocks_to_markdown(blocks, depth=0):
     # tidy blank runs
     out, blank = [], True
     for l in lines:
-        if l.strip() or l.endswith(" "):
+        if l.strip() or l.endswith(BLANK_PARAGRAPH):
             out.append(l)
             blank = False
         elif not blank:
@@ -376,7 +378,9 @@ def _blocks(tokens):
         if ty == "blank_line":
             continue
         if ty == "paragraph":
-            if "".join(x.get("raw", "") for x in t.get("children") or [] if x["type"] == "text").strip() == "" and " " in "".join(x.get("raw", "") for x in t.get("children") or []):
+            children = t.get("children") or []
+            text_only = "".join(x.get("raw", "") for x in children if x["type"] == "text")
+            if text_only.strip() == "" and BLANK_PARAGRAPH in "".join(x.get("raw", "") for x in children):
                 out.append({"type": "paragraph", "paragraph": {"rich_text": []}})
             else:
                 out.extend(_para_blocks(t.get("children")))
