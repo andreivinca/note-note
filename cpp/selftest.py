@@ -254,7 +254,26 @@ def main():
         print("FAILED: %s not built (sh cpp/build.sh)" % MODULE)
         return 1
 
+    # Every round-trip case, plus shapes the writer never produces but the
+    # editor does: Enter inside a cell adds a paragraph to it, a cell can be
+    # emptied, and a quote after such a table used to land on the wrong
+    # block in the scanned answer. `sources` is the Markdown each document
+    # stands for — what the decorations are expected from.
+    sources = dict(CASES)
     documents = {name: to_html(markdown) for name, markdown in CASES.items()}
+    decorated = "| a | b |\n|---|---|\n| 1 | 2 |\n\n> quoted\n\n```\ncode\n```\n"
+    table_then_quote = to_html(decorated)
+    first_cell = table_then_quote.index("</p>", table_then_quote.index("<td")) + len("</p>")
+    sources["two paragraphs in a cell, then decorations"] = decorated
+    documents["two paragraphs in a cell, then decorations"] = (
+        table_then_quote[:first_cell] + "<p>more</p>" + table_then_quote[first_cell:])
+    empty_cell = table_then_quote.index("<td")
+    empty_cell_end = table_then_quote.index("</td>", empty_cell) + len("</td>")
+    sources["an empty cell, then decorations"] = decorated
+    documents["an empty cell, then decorations"] = (
+        table_then_quote[:empty_cell] + "<td></td>" + table_then_quote[empty_cell_end:])
+    sources["a nested table, then decorations"] = CASES["nested table"] + "\n> quoted\n"
+    documents["a nested table, then decorations"] = to_html(sources["a nested table, then decorations"])
     png_dir = tempfile.mkdtemp(prefix="note-note-selftest-")
     png = os.path.join(png_dir, "shot.png")
     make_png(png, 800, 600)
@@ -294,7 +313,7 @@ def main():
 
     failures = 0
     print("native block formats vs the HTML scan")
-    for name, markdown in CASES.items():
+    for name, markdown in sources.items():
         result = results.get(name, {})
         native, scanned = result.get("native"), result.get("scanned")
         boxes_native, boxes_scanned = result.get("boxesNative"), result.get("boxesScanned")
@@ -333,7 +352,7 @@ def main():
             print("  FAIL  %-24s normalization changed imported list margins" % name)
         elif args.verbose and (native["quote"] or native["code"] or boxes_native):
             print("  ok    %-24s %r %r" % (name, native, boxes_native))
-    print("  %d/%d cases" % (len(CASES) - failures, len(CASES)))
+    print("  %d/%d cases" % (len(sources) - failures, len(sources)))
 
     print("images: natural size, the display cap, and the corner-handle resize")
     image_failures = check_images(results.get("images") or {}, image_markdown, args.verbose)

@@ -47,24 +47,52 @@ function kindOfBlock(block) {
 }
 
 // Every document block's tag and open tag, in Qt's own block order — the
-// one walk under kinds() and markers(): every <p>, <li>, heading, <hr />
-// and table cell is a block; the <p> inside a cell is the cell's content,
-// not a block of its own (docs/engine-notes.md).
+// one walk under kinds() and markers(): every <p>, <li>, heading and <hr />
+// is a block, and so is every paragraph inside a table cell (Enter adds
+// one, and Qt separates it like any other; qthtml/reader.py counts them
+// the same way), a cell holding no paragraph being one block of its own.
+// The cells of a table nested inside a cell count in their turn. Counting
+// a cell as one block whatever it held put every decoration after a table
+// on the wrong block (docs/engine-notes.md).
 function _openTags(html) {
-  var body = (html.split("<body>")[1] || "").split("</body>")[0]
-  var re = /<(p|li|td|th|hr|h[1-6])[\s>]/g, out = [], cellEnd = -1, m
-  while ((m = re.exec(body)) !== null) {
-    if (m[1] === "td" || m[1] === "th") {
-      cellEnd = body.indexOf("</" + m[1], m.index)
-      out.push({ tag: m[1], open: "" })
+  var body = (html.split(/<body[^>]*>/)[1] || "").split("</body>")[0]
+  return _blocksIn(body)
+}
+
+function _blocksIn(html) {
+  var re = /<(\/?)(p|li|td|th|hr|h[1-6])[\s>]/g, out = [], m
+  while ((m = re.exec(html)) !== null) {
+    if (m[1] === "/") {
       continue
     }
-    if (m.index < cellEnd) {
+    var tag = m[2], openEnd = html.indexOf(">", m.index) + 1
+    if (tag === "td" || tag === "th") {
+      var end = _cellEnd(html, openEnd, tag)
+      var inner = _blocksIn(html.substring(openEnd, end))
+      out = out.concat(inner.length ? inner : [{ tag: tag, open: "" }])
+      re.lastIndex = end
       continue
     }
-    out.push({ tag: m[1], open: body.substring(m.index, body.indexOf(">", m.index) + 1) })
+    out.push({ tag: tag, open: html.substring(m.index, openEnd) })
   }
   return out
+}
+
+// Where the cell whose content starts at `from` closes: past the cells of
+// any table nested inside it, which open and close the same tag.
+function _cellEnd(html, from, tag) {
+  var re = new RegExp("<(/?)" + tag + "[\\s>]", "g"), depth = 0, m
+  re.lastIndex = from
+  while ((m = re.exec(html)) !== null) {
+    if (m[1] !== "/") {
+      depth++
+    } else if (depth === 0) {
+      return m.index
+    } else {
+      depth--
+    }
+  }
+  return html.length
 }
 
 // The kind of every document block. Headings count even though they are

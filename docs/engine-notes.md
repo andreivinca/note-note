@@ -251,6 +251,13 @@ anchor. Inside an `<a>`, ignore it.
 
 **Plain-text positions.** Blocks are separated by U+2029, a line break inside
 a block is U+2028, a table starts each cell with U+FDD0 and ends with U+FDD1.
+Enter inside a cell adds a paragraph to it, separated by U+2029 like any
+other: every paragraph in a cell is a block of its own (an empty cell is one
+block), and the cells of a table nested in a cell are blocks in their turn.
+The reader's caret map and the HTML scan of `ui/QuoteBars.js` both count
+so; the scan once counted a cell as one block whatever it held, and every
+decoration after such a table sat on the wrong block until the native
+inspector was built (cpp/selftest.py now compares the two on those shapes).
 So the block a caret sits in is the number of U+2029 plus U+FDD0 before it —
 which is how the toolbar turns a caret into a Markdown line, via the map
 `qthtml.convert()` returns.
