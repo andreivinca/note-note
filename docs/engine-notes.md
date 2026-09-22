@@ -98,9 +98,10 @@ clicks stay with the text editor. The native detector handles all links when
 built, and Qt's own activation handles explicit links in the fallback.
 
 **A monospace note font does not make prose into code.** The inline-code
-dialect explicitly uses the generic `monospace` family. Match that exact family,
-not fixed pitch or any name containing "mono": the app's normal note face is
-iA Writer Mono S. Plain-text notes ignore character-format semantics altogether,
+dialect explicitly uses the generic `monospace` family. Match that exact family
+(`dialect.is_mono`, `Dialect.hasMonoFamily`), not fixed pitch or any name
+containing "mono": the key tests run the editor in iA Writer Mono S, and a
+note face is a setting. Plain-text notes ignore character-format semantics altogether,
 since switching Qt's rich document to plain text can retain old anchor formats.
 
 **Qt keeps appearance, not semantics.** The writer serialises how a block

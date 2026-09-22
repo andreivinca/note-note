@@ -193,8 +193,16 @@ def is_bold(style, minimum=BOLD_WEIGHT):
         return False
 
 
+def font_families(style):
+    """The families a style names, unquoted, in order."""
+    return [name.strip().strip("'\"") for name in style.get("font-family", "").split(",") if name.strip()]
+
+
 def is_mono(style):
-    return MONO_FAMILY in style.get("font-family", "").replace("'", "").replace('"', "")
+    """A run is code when the generic family is among the families it names,
+    exactly — a note face whose name holds "mono" is prose (ui/Dialect.js,
+    hasMonoFamily, applies the same rule to the live document)."""
+    return MONO_FAMILY in font_families(style)
 
 
 def has_block_background(style):

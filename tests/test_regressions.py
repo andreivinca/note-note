@@ -312,6 +312,16 @@ class Content(unittest.TestCase):
         self.assertEqual(answer["note"], to_markdown(html))
         self.assertEqual(answer["markdown"].count("\n"), 5)
 
+    def test_inline_code_is_the_exact_family(self):
+        # A monospace note face is prose; the generic family, alone or among
+        # fallbacks, is code — the same in the reader and in the editor's JS.
+        cases = [("'monospace'", True), ("'DejaVu Sans Mono','monospace'", True),
+                 ("'iA Writer Mono S'", False), ("'Monospace'", False), ("", False)]
+        for value, expected in cases:
+            self.assertEqual(dialect.is_mono({"font-family": value}), expected, value)
+        js = (ROOT / "ui/Dialect.js").read_text()
+        self.assertEqual(re.search(r'var MONO_FAMILY = "([^"]*)"', js)[1], dialect.MONO_FAMILY)
+
     def test_document_dialect_agrees_across_adapters(self):
         js = (ROOT / "ui/Dialect.js").read_text()
         for name in ("QUOTE_PX", "CODE_PAD_PX", "MAX_IMAGE_DISPLAY", "LINE_HEIGHT_PCT"):

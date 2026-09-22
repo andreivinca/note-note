@@ -15,6 +15,7 @@ import "app/services/microsoft" as Microsoft
 import "app/services/notes/sidebar.js" as Sidebar
 import "app/services/providers/settings.js" as Settings
 import "app/ui/MarkdownBlocks.js" as Blocks
+import "app/ui/Dialect.js" as Dialect
 import "app/ui/KeyBindings.js" as Keys
 import "app/ui/editing/ToolbarSettings.js" as ToolbarSettings
 import "app/tests" as Tests
@@ -472,6 +473,13 @@ ShellRoot {
   }
 
   function pureCases() {
+    var proseFace = "<span style=\"font-family:'iA Writer Mono S'; font-weight:700;\">x</span>"
+    var codeRun = "<span style=\"font-family:'DejaVu Sans Mono','monospace'; background-color:#222;\">x</span>"
+    check("a note face whose name holds mono is prose", !Dialect.hasMonoFamily(proseFace))
+    check("the generic family among fallbacks is code", Dialect.hasMonoFamily(codeRun))
+    check("taking the code family out leaves every other declaration",
+          Dialect.withoutMonoFamily(codeRun) === "<span style=\"background-color:#222;\">x</span>"
+          && Dialect.withoutMonoFamily(proseFace) === proseFace)
     var tools = [
       { toolId: "bold", isMenu: false },
       { toolId: "italic", isMenu: false },

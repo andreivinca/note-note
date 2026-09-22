@@ -22,6 +22,45 @@ var IMAGE_LEAD = "\u00a0"
 // Qt drops a list item with no content, so an empty checkbox carries this.
 var EMPTY_ITEM = "\u00a0"
 
+// The inline-code family, exactly as dialect.MONO_FAMILY: a run is code
+// when this generic family is among the families its style names, not
+// when a family's name holds "mono" — a monospace note face is prose
+// (docs/engine-notes.md).
+var MONO_FAMILY = "monospace"
+
+// The families one font-family value names, unquoted:
+// "'DejaVu Sans Mono','monospace'" -> ["DejaVu Sans Mono", "monospace"].
+function fontFamilies(value) {
+  var out = []
+  var names = value.split(",")
+  for (var i = 0; i < names.length; i++) {
+    var name = names[i].trim().replace(/^['"]|['"]$/g, "")
+    if (name !== "") {
+      out.push(name)
+    }
+  }
+  return out
+}
+
+// Whether the HTML holds a run in the inline-code family.
+function hasMonoFamily(html) {
+  var re = /font-family\s*:\s*([^;"]*)/g, m
+  while ((m = re.exec(html)) !== null) {
+    if (fontFamilies(m[1]).indexOf(MONO_FAMILY) >= 0) {
+      return true
+    }
+  }
+  return false
+}
+
+// The HTML with its inline-code family declarations taken out; every
+// other family stays.
+function withoutMonoFamily(html) {
+  return html.replace(/font-family\s*:\s*([^;"]*);?\s*/g, function(declaration, value) {
+    return fontFamilies(value).indexOf(MONO_FAMILY) >= 0 ? "" : declaration
+  })
+}
+
 // The inline tools' Markdown, by tool id — what a tool types inside a code
 // block, where the fence holds the characters literally (NoteEditor,
 // typeMarker). Mirrors reader.INLINE_MARKERS in

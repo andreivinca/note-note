@@ -16,10 +16,10 @@ Tool {
     if (range.from === range.to) {
       return
     }
-    var mono = /font-family:[^;"]*mono/i.test(range.html)
-    var html = mono ? editor.withoutChip(range.html.replace(/font-family:[^;"]*mono[^;"]*;?/gi, ""))
-                    : "<span style=\"font-family:'monospace'; background-color:"
-                      + editor.codeChipColour + ';">' + range.html + "</span>"
+    var html = Dialect.hasMonoFamily(range.html)
+      ? editor.withoutChip(Dialect.withoutMonoFamily(range.html))
+      : "<span style=\"font-family:'" + Dialect.MONO_FAMILY + "'; background-color:"
+        + editor.codeChipColour + ';">' + range.html + "</span>"
     editor.replaceInline(html, true)
   }
 }

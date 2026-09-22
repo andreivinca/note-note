@@ -539,7 +539,7 @@ Item {
       var esc = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/\n/g, "<br />")
       var before = area.length, added = 0
       atomic(function() {
-        area.insert(to, '<span style="white-space:pre; font-family:\'monospace\';">' + esc + "</span>")
+        area.insert(to, '<span style="white-space:pre; font-family:\'' + Dialect.MONO_FAMILY + '\';">' + esc + "</span>")
         added = area.length - before
         if (from !== to) {
           area.remove(from, to)
@@ -1572,7 +1572,7 @@ Item {
   // stay all-mono or the block stops being one (reader) — escapeForward
   // has stepped past one before it gets here, so the mono here is inline.
   function escapeInlineCode(pos) {
-    if (pos === 0 || !/font-family:[^;"]*mono/i.test(area.getFormattedText(pos - 1, pos))) {
+    if (pos === 0 || !Dialect.hasMonoFamily(area.getFormattedText(pos - 1, pos))) {
       return false
     }
     area.insert(pos, '<span style="white-space:pre;"> </span>')
