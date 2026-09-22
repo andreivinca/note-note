@@ -124,7 +124,7 @@ def main():
                    DBUS_SESSION_BUS_ADDRESS="unix:path=" + str(work / "no-session-bus"),
                    QT_QPA_PLATFORMTHEME="generic", QT_FORCE_STDERR_LOGGING="1", QT_QUICK_BACKEND="software")
         try:
-            proc = subprocess.run([str(binary), "--qml", str(harness)], env=env,
+            proc = subprocess.run([str(binary), "--data-dir", str(resources), "--qml", str(harness)], env=env,
                                   capture_output=True, text=True, timeout=45)
         except (OSError, subprocess.SubprocessError) as error:
             print("FAIL:", error)
@@ -156,7 +156,7 @@ def main():
         source = (ROOT / "tests/standalone_launch.qml").read_text()
         harness.write_text(source.replace('"app/', '"' + resources.as_uri() + '/'))
         try:
-            proc = subprocess.run([str(binary), "--qml", str(harness)], env=env,
+            proc = subprocess.run([str(binary), "--data-dir", str(resources), "--qml", str(harness)], env=env,
                                   capture_output=True, text=True, timeout=20)
         except (OSError, subprocess.SubprocessError) as error:
             print("FAIL: application launch:", error)
