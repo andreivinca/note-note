@@ -541,7 +541,7 @@ Item {
     // The cached read is a local file and no request at all, so it does not
     // belong in the lane — it must answer instantly even while OneNote is
     // parked, which is what keeps the sidebar populated during a throttle.
-    cachedProc.running = true
+    cachedProc.start()
     root.listPages(false)
   }
 
@@ -631,7 +631,7 @@ Item {
       root.pages = []
       root.bodies = ({})
       root.loadVersions = ({})
-      clearProc.running = true
+      clearProc.start()
       // Nothing queued belongs to the account that just left. The rate
       // cooldown is deliberately *not* cleared: Microsoft throttles per
       // app+user, so signing back in does not lift it, and pretending

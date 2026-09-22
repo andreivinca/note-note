@@ -146,7 +146,9 @@ Item {
     }
   }
 
-  function refresh() { statusProc.running = true }
+  function refresh() {
+    statusProc.start()
+  }
 
   // The listing. Deduped, so the poll and an open() collapse into one; a
   // Refresh replaces a queued one so the user's explicit ask is the one sent.
@@ -365,7 +367,7 @@ Item {
         rebuild()
         return
       }
-      cachedProc.running = true
+      cachedProc.start()
       root.listPages(false)
     }
   }
@@ -503,7 +505,10 @@ Item {
             bordered: true
             foreground: Color.urgent
             accent: Color.accent
-            onClicked: { root.viewCleared(); logoutProc.running = true }
+            onClicked: {
+              root.viewCleared()
+              logoutProc.start()
+            }
           }
           Button {
             visible: root.configured && view.confirmingRemove

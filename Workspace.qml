@@ -2109,7 +2109,7 @@ Item {
       }
     } catch (e) {
     } // a corrupt state file costs nothing
-    scanProviders.running = true
+    scanProviders.start()
   }
 
   function initialize() {
@@ -2556,11 +2556,8 @@ Item {
                 root.showStatus("Could not open link")
               }
             }
-            onStatusRequestedTextChanged: {
-              if (statusRequestedText) {
-                root.showStatus(statusRequestedText)
-                statusRequestedText = ""
-              }
+            onStatusRequested: function(text) {
+              root.showStatus(text)
             }
           }
 

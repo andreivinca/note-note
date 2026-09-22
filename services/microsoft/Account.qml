@@ -52,7 +52,9 @@ Item {
 
   function hasScope(s) { return (" " + root.grantedScope + " ").indexOf(" " + s + " ") >= 0 }
 
-  function refresh() { statusProc.running = true }
+  function refresh() {
+    statusProc.start()
+  }
 
   function login() { startLogin(root.scopes) }
   function loginOptional() { startLogin(root.scopes + " " + root.optionalScopes) }
@@ -64,7 +66,7 @@ Item {
     root.loginScopes = requestedScopes
     root.loggingIn = true
     root.updated()
-    loginProc.running = true
+    loginProc.start()
   }
 
   // Abandon an in-progress sign-in — the device code was lost (switching to
@@ -75,14 +77,16 @@ Item {
       return
     }
     root.reloginPending = false
-    loginProc.running = false
+    loginProc.cancel()
   }
 
   // Sign out, then sign in again — for a token that predates a provider's scope.
   property bool reloginPending: false
   function relogin() { root.reloginPending = true; logout() }
 
-  function logout() { logoutProc.running = true }
+  function logout() {
+    logoutProc.start()
+  }
 
   ProcessTask {
     id: statusProc

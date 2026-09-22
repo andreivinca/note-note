@@ -24,7 +24,7 @@ Item {
         completed.destroy()
       }
     })
-    task.running = true
+    task.start()
     return {
       cancel: function() {
         if (task) {

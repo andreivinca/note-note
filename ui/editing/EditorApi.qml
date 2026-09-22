@@ -78,7 +78,7 @@ QtObject {
   }
 
   function report(message) {
-    host.statusRequestedText = message
+    host.statusRequested(message)
   }
 
   function cursorPosition() {

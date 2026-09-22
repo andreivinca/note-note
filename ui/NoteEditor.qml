@@ -207,7 +207,7 @@ Item {
 
   signal edited()
   // A short message for the host's status line.
-  property string statusRequestedText: ""
+  signal statusRequested(string text)
 
   property bool settingText: false
   // Conversions are asynchronous, so a note that arrives while an earlier one
@@ -352,7 +352,7 @@ Item {
         return
       }
         if (isImage) {
-          root.statusRequestedText = "This notebook cannot store images"
+          root.statusRequested("This notebook cannot store images")
         } else {
           pasteRich()
         }
@@ -519,7 +519,7 @@ Item {
     if (selectionInCode() || !selectionTouchesCode()) {
       return false
     }
-    root.statusRequestedText = "Select inside the code block, or outside it"
+    root.statusRequested("Select inside the code block, or outside it")
     return true
   }
 
@@ -608,7 +608,7 @@ Item {
     // (setImageWidth's `join`), so one ctrl+z still takes the whole paste.
     fitImageAt(at)
     root.edited()
-    root.statusRequestedText = "Image pasted"
+    root.statusRequested("Image pasted")
   }
 
   // ── images in list items ────────────────────────────────────────────
@@ -1369,7 +1369,7 @@ Item {
   function leaveTableRow() {
     withMarkdown(function(lines) {
       if (lines.some(function(line) { return /^\s*<table[ >]/.test(line) })) {
-        root.statusRequestedText = "Rebuild the native text helper to edit nested table rows and columns"
+        root.statusRequested("Rebuild the native text helper to edit nested table rows and columns")
         return
       }
       // Qt can omit an empty paragraph at a cell's start when exporting

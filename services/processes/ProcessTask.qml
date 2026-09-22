@@ -12,11 +12,15 @@ Item {
   property bool raw: false
   property int timeoutMs: 30000
   property int maxOutputBytes: 32 * 1024 * 1024
-  property bool running: false
+  // Started with start(), cancelled with cancel(); this says whether a run
+  // is under way, and is nobody's to set.
+  readonly property bool running: !task.settled
   property var process: null
   property string output: ""
   property int outputBytes: 0
   property bool settled: true
+  // The ticket of the run whose start is deferred: a cancel and a new start
+  // before it fires leave the old ticket behind, so the old begin does not.
   property int generation: 0
   signal started()
   signal lineReceived(string line)
@@ -41,7 +45,6 @@ Item {
     deadline.stop()
     var child = process
     process = null
-    running = false
     if (child) {
       child.stop()
       child.destroy()
@@ -52,11 +55,30 @@ Item {
   function cancel() {
     finish({ error: "operation cancelled", cancelled: true })
   }
+  // The UTF-8 length of `text`, from its code points: what the byte limit
+  // is measured in, counted once per chunk and taken off once per line.
+  function byteLength(text) {
+    var bytes = 0
+    for (var i = 0; i < text.length; i++) {
+      var code = text.charCodeAt(i)
+      if (code < 0x80) {
+        bytes += 1
+      } else if (code < 0x800) {
+        bytes += 2
+      } else if (code >= 0xD800 && code <= 0xDBFF) {
+        bytes += 4
+        i++
+      } else {
+        bytes += 3
+      }
+    }
+    return bytes
+  }
   function receive(chunk) {
     if (settled) {
       return
     }
-    var bytes = unescape(encodeURIComponent(chunk)).length
+    var bytes = byteLength(chunk)
     if (outputBytes + bytes > maxOutputBytes) {
       finish({ error: "the process output exceeded its byte limit" })
       return
@@ -68,14 +90,30 @@ Item {
       while (newline >= 0 && !settled) {
         var line = output.substring(0, newline)
         output = output.substring(newline + 1)
-        outputBytes = unescape(encodeURIComponent(output)).length
+        outputBytes -= byteLength(line) + 1
         lineReceived(line)
         newline = output.indexOf("\n")
       }
     }
   }
+  // One run at a time: a task started while it runs is left to finish, since
+  // that run's answer is the one being waited for. The process itself
+  // starts once start() has returned, so an answer never arrives before the
+  // caller holds its handle, however fast the process fails.
+  function start() {
+    if (!settled) {
+      return
+    }
+    settled = false
+    output = ""
+    outputBytes = 0
+    var ticket = ++generation
+    Qt.callLater(function() {
+      task.begin(ticket)
+    })
+  }
   function begin(expected) {
-    if (settled || !running || expected !== generation) {
+    if (settled || expected !== generation) {
       return
     }
     try {
@@ -115,20 +153,6 @@ Item {
       })
     } catch (error) {
       finish({ error: "could not start the process: " + error.message })
-    }
-  }
-  onRunningChanged: {
-    if (running) {
-      settled = false
-      output = ""
-      outputBytes = 0
-      generation++
-      var expected = generation
-      Qt.callLater(function() {
-        task.begin(expected)
-      })
-    } else {
-      cancel()
     }
   }
   Timer {

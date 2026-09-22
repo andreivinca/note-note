@@ -504,10 +504,10 @@ Item {
 
   // ── watching: inotify while the app is open (event-driven, no polling) ──
   function watch(on) {
-    if (on && !watchProc.running) {
-      watchProc.running = true
-    } else if (!on && watchProc.running) {
-      watchProc.running = false
+    if (on) {
+      watchProc.start()
+    } else {
+      watchProc.cancel()
     }
   }
   function poll() { root.refresh() }

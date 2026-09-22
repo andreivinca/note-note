@@ -161,7 +161,7 @@ Item {
       rebuild()
       return
     }
-    cachedProc.running = true       // a local file: instant, and never queued
+    cachedProc.start()       // a local file: instant, and never queued
     root.listNotes()
   }
 
@@ -207,7 +207,7 @@ Item {
     target: root.ms
     function onSignedOut() {
       root.notes = []
-      clearProc.running = true
+      clearProc.start()
       if (services && services.requests) {
         services.requests.cancelOwner(root)
       }
