@@ -14,7 +14,9 @@ _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 
 from mdtext import escape_text, escape_line_start, code_span, code_fence  # noqa: E402
 from parse import parse as _parse  # noqa: E402
 SUPPORTED = {"paragraph", "heading_1", "heading_2", "heading_3", "bulleted_list_item",
-             "numbered_list_item", "to_do", "quote", "code", "divider", "toggle"}
+             "numbered_list_item", "to_do", "quote", "code", "divider"}
+# The one highlight the writer can put back; every other colour is lost.
+KEPT_COLORS = {"default", "yellow_background"}
 
 
 
@@ -63,8 +65,87 @@ def rich_to_md(rich):
     return "".join(out)
 
 
+def _run_chars(run):
+    """One rich-text run as the characters a save must reproduce: each with
+    its formatting and link, except whitespace, which Markdown can neither
+    format nor link. Reads Notion's answer (`plain_text`, `href`) and the
+    writer's request (`text.content`, `text.link`) alike."""
+    text = run.get("plain_text") if "plain_text" in run else (run.get("text") or {}).get("content", "")
+    marks = tuple(sorted(k for k, v in (run.get("annotations") or {}).items()
+                         if v is True or (k == "color" and v != "default")))
+    color = (run.get("annotations") or {}).get("color", "default")
+    link = run.get("href") or ((run.get("text") or {}).get("link") or {}).get("url") or None
+    out = []
+    for char in text or "":
+        if char.isspace():
+            out.append((char, (), "default", None))
+        else:
+            out.append((char, marks, color, link))
+    return out
+
+
+def essence(blocks):
+    """What a save can write back, block by block: the type, the text with
+    its formatting per character, a to-do's state, a code block's language,
+    and the children — the same shape whether the blocks came from Notion or
+    from markdown_to_blocks, so the two can be compared."""
+    out = []
+    for block in blocks or []:
+        kind = block.get("type")
+        body = block.get(kind) or {}
+        chars = []
+        for run in body.get("rich_text") or []:
+            if run.get("type", "text") != "text":
+                chars.append(("\ufffc", (run.get("type"),), "default", None))
+            chars.extend(_run_chars(run))
+        language = (body.get("language") or "plain text") if kind == "code" else None
+        children = block.get("children") or body.get("children") or []
+        out.append((kind, chars, bool(body.get("checked")), language, essence(children)))
+    return out
+
+
+def unwritable(blocks):
+    """Why a save could not put this page back as it is: the names of what
+    the writer has no block, annotation or nesting for, in page order and
+    without repeats. Empty when the page round-trips — decided by the trip
+    itself (essence), with these names as the explanation."""
+    reasons = []
+
+    def add(name):
+        if name not in reasons:
+            reasons.append(name)
+
+    def named(noun):
+        return ("an " if noun[:1] in "aeiou" else "a ") + noun.replace("_", " ")
+
+    def walk(blocks, nested_under=None):
+        for block in blocks or []:
+            kind = block.get("type")
+            body = block.get(kind) or {}
+            if kind not in SUPPORTED:
+                add(named(str(kind)) + " block")
+            elif nested_under and nested_under not in ("bulleted_list_item", "numbered_list_item", "to_do"):
+                add("text nested under " + named(nested_under))
+            for run in body.get("rich_text") or []:
+                if run.get("type", "text") != "text":
+                    add(named(str(run.get("type"))))
+                elif (run.get("annotations") or {}).get("color", "default") not in KEPT_COLORS:
+                    add("coloured text")
+            children = block.get("children") or body.get("children") or []
+            walk(children, kind if kind in SUPPORTED else None)
+
+    walk(blocks)
+    if not reasons and essence(blocks) != essence(markdown_to_blocks(blocks_to_markdown(blocks)[0])):
+        reasons.append("formatting a save could not put back as it is")
+    return reasons
+
+
 def blocks_to_markdown(blocks, depth=0):
-    """blocks: [{type, <type>: {...}, children: [...]}] -> (markdown, editable)."""
+    """blocks: [{type, <type>: {...}, children: [...]}] -> (markdown, editable).
+
+    `editable` is the block types alone; `unwritable` is the whole answer,
+    from the round trip, and is what decides whether the page opens for
+    editing (notion.py, cmd_page)."""
     lines, editable, prev = [], True, None
     pad = "  " * depth
     for b in blocks:
@@ -95,16 +176,16 @@ def blocks_to_markdown(blocks, depth=0):
             ann = first.get("annotations") or {}
             plain_start = not ann.get("bold") and not ann.get("italic") and not ann.get("code") and not first.get("href")
             lines.append((pad + (escape_line_start(text) if plain_start else text)) if text else pad + " ")
-        elif t == "bulleted_list_item" or t == "toggle":
-            if prev not in ("bulleted_list_item", "numbered_list_item", "to_do", "toggle") and lines and lines[-1] != "":
+        elif t == "bulleted_list_item":
+            if prev not in ("bulleted_list_item", "numbered_list_item", "to_do") and lines and lines[-1] != "":
                 lines.append("")
             lines.append(pad + "- " + escape_line_start(text))
         elif t == "numbered_list_item":
-            if prev not in ("bulleted_list_item", "numbered_list_item", "to_do", "toggle") and lines and lines[-1] != "":
+            if prev not in ("bulleted_list_item", "numbered_list_item", "to_do") and lines and lines[-1] != "":
                 lines.append("")
             lines.append(pad + "1. " + escape_line_start(text))
         elif t == "to_do":
-            if prev not in ("bulleted_list_item", "numbered_list_item", "to_do", "toggle") and lines and lines[-1] != "":
+            if prev not in ("bulleted_list_item", "numbered_list_item", "to_do") and lines and lines[-1] != "":
                 lines.append("")
             lines.append(pad + ("- [x] " if body.get("checked") else "- [ ] ") + escape_line_start(text))
         elif t == "quote":

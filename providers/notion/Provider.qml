@@ -173,7 +173,8 @@ Item {
   function load(path, cb) {
     var id = idOf(path), cached = root.bodies[id], pg = pageAt(path)
     if (cached && (!pg || cached.version === (pg.edited || ""))) {
-      cb({ title: cached.title, body: cached.body, editable: cached.editable, version: cached.version || "" })
+      cb({ title: cached.title, body: cached.body, editable: cached.editable, reason: cached.reason || "",
+           version: cached.version || "" })
       return
     }
     if (!root.rq) {
@@ -200,10 +201,12 @@ Item {
         }
         var pg2 = root.pageAt(path), ver = pg2 ? pg2.edited || "" : ""
         var b = root.bodies
-        b[root.idOf(path)] = { title: r.title || "", body: r.body || "", editable: r.editable === true, version: ver }
+        var loaded = { title: r.title || "", body: r.body || "", editable: r.editable === true,
+                       reason: r.reason || "", version: ver }
+        b[root.idOf(path)] = loaded
         root.bodies = b
         if (cb) {
-          cb({ title: r.title || "", body: r.body || "", editable: r.editable === true, version: ver })
+          cb(loaded)
         }
       })
   }

@@ -266,6 +266,50 @@ def test_a_create_is_never_repeated(verbose):
     return failures
 
 
+def test_a_page_opens_for_editing_only_when_a_save_would_put_it_back(verbose):
+    """A save replaces every block of the page with the Markdown written
+    back, so a page that the writer cannot reproduce — a toggle, a colour,
+    text nested under a paragraph, a mention — must open read-only and say
+    why. Editability used to be decided by block type alone, so such pages
+    were rewritten lossily on the first save.
+    """
+    import notion_md
+
+    def run(text, **ann):
+        annotations = {"bold": False, "italic": False, "strikethrough": False, "underline": False,
+                       "code": False, "color": "default"}
+        annotations.update(ann)
+        return {"type": "text", "text": {"content": text, "link": None}, "annotations": annotations,
+                "plain_text": text, "href": None}
+
+    def block(kind, *runs, children=None, **extra):
+        made = {"type": kind, kind: dict({"rich_text": list(runs)}, **extra)}
+        if children:
+            made["children"] = children
+        return made
+
+    plain = [block("heading_1", run("Title")),
+             block("paragraph", run("Hello "), run("bold ", bold=True), run("and "), run("mark", color="yellow_background")),
+             block("to_do", run("task"), checked=True), block("divider"),
+             block("code", run("x = 1\ny = 2"), language="python"), block("quote", run("said")),
+             block("bulleted_list_item", run("a"), children=[block("numbered_list_item", run("b"))]),
+             block("paragraph", dict(run("docs"), href="https://example.com")), block("paragraph")]
+    failures = 0
+    failures += check("a page the writer can reproduce opens for editing", notion_md.unwritable(plain) == [],
+                      repr(notion_md.unwritable(plain)))
+    lossy = {
+        "a toggle block": [block("toggle", run("Details"), children=[block("paragraph", run("hidden"))])],
+        "coloured text": [block("paragraph", run("red", color="red"))],
+        "text nested under a paragraph": [block("paragraph", run("parent"), children=[block("paragraph", run("child"))])],
+        "a mention": [block("paragraph", {"type": "mention", "mention": {}, "plain_text": "@someone", "annotations": {}})],
+        "an image block": [block("image")],
+    }
+    for reason, blocks in lossy.items():
+        found = notion_md.unwritable(blocks)
+        failures += check("a page with %s opens read-only and says so" % reason, found[:1] == [reason], repr(found))
+    return failures
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -278,6 +322,7 @@ def main():
         total += test_conversion_failure_writes_nothing(args.verbose)
         total += test_path_segments_are_quoted(args.verbose)
         total += test_a_create_is_never_repeated(args.verbose)
+        total += test_a_page_opens_for_editing_only_when_a_save_would_put_it_back(args.verbose)
     finally:
         import shutil
         shutil.rmtree(WORK, ignore_errors=True)

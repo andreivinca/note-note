@@ -10,7 +10,7 @@ integration in Notion ("Connections") to be visible.
   notion.py setup <file>           -> reads {"token"}; verifies it; stores it
   notion.py logout
   notion.py list [--cached|--max-age S] -> {"pages":[{id,title,parent,edited}],"cached":bool}
-  notion.py page <id>              -> {"title","body"(markdown),"editable"}
+  notion.py page <id>              -> {"title","body"(markdown),"editable","reason"}
   notion.py update <id> <file>     -> reads {"title","body"}; replaces the page's blocks
   notion.py create <parentId> <file> -> {"ok":true,"page":{...}}
   notion.py delete <id>            -> archives the page
@@ -201,11 +201,16 @@ def cmd_page(page_id):
     if status != 200:
         fail(err(pg, status))
     blocks, truncated = fetch_children(page_id, [MAX_BLOCKS])
-    md, editable = notion_md.blocks_to_markdown(blocks)
+    md, _ = notion_md.blocks_to_markdown(blocks)
+    # A save replaces the whole page with these blocks written back, so the
+    # page opens for editing only when that would put it back as it is.
+    reasons = notion_md.unwritable(blocks)
     if truncated:
         md += "\n\n[page continues — more than %d blocks; edit it in Notion]" % MAX_BLOCKS
-        editable = False
-    out({"title": title_of(pg), "body": md, "editable": editable})
+        reasons.insert(0, "more than %d blocks" % MAX_BLOCKS)
+    reason = ("This page holds %s, which Note Note cannot write back, so it opened read-only"
+              % ", ".join(reasons)) if reasons else ""
+    out({"title": title_of(pg), "body": md, "editable": not reasons, "reason": reason})
 
 
 def cmd_update(page_id, path):

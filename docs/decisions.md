@@ -609,10 +609,24 @@ same characters in it, so the caret's position survives the trip.
 
 ### Read-only rather than lossy writes
 
-A OneNote page with images or more than the block/section caps, a Notion page
-with unsupported blocks, a local file over 2 MiB: all open **read-only with a
-visible reason**. Saving would silently destroy content we cannot represent,
-which breaks the first rule of the project.
+A OneNote page with more than the block/section caps, a Notion page a save
+could not put back as it is, a local file over 2 MiB, a Sticky note cut at
+its size limit: all open **read-only with a visible reason** — the load
+answer's `reason`, said once on the status line. Saving would silently
+destroy content we cannot represent, which breaks the first rule of the
+project.
+
+What decides it is the round trip, not a list of block types. A Notion save
+replaces every block of the page with the Markdown written back, so the
+page opens for editing only when writing its Markdown back reproduces its
+blocks character for character (`notion_md.unwritable`): a toggle, a colour
+the writer cannot put back, text nested under a paragraph, a mention, each
+is named in the reason. Deciding by type alone let a page with a toggle or
+a red word open editable and be rewritten without either on its first save.
+OneNote is the mirror case: its reader refuses nothing it can read, and its
+writer refuses a save holding the four constructs it cannot write
+(engine-notes, "A quote, a code block, inline code and a rule do not
+round-trip").
 
 ### The four block-style buttons fold into one text-style menu
 
