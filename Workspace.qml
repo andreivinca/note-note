@@ -145,8 +145,7 @@ Item {
   property var queues: ({})
   property var queueList: []
   property var queueNames: ({})
-  property int queueRevision: 0
-  readonly property bool anyCooling: root.queueRevision >= 0 ? (root.coolingQueue() !== null) : false
+  readonly property bool anyCooling: root.coolingQueue() !== null
   property var providers: []
   property var providerState: ({})
   property bool providersLoaded: false
@@ -251,7 +250,6 @@ Item {
   // selection pulls the cursor back to the note (selectPath).
   property string treeCursor: ""
   property string deletePath: ""
-  property alias saveRevision: session.saveRevision
   property string missedSaveNotice: ""
   // ── state ───────────────────────────────────────────────────────────
   // Asked for by anyone whose state moved — a provider through
@@ -567,9 +565,6 @@ Item {
     }
     root.queues[key] = q
     root.queueList = root.queueList.concat([q])
-    q.updated.connect(function() {
-      root.queueRevision++
-    })
     return q
   }
 
@@ -588,8 +583,8 @@ Item {
   }
 
   // Of the parked lanes, the one with the longest still to wait — or null.
-  // Bound through queueRevision because a plain JS object is invisible to a
-  // binding.
+  // Each lane's `cooling` and `cooldownRemaining` are properties, so a
+  // binding over this follows them.
   function coolingQueue() {
     var worst = null
     for (var i = 0; i < root.queueList.length; i++) {
@@ -2589,7 +2584,7 @@ Item {
             }
             loading: root.currentPath !== "" && root.loadingPath === root.currentPath
             readOnly: editor.readOnly
-            unsaved: root.dirty || (root.saveRevision >= 0 && root.saveInFlight(root.currentPath))
+            unsaved: root.dirty || root.saveInFlight(root.currentPath)
             statusText: root.statusText
             hoveredLink: editor.hoveredLink
             wordCount: editor.wordCount

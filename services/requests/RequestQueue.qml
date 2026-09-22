@@ -30,21 +30,20 @@ Item {
   // Hidden window: ordinary reads stop; writes and opted-in background work run.
   property bool paused: false
 
-  readonly property int depth: root.revision >= 0 ? Scheduler.depth(root.queue) : 0
-  readonly property bool cooling: root.revision >= 0 ? Scheduler.cooling(root.queue, Date.now()) : false
-  readonly property real cooldownRemaining: root.revision >= 0 ? Scheduler.remaining(root.queue, Date.now()) : 0
+  // What the lane holds, as properties: a binding cannot see inside the
+  // scheduler's state object, so bump() publishes these on every change to
+  // it — the jobs queued or running, the accepted writes among them (what
+  // a close and a settings commit wait on), and the park's clock.
+  property int depth: 0
+  property int writeDepth: 0
+  property bool cooling: false
+  property real cooldownRemaining: 0
 
   // Depth, cooling or the cooldown moved. (`updated`, never `changed`: a
   // signal called `changed` collides with Qt's own — docs/engine-notes.md.)
   signal updated()
 
-  // Accepted writes queued or running, kept as a property so that a close
-  // or a settings commit can be bound to their settling rather than poll.
-  property int writeDepth: 0
   readonly property var queue: Scheduler.makeState()
-  // Bindings cannot see inside a plain JS object, so every change to it bumps
-  // this and the three readonly properties above hang off it.
-  property int revision: 0
   property bool pumping: false
   property bool pumpAgain: false
 
@@ -104,8 +103,10 @@ Item {
 
   // ── the machinery ───────────────────────────────────────────────────
   function bump() {
+    root.depth = Scheduler.depth(root.queue)
     root.writeDepth = Scheduler.writeDepth(root.queue)
-    root.revision++
+    root.cooling = Scheduler.cooling(root.queue, Date.now())
+    root.cooldownRemaining = Scheduler.remaining(root.queue, Date.now())
     root.updated()
   }
 

@@ -352,7 +352,8 @@ Item {
   // providers/onenote/Provider.qml).
   ProcessRunner { id: scriptRunner }
   readonly property bool busy: scriptRunner.active > 0
-  readonly property bool writeBusy: root.rq && root.rq.revision >= 0 ? root.rq.pendingFor(root, true) > 0 : false
+  // One provider to a lane, so the lane's accepted writes are this one's.
+  readonly property bool writeBusy: root.rq ? root.rq.writeDepth > 0 : false
 
   function runScript(args, payload, ctx) {
     scriptRunner.run({ command: ["python3", root.script].concat(args),

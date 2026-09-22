@@ -25,7 +25,6 @@ Item {
   property var saveEpoch: ({})
   property var savesPending: ({})
   property var drafts: ({})
-  property int saveRevision: 0
   readonly property bool busy: Object.keys(session.savesPending).length > 0
   readonly property string notDisplayable: "This note could not be displayed — it has not been changed"
 
@@ -255,7 +254,6 @@ Item {
       delete pending[path]
     }
     session.savesPending = pending
-    session.saveRevision++
   }
 
   // Used only after the user confirms deleting this note.
