@@ -101,8 +101,10 @@ class _Renderer:
         return self.blocks(token.get("children"), indent, quote)
 
     def heading(self, token):
-        level = min(max(token.get("attrs", {}).get("level", 1), 1), 3)
+        level = min(max(token.get("attrs", {}).get("level", 1), 1), 6)
         span = 'font-size:%s; font-weight:%d;' % (dialect.HEADING_FONT_SIZE[level], dialect.BOLD_WEIGHT)
+        if level in dialect.HEADING_VARIANT:
+            span += ' font-variant:%s;' % dialect.HEADING_VARIANT[level]
         # Inside a heading the author's bold is written heavier, so that it
         # survives a document where the heading itself is already bold.
         return '<h%d style="%s"><span style="%s">%s</span></h%d>' % (

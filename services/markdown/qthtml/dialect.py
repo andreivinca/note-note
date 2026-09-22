@@ -14,9 +14,14 @@ we send.
 import re
 
 # Headings survive as a font size on a span; the tag does not survive at all
-# for the document's first block, so size is the only reliable signal.
-HEADING_FONT_SIZE = {1: "xx-large", 2: "x-large", 3: "large"}
-FONT_SIZE_HEADING = {size: level for level, size in HEADING_FONT_SIZE.items()}
+# for the document's first block, so size is the only reliable signal. Qt
+# keeps exactly these five size keywords (measured on 6.11: `x-small` and
+# below, `smaller`, `larger` and `em` sizes all come back as no size), so the
+# sixth level shares the fifth's size and is told apart by small capitals,
+# which Qt keeps as well and nothing else in the dialect writes.
+HEADING_FONT_SIZE = {1: "xx-large", 2: "x-large", 3: "large", 4: "medium", 5: "small", 6: "small"}
+FONT_SIZE_HEADING = {"xx-large": 1, "x-large": 2, "large": 3, "medium": 4, "small": 5}
+HEADING_VARIANT = {6: "small-caps"}
 
 BOLD_WEIGHT = 700
 # A heading is drawn bold, so bold *inside* one has to be heavier or it cannot
@@ -171,7 +176,10 @@ def is_quote(style):
 
 def heading_level(style):
     """The heading level a span's font size stands for, or 0."""
-    return FONT_SIZE_HEADING.get(style.get("font-size", ""), 0)
+    level = FONT_SIZE_HEADING.get(style.get("font-size", ""), 0)
+    if level == 5 and style.get("font-variant") == HEADING_VARIANT[6]:
+        return 6
+    return level
 
 
 def is_bold(style, minimum=BOLD_WEIGHT):

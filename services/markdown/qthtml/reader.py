@@ -235,7 +235,7 @@ class _Reader:
     def heading_level(self, node, style):
         """A heading is a font size — on the block, or on a span covering it."""
         if node.tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
-            return min(int(node.tag[1]), 3)
+            return int(node.tag[1])
         level = dialect.heading_level(style)
         if level:
             return level

@@ -201,6 +201,14 @@ class Content(unittest.TestCase):
         saved = to_markdown(to_html(fence + "\n" + value + "\n" + fence))
         self.assertEqual(parse(saved)[0]["raw"], value + "\n")
 
+    def test_deep_headings_keep_their_level(self):
+        # Levels four to six were clamped to three on both sides, so a note's
+        # `####` became `###` at its first save.
+        for level in range(1, 7):
+            markdown = "#" * level + " Title\n\nbody\n"
+            with self.subTest(level=level):
+                self.assertEqual(to_markdown(to_html(markdown)), markdown)
+
     def test_text_shapes_the_parser_would_consume_stay_text(self):
         # Each of these used to vanish on re-parse: a two-dash signature line
         # (a setext underline), a table delimiter row, a link reference

@@ -42,6 +42,9 @@ CASES = {
     "literal color HTML in code": '`<span style="color:red;">long</span>`\n',
 
     "headings": "# One\n\n## Two\n\n### Three\n",
+    "deep headings": "#### Four\n\n##### Five\n\n###### Six\n\nbody\n",
+    "sixth heading opens the note": "###### Six\n\nbody\n",
+    "sixth heading with bold": "###### Six with **bold** inside\n",
     "inline": "para **b** *i* _u_ ~~s~~ ==hi== `c` [l](http://x)\n",
     "heading with formatting": "## Head with ==mark== and *italic*\n",
     "heading with bold": "## Head with **bold** inside\n",

@@ -108,7 +108,7 @@ since switching Qt's rich document to plain text can retain old anchor formats.
 
 | written as | comes back as | read as |
 |---|---|---|
-| `<h1>` | a paragraph with `font-size:xx-large; font-weight:700` (the tag survives only below the first block) | heading level, from the size |
+| `<h1>` | a paragraph with `font-size:xx-large; font-weight:700` (the tag survives only below the first block) | heading level, from the size: `xx-large`, `x-large`, `large`, `medium` and `small` are the five size keywords Qt keeps (measured on 6.11: `x-small` and smaller, `smaller`, `larger` and `em` sizes come back as no size at all), so level 6 is `small` in small capitals (`font-variant:small-caps`, which Qt also keeps) — a note's `####` used to come back as `###` |
 | `<blockquote>` | a paragraph with `margin-left:40px; margin-right:40px` (the writer adds a muted-colour span for the eye, and the editor draws the quote bar itself, outside the document — Qt has no block borders) | quote (both margins) |
 | `<pre>` | a paragraph whose runs are `font-family:'monospace'`, on a block-level `background-color` (a near-invisible marker — the visible slab is drawn by the editor, over the document), without a quote's margins; its left margin is padding, not indent | fenced code (neighbouring ones merge; all-monospace *without* the block background is inline code, and *with* quote margins it is a quote of inline code; a code line's margins are never read back) |
 | indentation | `margin-left: 36px` per level, right margin 0 | indent level |
