@@ -580,7 +580,7 @@ LaneProvider {
       var section = page ? root.sectionAt(page.sectionId) : null
       return root.searchSections(section ? section.notebookId : "")
     }
-    onChanged: root.searchChanged()
+    onUpdated: root.searchChanged()
   }
 
   function searchSections(notebookId) {

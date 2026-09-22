@@ -107,7 +107,7 @@ Item {
         var done = test.indexReply
         test.indexReply = null
         done({ status: { serial: 9999, total: 1, indexed: 1, pending: 0, sections: {} } })
-        test.check("old account response cannot install its coverage", !cache.state.total)
+        test.check("old account response cannot install its coverage", !cache.coverage.total)
         test.check("account change clears only the old session", test.cleared.indexOf("session-a") >= 0)
         test.deferStep = true
         cache.inventoryReady = true
@@ -121,14 +121,14 @@ Item {
         test.failSearch = true
         var notices = 0
         var notice = function() { notices++ }
-        cache.changed.connect(notice)
+        cache.updated.connect(notice)
         cache.search("failed", function(result) {
           test.check("failed cache search answers without matches", result.paths.length === 0)
         })
         cache.search("failed again", function(result) {})
-        cache.changed.disconnect(notice)
+        cache.updated.disconnect(notice)
         test.check("cache failures remain visible without a notification loop",
-                   notices === 1 && cache.status(["s"]) === "Search cache unavailable")
+                   notices === 1 && cache.unavailable && cache.status(["s"]) === "Search cache unavailable")
         test.failSearch = false
         test.holdSearch = true
         cache.search("old account", function(result) {

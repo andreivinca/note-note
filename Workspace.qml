@@ -230,7 +230,6 @@ Item {
   // searchBusy recompute.
   property var searchWaiting: ({})
   property int searchSeq: 0
-  property int searchRevision: 0
   property int searchRequestSeq: 0
   property var searchRequests: ({})
   property var invalidSearchProviders: ({})
@@ -1119,7 +1118,6 @@ Item {
   }
 
   function invalidateContentSearch(provider) {
-    root.searchRevision++
     if (root.filterText.length < 2 || !root.searchContent || contentSearchTimer.running) {
       return
     }
@@ -2358,7 +2356,7 @@ Item {
           treeCursor: root.treeCursor
           filtering: root.filterText.length > 0
           searchBusy: root.searchBusy
-          searchStatus: root.searchRevision >= 0 && root.revision >= 0 ? root.activeSearchStatus() : ""
+          searchStatus: root.revision >= 0 ? root.activeSearchStatus() : ""
           sections: root.tabs
           activeKey: root.revision < 0 ? "" : root.activeKey()
           headerHeight: editor.toolbarHeight

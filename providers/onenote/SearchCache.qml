@@ -13,8 +13,16 @@ Item {
   property var preferredSections: []
   property var queue: null
   property var run: null
-  property var state: ({})
-  property string error: ""
+  // The index's coverage as the script last answered it (search_index.py,
+  // summary): totals, one entry per section, its serial and the next delay.
+  property var coverage: ({})
+  // Two ways the cache can be down: it could not be read or synchronised at
+  // all, or one indexing step failed and will be tried again. The text the
+  // panel shows follows from them.
+  property bool unavailable: false
+  property bool stepFailed: false
+  readonly property string error: root.unavailable ? "Search cache unavailable"
+    : root.stepFailed ? "Search indexing paused; retrying" : ""
   property bool deferred: false
   property real resumeAt: 0
   property bool initialized: false
@@ -25,7 +33,7 @@ Item {
   property var pendingJobs: []
   property bool resync: false
 
-  signal changed()
+  signal updated()
 
   onSessionChanged: reset()
   onReadyChanged: {
@@ -37,7 +45,7 @@ Item {
   }
   onPagesChanged: refresh()
   onInventoryReadyChanged: refresh()
-  onInventoryCompleteChanged: changed()
+  onInventoryCompleteChanged: updated()
   onQueueChanged: refresh()
   Component.onCompleted: refresh()
   Component.onDestruction: {
@@ -55,15 +63,16 @@ Item {
     root.cancelJobs()
     root.syncing = false
     root.initialized = false
-    root.state = ({})
-    root.error = ""
+    root.coverage = ({})
+    root.unavailable = false
+    root.stepFailed = false
     root.deferred = false
     root.resumeAt = 0
     if (root.previousSession && root.previousSession !== root.session && root.run) {
       root.run(["clear-search", root.previousSession], undefined, function(result) {})
     }
     root.previousSession = root.session
-    root.changed()
+    root.updated()
     root.refresh()
   }
 
@@ -95,10 +104,11 @@ Item {
   Timer { id: indexTimer; interval: 100; onTriggered: root.indexNext() }
 
   function accept(result) {
-    if (result && result.status && (!root.state.serial || result.status.serial >= root.state.serial)) {
-      root.state = result.status
-      root.error = ""
-      root.changed()
+    if (result && result.status && (!root.coverage.serial || result.status.serial >= root.coverage.serial)) {
+      root.coverage = result.status
+      root.unavailable = false
+      root.stepFailed = false
+      root.updated()
     }
   }
 
@@ -118,8 +128,8 @@ Item {
       }
       root.syncing = false
       if (!result || result.error) {
-        root.error = "Search cache unavailable"
-        root.changed()
+        root.unavailable = true
+        root.updated()
         root.schedule(60)
         return
       }
@@ -128,7 +138,7 @@ Item {
       if (root.resync) {
         root.refresh()
       } else {
-        root.schedule(root.deferred ? Math.max(0, root.resumeAt - Date.now()) / 1000 : root.state.nextDelay)
+        root.schedule(root.deferred ? Math.max(0, root.resumeAt - Date.now()) / 1000 : root.coverage.nextDelay)
       }
     })
   }
@@ -148,7 +158,7 @@ Item {
     if (!root.ready || !root.queue || root.pendingJobs.length >= 2) {
       return
     }
-    if (!root.initialized || root.syncing || syncTimer.running || root.error === "Search cache unavailable") {
+    if (!root.initialized || root.syncing || syncTimer.running || root.unavailable) {
       root.refresh()
       return
     }
@@ -178,8 +188,8 @@ Item {
           return
         }
         if (result.error) {
-          root.error = "Search indexing paused; retrying"
-          root.changed()
+          root.stepFailed = true
+          root.updated()
           root.schedule(60)
           return
         }
@@ -188,7 +198,7 @@ Item {
         }
         root.deferred = root.resumeAt > Date.now()
         root.accept(result)
-        root.schedule(root.deferred ? (root.resumeAt - Date.now()) / 1000 : root.state.nextDelay)
+        root.schedule(root.deferred ? (root.resumeAt - Date.now()) / 1000 : root.coverage.nextDelay)
       })
   }
 
@@ -198,9 +208,9 @@ Item {
       if (!root.queue.paused) {
         root.refresh()
       }
-      root.changed()
+      root.updated()
     }
-    function onUpdated() { root.changed() }
+    function onUpdated() { root.updated() }
   }
 
   function search(query, callback) {
@@ -217,15 +227,15 @@ Item {
       if (!result || result.error) {
         // Report a failure once. Repeating the same notification would make
         // the host keep querying the unavailable cache in a feedback loop.
-        if (root.error !== "Search cache unavailable") {
-          root.error = "Search cache unavailable"
-          root.changed()
+        if (!root.unavailable) {
+          root.unavailable = true
+          root.updated()
         }
         root.schedule(60)
         callback({ paths: [] })
         return
       }
-      // Successful reads never emit changed(): the host must not search
+      // Successful reads never emit updated(): the host must not search
       // again in response to its own search callback.
       callback(result)
     })
@@ -243,7 +253,7 @@ Item {
     }
     var counts = { total: 0, indexed: 0, pending: 0, failed: 0 }
     for (var i = 0; i < sectionIds.length; i++) {
-      var section = (root.state.sections || {})[sectionIds[i]]
+      var section = (root.coverage.sections || {})[sectionIds[i]]
       if (section) {
         counts.total += section.total
         counts.indexed += section.indexed
@@ -265,8 +275,8 @@ Item {
   }
 
   function diagnostics() {
-    return { total: root.state.total || 0, indexed: root.state.indexed || 0,
-             pending: root.state.pending || 0, failed: root.state.failed || 0,
+    return { total: root.coverage.total || 0, indexed: root.coverage.indexed || 0,
+             pending: root.coverage.pending || 0, failed: root.coverage.failed || 0,
              workers: root.pendingJobs.length, syncing: root.syncing,
              initialized: root.initialized, deferred: root.deferred,
              resumeIn: Math.max(0, Math.ceil((root.resumeAt - Date.now()) / 1000)), error: root.error }
