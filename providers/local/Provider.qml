@@ -276,9 +276,28 @@ Item {
       }).map(function(x) { return x.e })
   }
 
+  // The last listing reached its end, so the model says what is there and
+  // an order written from it names every note. A listing cut short by its
+  // budget or deadline leaves this false: what it listed is shown when the
+  // sidebar had nothing, an existing model is kept, and no order is written
+  // until a whole listing lands — an order written from a partial list
+  // would drop every note the list did not reach. A notebook the lister
+  // could not read is unknown, not empty, and its order is kept too.
+  property bool listingComplete: true
+  property var unreadableNotebooks: ({})
+
+  function orderWritable(key) {
+    return root.listingComplete && !root.unreadableNotebooks[key]
+  }
+
+  function refuseOrderWrite() {
+    root.statusRequested(root.name + ": the notes could not all be listed, so the order was not saved")
+  }
+
   // Parses the listing script's output.
   function loadList(raw) {
     var lines = raw.split("\n"), dirs = [], orders = {}, bookOrder = [], entries = []
+    var end = null, unreadable = {}
     for (var i = 0; i < lines.length; i++) {
       var p = lines[i].split("\t")
       if (p[0] === "D") {
@@ -287,8 +306,28 @@ Item {
         (orders[p[1] || ""] = orders[p[1] || ""] || []).push(p[2])
       } else if (p[0] === "B") {
         bookOrder.push(p[1])
+      } else if (p[0] === "X") {
+        unreadable[p[1] || ""] = p[2] || "the notebook could not be read"
+      } else if (p[0] === "E") {
+        end = { complete: p[1] === "complete", reason: p[2] || "" }
       } else if (p[0] === "N") {
         entries.push({ key: p[1] || "", file: p[2], path: pathOf(p[2]), title: p[3] || "", preview: p[4] || "", size: Number(p[5] || 0), version: p[6] || "" })
+      }
+    }
+    if (!end) {
+      // A stream without its last line is a listing that died, not a list.
+      root.statusRequested(root.name + ": the listing ended before it was complete")
+      return
+    }
+    root.listingComplete = end.complete
+    root.unreadableNotebooks = unreadable
+    for (var unread in unreadable) {
+      root.statusRequested(root.name + ": " + (unread || "Notes") + " — " + unreadable[unread])
+    }
+    if (!end.complete) {
+      root.statusRequested(root.name + ": " + end.reason + " — showing what was listed")
+      if (root.notes.length > 0 || root.notebooks.length > 0) {
+        return
       }
     }
     var books = dirs.filter(function(k) { return k !== "" || entries.some(function(e) { return e.key === "" }) })
@@ -448,6 +487,10 @@ Item {
   }
 
   function setOrder(sectionKey, paths) {
+    if (!orderWritable(sectionKey)) {
+      refuseOrderWrite()
+      return
+    }
     var file = dirOf(sectionKey) + "/.order"
     mutate("order:" + file, function() {
       var names = reorderNotes(sectionKey, paths).filter(function(note) { return note.key === sectionKey })
@@ -484,6 +527,10 @@ Item {
   }
 
   function persistOrder(key) {
+    if (!orderWritable(key)) {
+      refuseOrderWrite()
+      return
+    }
     var file = dirOf(key) + "/.order"
     mutate("order:" + file, function() {
       var names = root.notes.filter(function(note) { return note.key === key }).map(function(note) { return baseName(note.file) })
@@ -492,6 +539,10 @@ Item {
   }
 
   function persistNotebookOrder() {
+    if (!root.listingComplete) {
+      refuseOrderWrite()
+      return
+    }
     var file = root.notesRoot + "/.notebooks"
     mutate("order:" + file, function() {
       var keys = root.notebooks.filter(function(book) { return !!book.key }).map(function(book) { return book.key })

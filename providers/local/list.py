@@ -5,6 +5,16 @@ oldest-first by birth time, as the tab-separated stream Provider.qml parses:
     D<TAB>key                                        a notebook ("" = root)
     O<TAB>key<TAB>name                               saved note order (.order)
     N<TAB>key<TAB>path<TAB>title<TAB>preview<TAB>size<TAB>mtime_ns
+    X<TAB>key<TAB>reason                             a notebook that could not be read
+    E<TAB>complete | E<TAB>partial<TAB>reason        always the last line
+
+The last line says whether the rest can be trusted. A listing has a byte
+budget and a deadline, and one that reaches either stops there and says
+so: the rows it got are real, but a note it never reached is not gone, and
+an order written from such a list would drop every note it did not name.
+A notebook that could not be read is reported the same way, per notebook,
+rather than listed as empty. A stream with no last line is a listing that
+died, and is not a list at all.
 
 The birth time comes from statx(2), not from os.stat(): a stat_result only
 carries st_birthtime where the platform's own struct stat does, which on Linux
@@ -44,6 +54,7 @@ import notefile  # noqa: E402
 HEAD_BYTES = 4096          # of a note: the front matter and the first content line
 ORDER_BYTES = 256 * 1024   # .order / .notebooks hold file names, one per line
 DEADLINE = 10.0            # seconds for the whole listing; expired = partial list
+END_BYTES = 256            # kept back from the budget so the last line always fits
 
 AT_FDCWD = -100            # statx: resolve a relative path against the cwd
 AT_SYMLINK_NOFOLLOW = 0x100
@@ -132,65 +143,76 @@ def head_of(path, deadline):
     return title, notefile.preview(body)
 
 
+class Cut(Exception):
+    """The listing stopped short — the byte budget or the deadline — and
+    says so in its last line."""
+
+
 def main():
     root, budget = sys.argv[1], int(sys.argv[2])
     deadline = time.monotonic() + DEADLINE
     os.makedirs(root, exist_ok=True)
     out = sys.stdout.buffer
 
-    left = budget
-
+    left = budget - END_BYTES
     def emit(*fields):
         # The output cap cuts between lines, never through one: the parser
-        # must not see half an N record.
+        # must not see half an N record. A field never holds a tab or a
+        # newline of its own.
         nonlocal left
-        line = ("\t".join(fields) + "\n").encode()
+        line = ("\t".join(" ".join(field.split()) for field in fields) + "\n").encode()
         if len(line) > left:
-            return False
+            raise Cut("the listing is larger than %d bytes" % budget)
         left -= len(line)
         out.write(line)
-        return True
 
     def lines_of(path):
         raw = read_capped(path, ORDER_BYTES, deadline)
         return [l for l in raw.decode("utf-8", "replace").split("\n") if l]
 
-    for name in lines_of(os.path.join(root, ".notebooks")):
-        emit("B", name)
+    try:
+        for name in lines_of(os.path.join(root, ".notebooks")):
+            emit("B", name)
 
-    for key in notebook_keys(root):
-        d = os.path.join(root, key) if key else root
-        emit("D", key)
-        for name in lines_of(os.path.join(d, ".order")):
-            emit("O", key, name)
-        notes = []
-        try:
-            with os.scandir(d) as it:
-                for entry in it:
-                    if not entry.name.endswith(".md"):
-                        continue
-                    try:
-                        st = entry.stat(follow_symlinks=False)
-                    except OSError:
-                        continue
-                    if not stat.S_ISREG(st.st_mode):
-                        continue
-                    path = os.path.join(d, entry.name)
-                    # Same-second ties break on the modification time and then
-                    # on the name, all three compared as the numbers and the
-                    # string they are. Nothing here is formatted first: a key
-                    # built as text sorted a 9-byte note after an 80-byte one
-                    # and reshuffled the list as a note was typed into.
-                    notes.append(((birth_time(path) or int(st.st_mtime),
-                                   int(st.st_mtime), entry.name),
-                                  st.st_size, st.st_mtime_ns, path))
-        except OSError:
-            continue
-        for _, size, mtime, path in sorted(notes):
-            if time.monotonic() > deadline:
-                return
-            title, preview = head_of(path, deadline)
-            emit("N", key, path, title, preview, str(size), str(mtime))
+        for key in notebook_keys(root):
+            d = os.path.join(root, key) if key else root
+            emit("D", key)
+            for name in lines_of(os.path.join(d, ".order")):
+                emit("O", key, name)
+            notes = []
+            try:
+                with os.scandir(d) as it:
+                    for entry in it:
+                        if not entry.name.endswith(".md"):
+                            continue
+                        try:
+                            st = entry.stat(follow_symlinks=False)
+                        except OSError:
+                            continue
+                        if not stat.S_ISREG(st.st_mode):
+                            continue
+                        path = os.path.join(d, entry.name)
+                        # Same-second ties break on the modification time and then
+                        # on the name, all three compared as the numbers and the
+                        # string they are. Nothing here is formatted first: a key
+                        # built as text sorted a 9-byte note after an 80-byte one
+                        # and reshuffled the list as a note was typed into.
+                        notes.append(((birth_time(path) or int(st.st_mtime),
+                                       int(st.st_mtime), entry.name),
+                                      st.st_size, st.st_mtime_ns, path))
+            except OSError as error:
+                # Unknown, not empty: nothing is written for this notebook.
+                emit("X", key, error.strerror or "the notebook could not be read")
+                continue
+            for _, size, mtime, path in sorted(notes):
+                if time.monotonic() > deadline:
+                    raise Cut("the listing took longer than %d seconds" % int(DEADLINE))
+                title, preview = head_of(path, deadline)
+                emit("N", key, path, title, preview, str(size), str(mtime))
+    except Cut as cut:
+        out.write(("E\tpartial\t" + str(cut) + "\n").encode())
+        return
+    out.write(b"E\tcomplete\n")
 
 
 if __name__ == "__main__":

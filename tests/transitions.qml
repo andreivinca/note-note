@@ -783,6 +783,23 @@ ShellRoot {
           creations.join(",") === "local:section:Work,local:Travel")
     check("local supplies both footer actions",
           folders.sections[0].footerActions.map(function(action) { return action.path }).join(",") === "newNote,newNotebook")
+    // A listing cut short keeps the model it had and writes no order from
+    // what it did reach; a whole listing lifts both holds.
+    var said = []
+    folders.statusRequested.connect(function(text) { said.push(text) })
+    var record = function(name) { return "N\tWork\t/notes/Work/" + name + ".md\t" + name + "\t\t1\t1" }
+    folders.loadList(["D\tWork", record("one"), record("two"), "E\tcomplete"].join("\n") + "\n")
+    check("a whole listing is trusted", folders.listingComplete && folders.notes.length === 2 && folders.orderWritable("Work"))
+    folders.loadList(["D\tWork", record("one"), "E\tpartial\tthe listing is larger than 10 bytes"].join("\n") + "\n")
+    check("a partial listing keeps the notes already known", !folders.listingComplete && folders.notes.length === 2)
+    folders.persistOrder("Work")
+    check("no order is written from a partial listing",
+          !folders.orderWritable("Work") && said[said.length - 1].indexOf("order was not saved") >= 0, said.join("|"))
+    folders.loadList(["D\tWork", "X\tWork\tPermission denied", "D\tOther", record("three").replace(/Work/g, "Other"), "E\tcomplete"].join("\n") + "\n")
+    check("an unreadable notebook keeps its order while the rest is trusted",
+          folders.listingComplete && !folders.orderWritable("Work") && folders.orderWritable("Other"))
+    folders.loadList(["D\tWork", "E\tcomplete"].join("\n").replace("E\tcomplete", "") + "\n")
+    check("a listing without its last line changes nothing", said[said.length - 1].indexOf("ended before") >= 0 && folders.notes.length === 1)
     folders.destroy()
 
     // An account answer that is not "signed out" — a probe that failed, a

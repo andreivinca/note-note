@@ -299,7 +299,7 @@ These suites need no shell, a display, an account or the
 network — every request is answered by a stub:
 
 ```bash
-python3 providers/local/selftest.py       # the listing's order, and statx(2)
+python3 providers/local/selftest.py       # the listing's order, statx(2), and its last line
 python3 providers/notion/selftest.py      # a page is never emptied to save it
 python3 providers/sticky/selftest.py      # a cut note opens read-only, never as a partial note
 python3 providers/onenote/selftest.py     # which writes may be run again
@@ -317,6 +317,13 @@ Each pins a bug that shipped, and was found by a review of the Python:
   through to a tie-break that compared *size as text*, so a note reordered
   itself as it was typed into. It checks the `struct statx` layout as well,
   since an offset wrong by eight bytes still hands back a plausible timestamp.
+- **`providers/local/selftest.py`, the listing's last line** — a listing
+  that reaches its byte budget or its deadline ends with `E partial` and
+  the reason, a notebook it cannot read is an `X` record rather than an
+  empty notebook, and a whole listing ends with `E complete`. The provider
+  writes no `.order` from anything else: a cut listing used to look exactly
+  like a whole one, and the order file was rewritten without every note it
+  had not reached.
 - **`providers/sticky/selftest.py`** — a note longer than the provider's
   256 KiB ceiling is cut to it and says so (`truncatedAt`), and the
   provider opens such a note read-only with the reason. It used to open

@@ -291,6 +291,56 @@ def test_fallback(directory, verbose):
     return failures
 
 
+def stream(root, budget):
+    """The raw lines list.py emits for `root` under a byte budget."""
+    done = subprocess.run([sys.executable, os.path.join(HERE, "list.py"), root, str(budget)],
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+    if done.returncode != 0:
+        raise RuntimeError(done.stderr.decode()[-400:])
+    return [line for line in done.stdout.decode().split("\n") if line]
+
+
+FIELDS = {"B": 2, "D": 2, "O": 3, "N": 7, "X": 3}
+
+
+def test_listing_end_record(directory, verbose):
+    """The last line says whether the listing can be trusted. Cut by its
+    budget, a listing used to look exactly like a complete one, and the
+    order file was then rewritten from it without the notes it never
+    reached; a notebook it could not read was listed as empty."""
+    root = os.path.join(directory, "ending")
+    os.makedirs(os.path.join(root, "Book"))
+    for index in range(6):
+        note(root, "note-%d.md" % index, 20)
+        note(os.path.join(root, "Book"), "book-%d.md" % index, 20)
+    failures = 0
+    whole = stream(root, 1000000)
+    failures += check("a whole listing ends by saying so", whole[-1] == "E\tcomplete", repr(whole[-1:]))
+    failures += check("a whole listing names every note", sum(line.startswith("N\t") for line in whole) == 12)
+    cut = stream(root, 700)
+    failures += check("a listing over its budget ends by saying so and why",
+                      cut[-1].startswith("E\tpartial\tthe listing is larger than 700"), repr(cut[-1:]))
+    failures += check("a cut listing stops short rather than growing past its budget",
+                      0 < sum(line.startswith("N\t") for line in cut) < 12, repr(cut))
+    failures += check("every line of a cut listing is a whole record",
+                      all(len(line.split("\t")) == FIELDS[line[0]] for line in cut[:-1]), repr(cut))
+    if os.geteuid() == 0:
+        skipped("an unreadable notebook", "running as root, which can read anything")
+    else:
+        os.chmod(os.path.join(root, "Book"), 0)
+        try:
+            shut = stream(root, 1000000)
+        finally:
+            os.chmod(os.path.join(root, "Book"), 0o700)
+        failures += check("an unreadable notebook is reported, not listed as empty",
+                          any(line.startswith("X\tBook\t") for line in shut)
+                          and not any(line.startswith("N\tBook\t") for line in shut), repr(shut))
+        failures += check("the rest of the listing is still complete", shut[-1] == "E\tcomplete")
+    print("the listing's last line")
+    print("  %d checks failed" % failures if failures else "  all green")
+    return failures
+
+
 def test_image_escape(directory, verbose):
     """An `<img src>` that climbs out of the note's folder measures nothing."""
     failures = 0
@@ -332,6 +382,7 @@ def main():
         total += test_numeric_key(directory, args.verbose)
         total += test_fallback(directory, args.verbose)
         total += test_image_escape(directory, args.verbose)
+        total += test_listing_end_record(directory, args.verbose)
 
     if FAILURES:
         print("\n%d failure(s):" % len(FAILURES))
