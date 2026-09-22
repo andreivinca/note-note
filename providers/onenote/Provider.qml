@@ -82,7 +82,8 @@ Item {
   }
 
   readonly property string dir: Platform.localPath(Qt.resolvedUrl(".")).replace(/\/$/, "")
-  readonly property string script: dir + "/onenote.py"
+  // The backend script; a test hands in a stand-in.
+  property string script: dir + "/onenote.py"
 
   signal updated()
   signal statusRequested(string text)
@@ -570,12 +571,56 @@ Item {
             root.searchInventoryReady = true
             root.searchInventoryComplete = r.inventoryComplete === true
           }
-          if (Array.isArray(r.sectionOrderWarnings) && r.sectionOrderWarnings.length) {
-            root.statusRequested("OneNote section order: " + r.sectionOrderWarnings.join("; "))
-          }
+          root.listed(r)
         }
         root.rebuild()
       })
+  }
+
+  // Every listing answer passes through here: it is the newest word on the
+  // sections, and it says whether the section-order pass is due.
+  property int listingSerial: 0
+  function listed(answer) {
+    root.supersedeOrderPass()
+    if (answer.sectionOrderPending === true) {
+      root.establishOrder()
+    }
+  }
+
+  // The custom section order is established after the listing, beside the
+  // lane (docs/onenote-section-order.md): the OneDrive metadata it reads
+  // can take a while, and neither the pages nor a note wait for it. A
+  // newer listing, or a sign-out, supersedes a pass under way — its answer
+  // would be for sections that are no longer the newest word — and a
+  // listing that is due one asks for its own.
+  ProcessRunner { id: orderRunner }
+  property var orderPass: null
+  function supersedeOrderPass() {
+    root.listingSerial++
+    if (root.orderPass) {
+      root.orderPass.cancel()
+      root.orderPass = null
+    }
+  }
+  function establishOrder() {
+    var serial = root.listingSerial
+    root.orderPass = root.runProcess(orderRunner, ["section-order"], "", function(result) {
+      if (serial !== root.listingSerial) {
+        return
+      }
+      root.orderPass = null
+      if (result.error) {
+        root.statusRequested("OneNote section order: " + result.error)
+        return
+      }
+      if (Array.isArray(result.sections)) {
+        root.onSections = result.sections
+      }
+      if (Array.isArray(result.sectionOrderWarnings) && result.sectionOrderWarnings.length) {
+        root.statusRequested("OneNote section order: " + result.sectionOrderWarnings.join("; "))
+      }
+      root.rebuild()
+    })
   }
 
   SearchCache {
@@ -628,6 +673,7 @@ Item {
       root.saveVersions = ({})
     }
     function onSignedOut() {
+      root.supersedeOrderPass()
       root.onSections = []
       root.pages = []
       root.bodies = ({})
@@ -913,6 +959,7 @@ Item {
           root.searchInventoryReady = res.inventoryReady === true
           root.searchInventoryComplete = res.inventoryComplete === true
         }
+        root.listed(res)
       }
       root.rebuild()
     }

@@ -46,12 +46,15 @@ msgraph.SCOPES = " ".join(scope for scope in msgraph.SCOPES.split() if scope != 
 msgraph.OPTIONAL_SCOPES = "Files.Read"
 
 ONENOTE_CACHE = os.path.join(CACHE_DIR, "note-note-onenote.json")
+# The custom section order the last pass established (cmd_section_order):
+# a file of its own, since the pass runs beside the listing, not inside it.
+ONENOTE_ORDER = os.path.join(CACHE_DIR, "note-note-onenote-order.json")
 ONENOTE_IMG_DIR = os.path.join(CACHE_DIR, "note-note-onenote-img")
 # This provider's limits: what it will read from Graph and keep around.
 MAX_SECTIONS = 500
 MAX_PAGES = 3000
 MAX_LIST_BODY = 4 * 1024 * 1024   # one page of a listing
-SECTION_ORDER_VERSION = 3       # invalidates listings ordered before repeated numbers and several TOCs were accepted
+SECTION_ORDER_VERSION = 3       # invalidates an order established before repeated numbers and several TOCs were accepted
 MAX_ORDER_CACHE = 1024 * 1024
 MAX_PAGE_HTML = 4 * 1024 * 1024   # a page's content
 MAX_IMAGE = 20 * 1024 * 1024      # one cached image
@@ -147,18 +150,35 @@ def current_session():
 
 
 def load_listing(default=None):
-    cached = load_json(ONENOTE_CACHE, None)
+    return load_for_session(ONENOTE_CACHE, default)
+
+
+def save_listing(cached):
+    save_for_session(ONENOTE_CACHE, cached)
+
+
+def load_order():
+    return load_for_session(ONENOTE_ORDER, {})
+
+
+def save_order(order):
+    save_for_session(ONENOTE_ORDER, order)
+
+
+def load_for_session(path, default):
+    """A cache of the signed-in account's; another account's stays unread."""
+    cached = load_json(path, None)
     if not isinstance(cached, dict) or cached.get("cacheSession", "") != current_session():
         return default
     return cached
 
 
-def save_listing(cached):
+def save_for_session(path, data):
     session = os.environ.get("NOTE_NOTE_MS_CACHE_SESSION") or current_session()
     if session != current_session():
         return
-    cached["cacheSession"] = session
-    save_private(ONENOTE_CACHE, cached)
+    data["cacheSession"] = session
+    save_private(path, data)
 
 
 def search_ticket(page_id):
@@ -236,15 +256,53 @@ def has_section_order_scope():
         return False
 
 
-def alphabetical_sections(sections):
-    """Sort within each notebook, preserving notebook slots and all Graph data."""
+def name_key(section):
+    return section["name"].casefold(), section["name"], section["id"]
+
+
+def by_notebook(sections):
     books = {}
     for section in sections:
         books.setdefault(section["notebookId"], []).append(section)
-    ordered = {key: iter(sorted(members, key=lambda section:
-                               (section["name"].casefold(), section["name"], section["id"])))
-               for key, members in books.items()}
-    return [next(ordered[section["notebookId"]]) for section in sections]
+    return books
+
+
+def in_notebook_slots(sections, arranged):
+    """The sections with each notebook's members in `arranged` order, the
+    notebooks themselves in the slots Graph gave them."""
+    members = {key: iter(value) for key, value in arranged.items()}
+    return [next(members[section["notebookId"]]) for section in sections]
+
+
+def alphabetical_sections(sections):
+    """Sort within each notebook, preserving notebook slots and all Graph data."""
+    return in_notebook_slots(sections, {key: sorted(members, key=name_key)
+                                        for key, members in by_notebook(sections).items()})
+
+
+def order_matches(order):
+    """Whether the order file was written under the present policy and consent."""
+    return (isinstance(order, dict) and order.get("version") == SECTION_ORDER_VERSION
+            and order.get("scope") == has_section_order_scope())
+
+
+def remembered_order(sections, order):
+    """Graph's sections in the order the last pass established (the order
+    file). Within each notebook the sections the pass placed come first, by
+    position, then the ones it has not seen, A-Z: a new section waits at the
+    end for the pass that follows the listing. Without consent, or with an
+    order file from another policy or consent state, A-Z throughout - no
+    stale custom sequence is kept. Notebooks keep their Graph slots."""
+    positions = order.get("positions") if order_matches(order) and order.get("scope") else None
+    if not isinstance(positions, dict):
+        return alphabetical_sections(sections)
+    arranged = {}
+    for key, members in by_notebook(sections).items():
+        placed = [section for section in members if isinstance(positions.get(section["id"]), int)]
+        placed.sort(key=lambda section: positions[section["id"]])
+        waiting = sorted([section for section in members if section not in placed], key=name_key)
+        arranged[key] = placed + waiting
+    return in_notebook_slots(sections, arranged)
 
 
 def ordered_sections(sections, cache, token):
@@ -283,7 +341,7 @@ class Listing:
     """The listing cache, and what a re-listing may skip.
 
     Two things are folded in here, and both exist to spend fewer requests on
-    an account that has not changed (section-order metadata is checked too):
+    an account that has not changed:
 
     **Continue, never restart.** Each section's pages are written into the
     cache as its request comes back, with the section's own
@@ -299,9 +357,6 @@ class Listing:
 
     def __init__(self, cache, sections):
         self.sections = sections
-        self.section_orders = cache.get("sectionOrders", {})
-        self.order_warnings = cache.get("sectionOrderWarnings", [])
-        self.order_scope = has_section_order_scope()
         self.by_section = {}
         for pg in (cache.get("pages") or []):
             self.by_section.setdefault(pg.get("sectionId", ""), []).append(pg)
@@ -337,12 +392,8 @@ class Listing:
             self.fetched = time.time()
         os.makedirs(CACHE_DIR, exist_ok=True)
         save_listing({"sections": self.sections, "pages": self.pages(),
-                                     "sectionPages": self.seen, "fetched": self.fetched,
-                                     "sectionOrders": self.section_orders,
-                                     "sectionOrderVersion": SECTION_ORDER_VERSION,
-                                     "sectionOrderScope": self.order_scope,
-                                     "sectionOrderWarnings": self.order_warnings,
-                                     "inventoryComplete": complete and self.within_limits()})
+                      "sectionPages": self.seen, "fetched": self.fetched,
+                      "inventoryComplete": complete and self.within_limits()})
         self.last_write = time.monotonic()
 
     def within_limits(self):
@@ -356,23 +407,21 @@ class Listing:
 
 
 def cmd_onenote_list(cached, max_age=0, force=False):
+    """The account's sections and pages. The custom section order is not
+    established here: the listing answers in the order the last pass left
+    (remembered_order) and says when a pass is due - after every network
+    listing, and whenever the order file no longer matches the policy or
+    the consent - and the provider runs `section-order` beside it."""
     c = load_listing()
-    order_scope = has_section_order_scope()
-    current_order = (isinstance(c, dict) and c.get("sectionOrderVersion") == SECTION_ORDER_VERSION
-                     and c.get("sectionOrderScope") == order_scope)
-    if cached or (max_age and c and current_order
-                  and time.time() - c.get("fetched", 0) < max_age):
+    order = load_order()
+    if cached or (max_age and c and time.time() - c.get("fetched", 0) < max_age):
         inventory_ready = c is not None
         c = c or {"sections": [], "pages": []}
         sections = c.get("sections", [])
-        warnings = c.get("sectionOrderWarnings", [])
-        if not current_order or not order_scope:
-            sections = alphabetical_sections(sections)
-            warnings = ["Custom section order unavailable; sections sorted alphabetically"] if sections else []
-        out({"sections": sections, "pages": c.get("pages", []), "cached": True,
-             "inventoryReady": inventory_ready,
+        out({"sections": remembered_order(sections, order), "pages": c.get("pages", []),
+             "cached": True, "inventoryReady": inventory_ready,
              "inventoryComplete": c.get("inventoryComplete", False),
-             "sectionOrderWarnings": warnings})
+             "sectionOrderPending": bool(sections) and not order_matches(order)})
         return
     sections = []
     url = ("/me/onenote/sections?$select=id,displayName,lastModifiedDateTime,parentNotebook"
@@ -387,15 +436,10 @@ def cmd_onenote_list(cached, max_age=0, force=False):
                              "notebookId": (sct.get("parentNotebook") or {}).get("id", ""),
                              "modified": sct.get("lastModifiedDateTime", "")})
         url = res.get("@odata.nextLink")
-    sections = sections[:MAX_SECTIONS]
+    sections = remembered_order(sections[:MAX_SECTIONS], order)
     cache = c if isinstance(c, dict) else {}
-    # This token has already worked for normal notes. Optional metadata uses
-    # the snapshot as-is; it cannot refresh or invalidate the account.
     token = access_token()
-    sections, orders, warnings = ordered_sections(sections, cache.get("sectionOrders"), token)
     listing = Listing(cache, sections)
-    listing.section_orders = orders
-    listing.order_warnings = warnings
     todo = [sct for sct in sections if listing.stale(sct, force)]
 
     # Pages are listed per section: the account-wide /me/onenote/pages call
@@ -455,7 +499,29 @@ def cmd_onenote_list(cached, max_age=0, force=False):
     listing.save(True)
     out({"sections": sections, "pages": listing.pages(), "cached": False,
          "inventoryComplete": listing.within_limits(),
-         "sectionOrderWarnings": listing.order_warnings})
+         "sectionOrderPending": bool(sections)})
+
+
+def cmd_section_order():
+    """Establish the custom section order for the listing in the cache. Runs
+    after the listing and beside the note lane, on the provider's word: the
+    OneDrive metadata it reads can take a while, and neither the pages nor a
+    note may wait for it (docs/onenote-section-order.md). The order goes to
+    its own file - positions by section id, the TOC metadata the next pass
+    may reuse, and the warnings - and the answer is the listing's sections
+    as they stand now, in that order: a listing that landed meanwhile keeps
+    its newer sections, waiting after the placed ones."""
+    sections = (load_listing() or {}).get("sections", [])
+    scope = has_section_order_scope()
+    # This token has already worked for normal notes. Optional metadata uses
+    # the snapshot as-is; it cannot refresh or invalidate the account.
+    token = access_token() if sections and scope else ""
+    ordered, metadata, warnings = ordered_sections(sections, load_order().get("metadata"), token)
+    order = {"version": SECTION_ORDER_VERSION, "scope": scope, "metadata": metadata, "warnings": warnings,
+             "positions": {section["id"]: index for index, section in enumerate(ordered)}}
+    save_order(order)
+    latest = (load_listing() or {}).get("sections", sections)
+    out({"sections": remembered_order(latest, order), "sectionOrderWarnings": warnings})
 
 
 # Page images are only ever fetched from Graph's own resource endpoint, with
@@ -1093,6 +1159,8 @@ def main(argv):
             except (IndexError, ValueError):
                 age = 0
         cmd_onenote_list("--cached" in argv[2:], age, "--force" in argv[2:])
+    elif cmd == "section-order":
+        cmd_section_order()
     elif cmd == "pages" and len(argv) >= 3:
         cmd_onenote_pages(argv[2:])
     elif cmd == "page" and len(argv) >= 3:
@@ -1115,13 +1183,14 @@ def main(argv):
         search_index.Index(CACHE_DIR, argv[2]).clear()
         out({"ok": True})
     elif cmd == "clear-cache":
-        try:
-            os.remove(ONENOTE_CACHE)
-        except OSError:
-            pass
+        for path in (ONENOTE_CACHE, ONENOTE_ORDER):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
         out({"ok": True})
     else:
-        fail("usage: onenote.py list [--cached|--max-age S|--force]|page <id>|update <id> <file>|create <sectionId> <file>|delete <id>|create-section <notebookId> <file>|clear-cache", 2)
+        fail("usage: onenote.py list [--cached|--max-age S|--force]|section-order|page <id>|update <id> <file>|create <sectionId> <file>|delete <id>|create-section <notebookId> <file>|clear-cache", 2)
 
 
 if __name__ == "__main__":

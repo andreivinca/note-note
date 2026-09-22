@@ -65,6 +65,16 @@ def main():
             "           'signed-out': '{\"configured\": true, \"signedIn\": false}',\n"
             "           'garbage': 'not json at all', 'error': '{\"error\": \"boom\"}'}\n"
             "sys.stdout.write(answers[owner])\n")
+        # A stand-in for onenote.py as the provider drives it: a cached listing
+        # that says a section-order pass is due, and the pass's answer.
+        (work / "onenote_stub.py").write_text(
+            "import json, sys\n"
+            "b = {'id': 'b', 'name': 'B', 'notebookId': 'n', 'notebook': 'N'}\n"
+            "a = {'id': 'a', 'name': 'A', 'notebookId': 'n', 'notebook': 'N'}\n"
+            "answers = {'list': {'sections': [b, a], 'pages': [], 'cached': True, 'inventoryReady': True,\n"
+            "                    'inventoryComplete': True, 'sectionOrderPending': True},\n"
+            "           'section-order': {'sections': [a, b], 'sectionOrderWarnings': ['N: placed by the pass']}}\n"
+            "sys.stdout.write(json.dumps(answers[sys.argv[1]]))\n")
         (work / "notes/Broken").write_text("a file, not a notebook")
         (work / "notes/External.md").write_text("---\ntitle: External original\n---\noriginal")
         (work / "notes/Large.md").write_text("漢" * 700000, encoding="utf-8")
@@ -77,6 +87,7 @@ def main():
                    XDG_CONFIG_HOME=str(work / "config"), XDG_CACHE_HOME=str(work / "cache"),
                    XDG_STATE_HOME=str(work / "state"), NOTE_NOTE_TEST_DIR=str(work / "notes"),
                    NOTE_NOTE_TEST_STATUS_SCRIPT=str(work / "status_stub.py"),
+                   NOTE_NOTE_TEST_ONENOTE_SCRIPT=str(work / "onenote_stub.py"),
                    NOTE_NOTE_TEST_TOOLS=(tool_ui / "tools").as_uri(),
                    NOTE_NOTE_TEST_INVALID_TOOLS=invalid_tools.as_uri(),
                    NOTE_NOTE_TEST_TOOLS_ONLY="1" if "--tools" in sys.argv else "",

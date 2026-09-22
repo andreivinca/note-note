@@ -86,13 +86,20 @@ app-registration permission edit (tenant consent policies still apply).
   Downloads metadata from signed Microsoft URLs without the bearer token,
   redirects or logging credentials. Parsed entries are reused by TOC eTag;
   no note bodies or manual order are stored by this feature.
-- `onenote.py` preserves parsed metadata through partial listing checkpoints.
-  Its independent alphabetical fallback wraps even the optional imports and
+- `onenote.py` runs the order as a pass of its own (`section-order`), after
+  the listing and beside the note lane, on the provider's word: the pages
+  never wait for OneDrive metadata. The pass keeps its state in its own file
+  (positions by section id, the parsed TOC metadata reused by eTag, and the
+  warnings), and the listing answers in the order the last pass left, a
+  section the pass has not placed yet following its notebook's placed ones
+  until the pass that follows the listing places it. An order file from
+  another policy version or consent state is not applied. The pass's
+  independent alphabetical fallback wraps even the optional imports and
   initialization. It accepts only a permutation of the original Graph sections;
   optional code cannot replace section data or membership. Graph remains
-  authoritative for page order. The previous fallback cache policy is invalidated.
-  Optional stdout is discarded so even a print-then-exit failure cannot corrupt
-  the provider's JSON reply or expose its exception payload.
+  authoritative for page order. Optional stdout is discarded so even a
+  print-then-exit failure cannot corrupt the provider's JSON reply or expose
+  its exception payload.
 - `section_order.py` requires a position for every live child and matching
   IDs/names for every Graph section. Order numbers may repeat or skip, as the
   web client writes both; equal numbers keep the order the TOC lists them in,

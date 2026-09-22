@@ -274,15 +274,14 @@ class OrderingTests(unittest.TestCase):
         self.assertEqual(reader.folder(BOOK[2:]), ["0-food", "0-child"])
         self.assertNotIn("bin", reader.visited)
 
-    def test_listing_checkpoint_preserves_order_cache_and_page_order(self):
-        result, cached, _ = order.arrange(sections(), remote=Remote())
+    def test_listing_checkpoint_preserves_section_and_page_order(self):
+        result, _, _ = order.arrange(sections(), remote=Remote())
         pages = [{"id": "second", "sectionId": result[0]["id"]},
                  {"id": "first", "sectionId": result[0]["id"]}]
-        listing = onenote.Listing({"pages": pages, "sectionOrders": cached}, result)
+        listing = onenote.Listing({"pages": pages}, result)
         with patch.object(onenote, "save_private") as save, patch.object(onenote.os, "makedirs"):
             listing.save(False)
         data = save.call_args.args[1]
-        self.assertEqual(data["sectionOrders"], cached)
         self.assertEqual(data["sections"], result)
         self.assertEqual(data["pages"], pages)
 
@@ -386,42 +385,111 @@ class BoundaryTests(unittest.TestCase):
             self.assertEqual(arranged, alphabetical())
             self.assertTrue(warnings)
 
-    def test_workaround_failure_does_not_abort_page_listing_or_checkpoint(self):
+    def files(self, listing=None):
+        """The cache files on disk, as the commands read and write them."""
+        files = {}
+        if listing is not None:
+            files[onenote.ONENOTE_CACHE] = listing
+        return files
+
+    def on_disk(self, stack, files):
+        stack.enter_context(patch.object(onenote, "load_json", side_effect=lambda path, default=None: files.get(path, default)))
+        stack.enter_context(patch.object(onenote, "save_private", side_effect=files.__setitem__))
+        stack.enter_context(patch.object(onenote.os, "makedirs"))
+
+    def test_listing_answers_pages_before_any_order_pass(self):
         source = sections()
         graph_sections = [{"id": section["id"], "displayName": section["name"],
                            "lastModifiedDateTime": "stamp", "parentNotebook": {"id": BOOK, "displayName": "Test"}}
                           for section in source]
         printed = io.StringIO()
+        files = self.files()
         with contextlib.ExitStack() as stack:
             stack.enter_context(patch.object(onenote, "has_section_order_scope", return_value=True))
-            stack.enter_context(patch.object(onenote, "load_json", return_value={}))
+            self.on_disk(stack, files)
             stack.enter_context(patch.object(onenote, "access_token", return_value="token"))
             stack.enter_context(patch.object(onenote, "graph", return_value=(200, {"value": graph_sections})))
             http = stack.enter_context(patch.object(onenote, "http", return_value=(200, {"value": [
                 {"id": "z", "title": "Z first"}, {"id": "a", "title": "A second"}]})))
-            save = stack.enter_context(patch.object(onenote, "save_private"))
-            stack.enter_context(patch.object(onenote.os, "makedirs"))
-            stack.enter_context(patch.object(order, "arrange", side_effect=RuntimeError("secret-url")))
+            arrange = stack.enter_context(patch.object(order, "arrange", side_effect=RuntimeError("secret-url")))
             stack.enter_context(contextlib.redirect_stdout(printed))
             onenote.cmd_onenote_list(False)
         reply = json.loads(printed.getvalue())
+        arrange.assert_not_called()
         self.assertEqual(reply["sections"], alphabetical())
+        self.assertTrue(reply["sectionOrderPending"])
         self.assertEqual(http.call_count, len(source))
         self.assertTrue(all("$orderby=order" in call.args[1] for call in http.call_args_list))
         self.assertEqual([page["id"] for page in reply["pages"]], ["z", "a"] * len(source))
-        self.assertEqual(save.call_args.args[1]["sections"], alphabetical())
+        self.assertEqual(files[onenote.ONENOTE_CACHE]["sections"], alphabetical())
+        self.assertNotIn("sectionOrders", files[onenote.ONENOTE_CACHE])
+
+    def test_order_pass_writes_its_file_and_the_listing_follows_it(self):
+        expected, _, _ = order.arrange(sections(), remote=Remote())
+        files = self.files({"sections": list(reversed(sections())), "pages": [], "fetched": time.time()})
+        printed = io.StringIO()
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch.object(onenote, "has_section_order_scope", return_value=True))
+            self.on_disk(stack, files)
+            stack.enter_context(patch.object(onenote, "access_token", return_value="token"))
+            stack.enter_context(patch.object(order, "Remote", side_effect=lambda token: Remote()))
+            stack.enter_context(contextlib.redirect_stdout(printed))
+            onenote.cmd_section_order()
+            passed = json.loads(printed.getvalue())
+            printed.seek(0)
+            printed.truncate()
+            onenote.cmd_onenote_list(True)
+            listed = json.loads(printed.getvalue())
+        self.assertEqual(passed["sections"], expected)
+        self.assertEqual(passed["sectionOrderWarnings"], [])
+        order_file = files[onenote.ONENOTE_ORDER]
+        self.assertEqual(order_file["version"], onenote.SECTION_ORDER_VERSION)
+        self.assertTrue(order_file["scope"])
+        self.assertTrue(order_file["metadata"]["files"])
+        self.assertEqual([section["id"] for section in expected],
+                         sorted(order_file["positions"], key=order_file["positions"].get))
+        self.assertEqual(listed["sections"], expected)
+        self.assertFalse(listed["sectionOrderPending"])
+
+    def test_order_pass_failure_is_alphabetical_and_contained(self):
+        files = self.files({"sections": list(reversed(sections())), "pages": []})
+        printed = io.StringIO()
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch.object(onenote, "has_section_order_scope", return_value=True))
+            self.on_disk(stack, files)
+            stack.enter_context(patch.object(onenote, "access_token", return_value="token"))
+            stack.enter_context(patch.object(order, "arrange", side_effect=RuntimeError("secret-url")))
+            stack.enter_context(contextlib.redirect_stdout(printed))
+            onenote.cmd_section_order()
+        reply = json.loads(printed.getvalue())
+        self.assertEqual(reply["sections"], alphabetical())
         self.assertTrue(reply["sectionOrderWarnings"])
         self.assertNotIn("secret-url", printed.getvalue())
+        self.assertEqual(files[onenote.ONENOTE_ORDER]["metadata"], {})
+
+    def test_a_section_the_pass_has_not_placed_follows_the_placed(self):
+        placed = [{"id": "p2", "name": "Zed", "notebookId": BOOK}, {"id": "p1", "name": "Mid", "notebookId": BOOK}]
+        new = {"id": "n", "name": "Alpha", "notebookId": BOOK}
+        order_file = {"version": onenote.SECTION_ORDER_VERSION, "scope": True, "positions": {"p1": 0, "p2": 1}}
+        with patch.object(onenote, "has_section_order_scope", return_value=True):
+            result = onenote.remembered_order([new] + placed, order_file)
+        self.assertEqual([section["id"] for section in result], ["p1", "p2", "n"])
 
     def test_cached_order_loses_permission_or_old_policy(self):
+        established = list(reversed(sections()))
         for scope, version in [(False, onenote.SECTION_ORDER_VERSION), (True, 1)]:
-            cache = {"sections": list(reversed(sections())), "pages": [], "fetched": time.time(),
-                     "sectionOrderVersion": version, "sectionOrderScope": True}
+            files = {onenote.ONENOTE_CACHE: {"sections": established, "pages": [], "fetched": time.time()},
+                     onenote.ONENOTE_ORDER: {"version": version, "scope": True,
+                                            "positions": {section["id"]: index for index, section in enumerate(established)}}}
             printed = io.StringIO()
-            with patch.object(onenote, "load_json", return_value=cache), patch.object(onenote, "has_section_order_scope", return_value=scope):
-                with contextlib.redirect_stdout(printed):
-                    onenote.cmd_onenote_list(True)
-            self.assertEqual(json.loads(printed.getvalue())["sections"], alphabetical())
+            with contextlib.ExitStack() as stack:
+                self.on_disk(stack, files)
+                stack.enter_context(patch.object(onenote, "has_section_order_scope", return_value=scope))
+                stack.enter_context(contextlib.redirect_stdout(printed))
+                onenote.cmd_onenote_list(True)
+            reply = json.loads(printed.getvalue())
+            self.assertEqual(reply["sections"], alphabetical())
+            self.assertTrue(reply["sectionOrderPending"])
 
     def test_print_then_exit_cannot_corrupt_provider_protocol(self):
         def broken(*args):

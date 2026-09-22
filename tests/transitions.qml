@@ -710,6 +710,40 @@ ShellRoot {
     function relogin() { destructiveLogins++ }
   }
   OneNote.Provider { id: oneNote; ms: oneNoteAccount }
+  // Driven by a stand-in script: the listing lands first, in the order the
+  // last pass left, and the pass that follows places the sections.
+  OneNote.Provider {
+    id: orderProvider
+    ms: oneNoteAccount
+    script: Platform.env("NOTE_NOTE_TEST_ONENOTE_SCRIPT")
+  }
+  function orderCases() {
+    if (!Platform.env("NOTE_NOTE_TEST_ONENOTE_SCRIPT")) {
+      return
+    }
+    var ids = function() {
+      return orderProvider.onSections.map(function(section) { return section.id }).join(",")
+    }
+    var listed = ""
+    var record = function() {
+      if (listed === "" && orderProvider.onSections.length) {
+        listed = ids()
+      }
+    }
+    orderProvider.onSectionsChanged.connect(record)
+    orderProvider.statusRequested.connect(function(text) {
+      if (text.indexOf("section order") < 0) {
+        return
+      }
+      orderProvider.onSectionsChanged.disconnect(record)
+      check("the listing answers before the pass, in the order the last pass left", listed === "b,a")
+      check("the pass places the sections and reports its warnings",
+            ids() === "a,b" && text === "OneNote section order: N: placed by the pass")
+      test.processes--
+    })
+    test.processes++
+    orderProvider.refresh()
+  }
   Notes.NoteSession {
     id: oneNoteSession
     editor: document
@@ -1055,6 +1089,7 @@ ShellRoot {
       lifecycleCases()
       pureCases()
       oneNoteCases()
+      orderCases()
       processCases()
       localCases()
       remoteModelCases()
