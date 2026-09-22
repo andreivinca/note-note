@@ -36,19 +36,19 @@ int main(int argc, char *argv[])
     parser.addOption({QStringLiteral("qml"), QStringLiteral("Run a QML test harness instead of the application."), QStringLiteral("file")});
     parser.process(app);
 
+    // Resources sit next to the executable in the installed layout, which
+    // an archive keeps when it is moved; the configured prefix answers for
+    // an executable copied elsewhere. A build-tree run says where the
+    // source tree is with --data-dir.
     QString dataDir = parser.value(QStringLiteral("data-dir"));
     if (dataDir.isEmpty()) {
-        if (QCoreApplication::applicationDirPath() == QStringLiteral(NOTE_NOTE_BUILD_DIR)) {
-            dataDir = QStringLiteral(NOTE_NOTE_SOURCE_DIR);
-        } else {
-            dataDir = QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral(NOTE_NOTE_DATA_FROM_BIN));
-            if (!QFileInfo::exists(dataDir + QStringLiteral("/Workspace.qml"))) {
-                dataDir = QStringLiteral(NOTE_NOTE_INSTALL_DATA_DIR);
-            }
+        dataDir = QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral(NOTE_NOTE_DATA_FROM_BIN));
+        if (!QFileInfo::exists(dataDir + QStringLiteral("/Workspace.qml"))) {
+            dataDir = QStringLiteral(NOTE_NOTE_INSTALL_DATA_DIR);
         }
     }
     if (!QFileInfo::exists(dataDir + QStringLiteral("/Workspace.qml"))) {
-        qCritical("The Note Note application resources could not be found.");
+        qCritical("The Note Note application resources could not be found; pass --data-dir.");
         return 1;
     }
 

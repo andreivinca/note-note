@@ -23,10 +23,12 @@ add_executable(note-note
     cpp/textblocks.cpp cpp/textblocks.h cpp/textlinks.cpp cpp/textlinks.h
 )
 target_link_libraries(note-note PRIVATE Qt6::Quick Qt6::QuickControls2 Qt6::Network note-note-theme)
+# The executable knows its resources by their place next to it and by the
+# install prefix, never by the tree it was built from: a release binary
+# carries nothing about the build machine, and a build-tree run names the
+# source tree with `--data-dir`.
 target_compile_definitions(note-note PRIVATE
     NOTE_NOTE_VERSION="${PROJECT_VERSION}"
-    NOTE_NOTE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
-    NOTE_NOTE_BUILD_DIR="${CMAKE_CURRENT_BINARY_DIR}"
     NOTE_NOTE_DATA_FROM_BIN="${NOTE_NOTE_DATA_FROM_BIN}"
     NOTE_NOTE_INSTALL_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/note-note"
 )

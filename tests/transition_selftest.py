@@ -97,7 +97,9 @@ def main():
             env["QT_QPA_PLATFORM"] = "wayland"
             env["NOTE_NOTE_TEST_HOST"] = "1"
         try:
-            command = [os.environ.get("NOTE_NOTE_BINARY", str(ROOT / "build/note-note")), "--qml", str(work / "shell.qml")] if standalone else ["qs", "-p", str(work / "shell.qml"), "--no-color"]
+            command = ([os.environ.get("NOTE_NOTE_BINARY", str(ROOT / "build/note-note")), "--data-dir", str(ROOT),
+                        "--qml", str(work / "shell.qml")] if standalone
+                       else ["qs", "-p", str(work / "shell.qml"), "--no-color"])
             proc = subprocess.run(command,
                                   env=env, capture_output=True, text=True, timeout=210)
         except subprocess.TimeoutExpired as error:

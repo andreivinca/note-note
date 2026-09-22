@@ -67,7 +67,7 @@ these default dimensions.
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
-./build/note-note
+./build/note-note --data-dir .
 ctest --test-dir build --output-on-failure
 ```
 
@@ -84,10 +84,11 @@ CMake installs `bin/note-note`, application resources in
 `share/note-note/`, a freedesktop desktop entry and an SVG icon. Keep the
 resources with the executable: Python helpers and external QML providers
 need real files. Installed executables find their resources relative to
-their binary directory, including when the prefix contains spaces. Build
-executables load the source tree; `--data-dir` selects an explicit resource
-directory for development. `--qml` runs isolated test harnesses and bypasses
-single-instance activation.
+their binary directory, including when the prefix contains spaces, and by
+the configured prefix when the executable was copied elsewhere; nothing
+about the machine it was built on is compiled in. A build-tree executable
+is given the source tree with `--data-dir .`. `--qml` runs isolated test
+harnesses and bypasses single-instance activation.
 
 Distribution packagers can configure `CMAKE_INSTALL_PREFIX=/usr` and stage
 the installation with `DESTDIR`. Package the runtime modules and image

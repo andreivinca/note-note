@@ -30,8 +30,8 @@ def wait_for_marker(stream, marker, timeout=5):
     return output.decode(errors="replace")
 
 
-def check_window_close(binary, harness, env, host):
-    command = [str(binary), "--qml", str(harness)]
+def check_window_close(binary, resources, harness, env, host):
+    command = [str(binary), "--data-dir", str(resources), "--qml", str(harness)]
     if not host:
         return subprocess.run(command, env=env, capture_output=True, text=True, timeout=10)
     display = os.environ.get("WAYLAND_DISPLAY")
@@ -171,7 +171,7 @@ def main():
         try:
             source = (ROOT / "tests/standalone_close.qml").read_text()
             harness.write_text(source.replace('"app/', '"' + resources.as_uri() + '/'))
-            proc = check_window_close(binary, harness, env, args.host)
+            proc = check_window_close(binary, resources, harness, env, args.host)
             output = proc.stdout + proc.stderr
             if proc.returncode or "<<<CLOSE_DONE>>>" not in output or any(marker in output for marker in
                     ("FAIL!", "TypeError:", "ReferenceError:", "Binding loop", "Unable to assign", "QML ", "Error:")):
