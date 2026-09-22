@@ -86,6 +86,15 @@ Item {
     session.load(false)
   }
 
+  // Puts the note away for the caller that holds the lock — a settings
+  // commit retiring the provider whose note is open. selectPath refuses
+  // while locked, and it flushes; this does neither: the caller already
+  // saved, and holds the lock for exactly that reason.
+  function putAway() {
+    session.currentPath = ""
+    session.load(false)
+  }
+
   function reloadCurrent() {
     if (!session.locked && !session.dirty && !session.saveInFlight(session.currentPath)) {
       session.load(true)

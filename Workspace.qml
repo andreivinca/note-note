@@ -257,6 +257,24 @@ Item {
   // and a provider's in the same breath, and that is one write, not two.
   property bool stateWriteDue: false
   readonly property int maxStateBytes: 1024 * 1024
+  // Every accepted write has settled: the note's saves, the file store's,
+  // the state file's, each lane's, and each provider's own — the moment a
+  // close may finish and a settings change may commit. Bound to the state
+  // it reads, so those follow the last write rather than poll for it. A
+  // provider without `writeBusy` (an older external one) is waited on by
+  // its `busy`, which covers reads too (PROVIDERS.md).
+  readonly property bool writesSettled: !session.busy && !files.busy && !root.stateWriteDue
+    && !root.providers.some(function(provider) {
+      return provider.writeBusy === true || (provider.writeBusy === undefined && provider.busy === true)
+    })
+    && !root.queueList.some(function(queue) {
+      return queue.writeDepth > 0
+    })
+  // The close follows the settling — once the notification has completed:
+  // finishing a close writes what this state reads (a failed close reopens
+  // the workspace, which refreshes providers and resumes lanes), and a
+  // reaction that writes its own inputs mid-update is a binding loop.
+  onWritesSettledChanged: Qt.callLater(root.finishClose)
 
   signal dismissRequested()
   signal readyToClose()
@@ -323,8 +341,6 @@ Item {
     if (root.closing) {
       return
     }
-
-    root.closing = true
     root.closeError = ""
     root.flushSave()
     root.opened = false
@@ -333,25 +349,26 @@ Item {
     root.pauseQueues(true)
     root.saveState()
     root.showStatus("Saving before closing…")
-    closeDrain.start()
+    // Last, once the flush and the state write are under way: the close
+    // finishes the moment they settle, which may be now.
+    root.closing = true
+    root.finishClose()
   }
 
   function finishClose() {
-    if (session.busy || lifecycle.busy || files.busy || root.stateWriteDue || root.providers.some(root.providerWritesPending)) {
+    if (!root.closing || !root.writesSettled || lifecycle.busy) {
       return
     }
-
     var failure = session.failureFor(root.providers.map(function(provider) {
       return provider.id
     })) || root.closeError
     if (failure || session.dirty) {
-      closeDrain.stop()
       root.closing = false
       root.open("{}")
       root.showStatus(failure || "The note still has unsaved changes")
       return
     }
-    closeDrain.stop()
+    root.closing = false
     root.readyToClose()
   }
 
@@ -861,27 +878,6 @@ Item {
 
   function applySettingsJson(text, callback) {
     lifecycle.apply(text, callback)
-  }
-
-  function providerBusy(provider) {
-    if (provider.busy === true) {
-      return true
-    }
-
-    return root.providerWritesPending(provider)
-  }
-
-  function providerWritesPending(provider) {
-    // Retirement waits for all activity; process exit only waits for writes.
-    // Older external providers retain the conservative busy contract.
-    var busy = typeof provider.writeBusy === "boolean" ? provider.writeBusy : provider.busy
-    if (busy === true) {
-      return true
-    }
-
-    return root.queueList.some(function(queue) {
-      return queue.pendingFor(provider, true) > 0
-    })
   }
 
   function retireProvider(provider) {
@@ -2157,13 +2153,6 @@ Item {
     source: "assets/fonts/nimbus-sans/NimbusSans-BoldItalic.otf"
   }
 
-  Timer {
-    id: closeDrain
-    interval: 50
-    repeat: true
-    onTriggered: root.finishClose()
-  }
-
   // While the app is visible, ask each provider every 20 s whether something
   // changed behind our back. Providers decide what is cheap (see poll()).
   Timer {
@@ -2270,6 +2259,7 @@ Item {
     session: session
     editor: editor
     files: files
+    onBusyChanged: Qt.callLater(root.finishClose)
   }
 
   Timer {

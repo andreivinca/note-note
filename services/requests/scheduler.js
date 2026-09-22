@@ -270,6 +270,8 @@ function cancelJob(state, job) {
 }
 
 function depth(state) { return state.jobs.length + state.running.length }
+// Accepted writes (flush jobs), queued or running: what a close waits on.
+function writeDepth(state) { return state.jobs.concat(state.running).filter(function(job) { return job.flush }).length }
 function cooling(state, nowMs) { return state.cooldownUntil > nowMs }
 function remaining(state, nowMs) { return Math.max(0, state.cooldownUntil - nowMs) / 1000 }
 

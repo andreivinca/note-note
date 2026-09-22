@@ -366,6 +366,7 @@ ShellRoot {
 
   QtObject {
     id: host
+    property bool writesSettled: !session.busy
     property var config: ({ providers: { test: { enabled: true, notebookTabs: false } } })
     property var providerUrls: ({ test: "app/providers/local/Provider.qml" })
     property string configPath: "unused-in-mock"

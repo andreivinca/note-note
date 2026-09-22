@@ -38,6 +38,9 @@ Item {
   // signal called `changed` collides with Qt's own — docs/engine-notes.md.)
   signal updated()
 
+  // Accepted writes queued or running, kept as a property so that a close
+  // or a settings commit can be bound to their settling rather than poll.
+  property int writeDepth: 0
   readonly property var queue: Scheduler.makeState()
   // Bindings cannot see inside a plain JS object, so every change to it bumps
   // this and the three readonly properties above hang off it.
@@ -100,7 +103,11 @@ Item {
   }
 
   // ── the machinery ───────────────────────────────────────────────────
-  function bump() { root.revision++; root.updated() }
+  function bump() {
+    root.writeDepth = Scheduler.writeDepth(root.queue)
+    root.revision++
+    root.updated()
+  }
 
   function call(fn, result, info) {
     if (!fn) {

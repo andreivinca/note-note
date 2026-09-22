@@ -12,6 +12,29 @@ Item {
   property var files: null
   property bool busy: false
   property var pending: null
+  property bool committing: false
+  // The moment the change may commit: every accepted write has settled and
+  // no provider being replaced is still at work — retirement waits for all
+  // of a provider's activity, where a close waits for its writes only. The
+  // commit follows its inputs' changes (the host's settled state and the
+  // replaced providers' `busy`, connected in apply), and runs once the
+  // notification has completed: committing starts the config write and
+  // retires providers, which are inputs of that very state, and a reaction
+  // that writes its own inputs mid-update is a binding loop.
+  readonly property bool drained: lifecycle.pending !== null && host.writesSettled
+    && !lifecycle.pending.changes.some(function(change) {
+      var provider = change.replace ? host.providerById(change.id) : null
+      return !!provider && provider.busy === true
+    })
+  function commitWhenDrained() {
+    Qt.callLater(lifecycle.tryCommit)
+  }
+  Connections {
+    target: lifecycle.host
+    function onWritesSettledChanged() {
+      lifecycle.commitWhenDrained()
+    }
+  }
 
   function apply(text, callback) {
     if (lifecycle.busy || session.locked || session.loadingNote) {
@@ -45,34 +68,36 @@ Item {
         }
       }
     }
-    lifecycle.pending = { parsed: parsed, merged: merged, changes: changes,
-                          callback: callback, readOnly: editor.readOnly }
+    var readOnly = editor.readOnly
     lifecycle.busy = true
     session.flushSave()
     session.locked = true
     editor.readOnly = true
+    var watched = []
     for (var j = 0; j < changes.length; j++) {
       var provider = host.providerById(changes[j].id)
-      if (provider && changes[j].replace && typeof provider.watch === "function") {
-        provider.watch(false)
+      if (provider && changes[j].replace) {
+        if (typeof provider.watch === "function") {
+          provider.watch(false)
+        }
+        if (provider.busyChanged) {
+          provider.busyChanged.connect(lifecycle.commitWhenDrained)
+          watched.push(provider)
+        }
       }
     }
-    drain.start()
+    // Last, with the flush under way: the commit follows the drain, which
+    // may be settled already.
+    lifecycle.pending = { parsed: parsed, merged: merged, changes: changes,
+                          callback: callback, readOnly: readOnly, watched: watched }
     lifecycle.tryCommit()
   }
 
   function tryCommit() {
-    if (!lifecycle.pending || session.busy) {
+    if (!lifecycle.drained || lifecycle.committing) {
       return
     }
-    var changes = lifecycle.pending.changes
-    for (var i = 0; i < changes.length; i++) {
-      var provider = host.providerById(changes[i].id)
-      if (changes[i].replace && provider && host.providerBusy(provider)) {
-        return
-      }
-    }
-    drain.stop()
+    lifecycle.committing = true
     var error = session.failureFor(Object.keys(host.providerUrls))
     if (error) {
       lifecycle.finish({ error: error })
@@ -98,9 +123,7 @@ Item {
         if (provider) {
           // The note has already been saved and all accepted work drained.
           if (host.providerOf(session.currentPath) === provider) {
-            session.locked = false
-            session.selectPath("")
-            session.locked = true
+            session.putAway()
           }
           host.retireProvider(provider)
         }
@@ -124,6 +147,10 @@ Item {
   function finish(result) {
     var pending = lifecycle.pending
     lifecycle.pending = null
+    lifecycle.committing = false
+    for (var w = 0; w < pending.watched.length; w++) {
+      pending.watched[w].busyChanged.disconnect(lifecycle.commitWhenDrained)
+    }
     session.locked = false
     if (session.currentPath) {
       editor.readOnly = pending.readOnly
@@ -139,6 +166,4 @@ Item {
     }
     pending.callback(result)
   }
-
-  Timer { id: drain; interval: 50; repeat: true; onTriggered: lifecycle.tryCommit() }
 }
