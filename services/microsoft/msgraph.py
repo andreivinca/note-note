@@ -3,7 +3,11 @@
 
 Owns the OAuth 2.0 device-code sign-in, the token file and its refresh, and
 the Graph HTTP helpers that provider scripts (sticky.py, onenote.py) import.
-Standard library only.
+Standard library only. A script says which budget and scopes are its own
+with `configure()` before its first request; what cannot be answered is
+raised as `GraphError`, carrying the `kind` the host's queue reads, and
+the script's entry point turns it into the one JSON error line — no
+function here writes to stdout on a script's behalf.
 
   msgraph.py status              -> {"configured":bool,"signedIn":bool,"account":str}
   msgraph.py login               -> line 1: {"userCode","verificationUri","message"}
@@ -18,6 +22,7 @@ users only sign in to their account. An optional
 gives one provider a registration of the user's own instead.
 """
 import contextlib
+from dataclasses import dataclass, field
 from enum import Enum
 import fcntl
 import json, os, sys, time, urllib.request, urllib.parse, urllib.error, uuid
@@ -25,40 +30,65 @@ import json, os, sys, time, urllib.request, urllib.parse, urllib.error, uuid
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "lib"))
 import ratelimit  # noqa: E402
-# The error and IO shape every provider answers with lives in lib/provider_io.py
-# so that there is one of each (see its docstring). It is re-exported from here
-# unchanged: onenote.py and sticky.py import these names from `msgraph`, and
-# where a helper is defined is not their business.
-from provider_io import (  # noqa: E402,F401
-    out, fail, fail_throttled, fail_transient, load_json, save_private, read_payload,
-    read_bounded, THROTTLED_STATUSES, TRANSIENT_STATUSES,
+from provider_io import (  # noqa: E402
+    out, fail, fail_throttled, load_json, save_private, read_bounded, transient_message,
+    THROTTLED_STATUSES, TRANSIENT_STATUSES, HOME, STATE_DIR,
 )
 
-HOME = os.path.expanduser("~")
 CONFIG = os.environ.get("NOTE_NOTE_ACCOUNT_CONFIG") or os.path.join(os.environ.get("XDG_CONFIG_HOME", HOME + "/.config"), "omarchy/note-note.json")
-STATE_DIR = os.environ.get("NOTE_NOTE_STATE_DIR") or os.path.join(os.environ.get("XDG_STATE_HOME", HOME + "/.local/state"), "omarchy")
-CACHE_DIR = os.environ.get("NOTE_NOTE_CACHE_DIR") or os.path.join(os.environ.get("XDG_CACHE_HOME", HOME + "/.cache"), "omarchy")
 # Each provider signs in on its own: it points the script at its own token
 # file (NOTE_NOTE_MS_TOKEN), asks only for its own scopes (NOTE_NOTE_MS_SCOPES)
 # and names its own app registration (NOTE_NOTE_MS_CLIENT_ID) — Sticky Notes
 # and OneNote share this code and nothing else. NOTE_NOTE_MS_ACCOUNT is the
 # provider's id, under which CONFIG may hold a registration of the user's own.
-LEGACY_TOKENS = os.path.join(STATE_DIR, "note-note-ms-token.json")
-TOKENS = os.environ.get("NOTE_NOTE_MS_TOKEN") or LEGACY_TOKENS
+TOKENS = os.environ.get("NOTE_NOTE_MS_TOKEN") or os.path.join(STATE_DIR, "note-note-ms-token.json")
 ACCOUNT = os.environ.get("NOTE_NOTE_MS_ACCOUNT", "")
 # The provider's public-client registration (Microsoft Entra: personal and
 # work accounts, public client flows enabled). Every user of that provider
 # signs in through it. Empty — no provider behind the call — and nobody can.
 CLIENT_ID = os.environ.get("NOTE_NOTE_MS_CLIENT_ID", "")
 TENANT = "common"
-# The one registration every token came from before each provider had its
-# own. A token that does not say who issued it is from there.
-LEGACY_CLIENT_ID = "e5652641-e704-4d1a-a62f-df67d7053a30"
-
-# Providers declare the scopes they need; each passes only its own in.
-SCOPES = os.environ.get("NOTE_NOTE_MS_SCOPES", "offline_access User.Read")
-OPTIONAL_SCOPES = os.environ.get("NOTE_NOTE_MS_OPTIONAL_SCOPES", "")
 GRAPH = "https://graph.microsoft.com/v1.0"
+
+
+class GraphError(Exception):
+    """A request or a sign-in that could not be answered. `kind` is what the
+    host's queue reads (providers/PROVIDERS.md): "transient" re-runs the job
+    on its own, none shows the message as it stands. A throttle is not one
+    of these — it is `ratelimit.Throttled`, and parks the lane."""
+
+    def __init__(self, message, kind=None):
+        super().__init__(message)
+        self.kind = kind
+
+
+@dataclass
+class Settings:
+    """What the script that imports this says about itself (`configure`).
+
+    The pacing: sticky.py and onenote.py each name their own key, so a
+    throttle on one never parks the other (providers/PROVIDERS.md, the
+    rate-key table); left unset, nothing is paced at all, which is what an
+    unaware caller gets. The scopes: each provider asks for its own, the
+    required ones on every refresh and the optional ones only once granted.
+    """
+    rate_key: str = None
+    rate_windows: list = field(default_factory=list)
+    scopes: str = os.environ.get("NOTE_NOTE_MS_SCOPES", "offline_access User.Read")
+    optional_scopes: str = os.environ.get("NOTE_NOTE_MS_OPTIONAL_SCOPES", "")
+
+
+settings = Settings()
+
+
+def configure(rate_key, rate_windows, scopes=None, optional_scopes=None):
+    """Called once by the provider script, before its first request."""
+    settings.rate_key = rate_key
+    settings.rate_windows = list(rate_windows)
+    if scopes is not None:
+        settings.scopes = scopes
+    if optional_scopes is not None:
+        settings.optional_scopes = optional_scopes
 
 
 def config():
@@ -77,12 +107,6 @@ def config():
 MAX_BODY = 8 * 1024 * 1024
 
 
-# Pacing. An importer sets these two before it makes any request — sticky.py
-# and onenote.py each name their own key, so a throttle on one never parks the
-# other (providers/PROVIDERS.md, the rate-key table). Left unset, nothing here
-# is paced at all, which is what an unaware caller of msgraph.py gets.
-RATE_KEY = None
-RATE_WINDOWS = []
 GRAPH_ORIGIN = "https://graph.microsoft.com/"
 
 
@@ -93,7 +117,7 @@ def rate_key_for(url):
     deliberately unpaced: a token refresh that waited behind a Graph cooldown
     would turn "OneNote is busy" into "you are signed out".
     """
-    return RATE_KEY if (RATE_KEY and url.startswith(GRAPH_ORIGIN)) else None
+    return settings.rate_key if (settings.rate_key and url.startswith(GRAPH_ORIGIN)) else None
 
 
 def wait_asked_by(error):
@@ -164,7 +188,7 @@ def request(method, url, body=None, headers=None, max_bytes=MAX_BODY,
             with urllib.request.urlopen(req, timeout=timeout) as response:
                 return response.status, read_bounded(response, max_bytes)
         except OverflowError as error:
-            fail(str(error))
+            raise GraphError(str(error)) from error
         except urllib.error.HTTPError as error:
             with error:
                 raw = error.read(max_bytes + 1)[:max_bytes]
@@ -180,12 +204,12 @@ def request(method, url, body=None, headers=None, max_bytes=MAX_BODY,
                 if retry_policy is RetryPolicy.RESTART:
                     raise ratelimit.Throttled(wait)
             if retry_policy is not RetryPolicy.NEVER and error.code in TRANSIENT_STATUSES:
-                fail_transient(error.code, raw)
+                raise GraphError(transient_message(error.code, raw), kind="transient")
             return error.code, raw
         except urllib.error.URLError as error:
-            fail("network error: %s" % error.reason)
+            raise GraphError("network error: %s" % error.reason) from error
 
-    return ratelimit.attempt_loop(rate_key, RATE_WINDOWS, once)
+    return ratelimit.attempt_loop(rate_key, settings.rate_windows, once)
 
 
 # ---------------------------------------------------------------- tokens
@@ -200,7 +224,7 @@ def signed_in(client_id):
     another one — a provider given a registration of its own, or the user's
     override changing — is no sign-in at all, and the provider asks again."""
     tok = load_json(TOKENS, None)
-    if not tok or tok.get("client_id", LEGACY_CLIENT_ID) != client_id:
+    if not tok or tok.get("client_id") != client_id:
         return None
     return tok
 
@@ -257,20 +281,20 @@ def access_token(force=False):
     """
     client_id, tenant = config()
     if not client_id:
-        fail("not configured")
+        raise GraphError("not configured")
     tok = signed_in(client_id)
     if not tok:
-        fail("not signed in")
+        raise GraphError("not signed in")
     expected = os.environ.get("NOTE_NOTE_MS_CACHE_SESSION", "")
     if expected and tok.get("cacheSession") != expected:
-        fail("the signed-in account changed")
+        raise GraphError("the signed-in account changed")
     if not force and tok.get("expires_at", 0) - 60 > time.time():
         return tok["access_token"]
     used = tok.get("refresh_token", "")
-    required = SCOPES.split()
+    required = settings.scopes.split()
     grant = tok.get("scope", "")
     granted = grant.split() if isinstance(grant, str) else []
-    optional = [scope for scope in OPTIONAL_SCOPES.split() if scope in granted and scope not in required]
+    optional = [scope for scope in settings.optional_scopes.split() if scope in granted and scope not in required]
 
     def refresh(scopes, retry_policy=None):
         status, result = http("POST", token_url(tenant), {
@@ -302,18 +326,18 @@ def access_token(force=False):
             # take it rather than reporting a sign-out that is not true.
             fresh = signed_in(client_id)
             if fresh and fresh.get("cacheSession") != tok.get("cacheSession"):
-                fail("the signed-in account changed")
+                raise GraphError("the signed-in account changed")
             if fresh and fresh.get("refresh_token") != used:
                 return fresh["access_token"]
             forget_token(used)
-            fail("not signed in")
-        fail("sign-in expired: %s" % res.get("error_description", res.get("error", status)))
+            raise GraphError("not signed in")
+        raise GraphError("sign-in expired: %s" % res.get("error_description", res.get("error", status)))
     # Do not hold the lock during a network request: logout must be immediate.
     # Recheck under the same lock used by logout and login before committing.
     with token_lock():
         fresh = signed_in(client_id)
         if not fresh or fresh.get("cacheSession") != tok.get("cacheSession"):
-            fail("the signed-in account changed")
+            raise GraphError("the signed-in account changed")
         if fresh.get("refresh_token") != used:
             return fresh["access_token"]
         fresh.update(res)
@@ -343,22 +367,9 @@ def graph(method, path, data=None, extra_headers=None, max_bytes=MAX_BODY, retry
 
 # ---------------------------------------------------------------- commands
 
-def adopt_legacy_token():
-    """A token from before per-provider sign-in carries every scope; seed a
-    missing provider token from it so nobody has to sign in again. Only
-    once: after that a missing token means the user signed out."""
-    marker = TOKENS + ".seeded"
-    if TOKENS != LEGACY_TOKENS and not os.path.exists(TOKENS) and not os.path.exists(marker) and os.path.exists(LEGACY_TOKENS):
-        tok = load_json(LEGACY_TOKENS, None)
-        if tok:
-            save_private(TOKENS, tok)
-            save_private(marker, {"seededFrom": LEGACY_TOKENS})
-
-
 def cmd_status():
     client_id, _ = config()
     with token_lock():
-        adopt_legacy_token()
         tok = signed_in(client_id) if client_id else None
         # A cache belongs to this sign-in, not to a display name that two accounts
         # can share. Refresh preserves it; a new device-code sign-in replaces it.
@@ -377,7 +388,7 @@ def cmd_login():
     # code off the screen, and a second run mints a different one — so a 5xx
     # anywhere here is delivered as it stands rather than as "transient".
     status, res = http("POST", "https://login.microsoftonline.com/%s/oauth2/v2.0/devicecode" % tenant,
-                       {"client_id": client_id, "scope": SCOPES}, form=True, retry_policy=RetryPolicy.NEVER)
+                       {"client_id": client_id, "scope": settings.scopes}, form=True, retry_policy=RetryPolicy.NEVER)
     if status != 200 or "device_code" not in res:
         fail(res.get("error_description", res.get("error", "device code request failed")))
     out({"userCode": res["user_code"], "verificationUri": res["verification_uri"], "message": res.get("message", "")})
@@ -441,12 +452,19 @@ def main(argv):
         fail("usage: msgraph.py status|login|logout", 2)
 
 
-if __name__ == "__main__":
+def run(argv):
+    """The entry point: the one place a failure becomes the JSON error line."""
     try:
-        main(sys.argv)
+        main(argv)
     except SystemExit:
         raise
+    except GraphError as error:
+        fail(str(error), kind=error.kind)
     except ratelimit.Throttled as t:
         fail_throttled(t)
     except Exception as e:  # never leave the caller without JSON
         fail("%s: %s" % (type(e).__name__, e))
+
+
+if __name__ == "__main__":
+    run(sys.argv)

@@ -576,7 +576,7 @@ class TransportTests(unittest.TestCase):
         with patch.object(order.ratelimit, "attempt_loop", return_value=(429, b"")) as attempt:
             remote.request(order.msgraph.GRAPH + order.item_path("x"), "snapshot")
         self.assertEqual(attempt.call_args.args[0], "graph-onenote-section-order")
-        self.assertNotEqual(attempt.call_args.args[0], onenote.msgraph.RATE_KEY)
+        self.assertNotEqual(attempt.call_args.args[0], onenote.msgraph.settings.rate_key)
 
 
 def run():

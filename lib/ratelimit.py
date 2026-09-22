@@ -21,7 +21,7 @@ cold listing runs at full speed and only a genuinely heavy hour is paced. A
 separate **concurrency** cap bounds how many requests one key may have in
 flight across every process at once — Microsoft allows five per app+user.
 
-Standard library and lib/fileio.py beside it, importable by an external provider:
+Standard library and the lib/ modules beside it, importable by an external provider:
 
     import ratelimit
     with ratelimit.slot("my-api", [(60, 100)]):
@@ -36,9 +36,8 @@ import time
 import uuid
 
 import fileio
+from provider_io import CACHE_DIR
 
-HOME = os.path.expanduser("~")
-CACHE_DIR = os.environ.get("NOTE_NOTE_CACHE_DIR") or os.path.join(os.environ.get("XDG_CACHE_HOME", HOME + "/.cache"), "omarchy")
 # One directory, two files per key: <key>.json (the state) and <key>.lock (the
 # flock). Overridable so the selftest never touches the real budget.
 DEFAULT_DIR = os.path.join(CACHE_DIR, "note-note-rate")

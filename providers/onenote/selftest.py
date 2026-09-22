@@ -181,15 +181,14 @@ def test_the_transient_gate(verbose):
     for status in msgraph.TRANSIENT_STATUSES:
         sign_in()
         endpoint = Endpoint(graph=[(status, b"Transient error", headers())])
-        with scripted(endpoint) as printed:
+        error = None
+        with scripted(endpoint):
             try:
                 onenote.graph_raw("GET", PAGE)
-                exited = False
-            except SystemExit:
-                exited = True
-        answer = answered(printed)
+            except msgraph.GraphError as e:
+                error = e
         failures += check("%d is transient by default" % status,
-                          exited and answer.get("kind") == "transient", "%r" % (answer,))
+                          error is not None and error.kind == "transient", "%r" % (error,))
 
         sign_in()
         endpoint = Endpoint(graph=[(status, b"Transient error", headers())])
@@ -243,7 +242,7 @@ def test_title_failure_does_not_repeat_the_body(verbose):
     for status in (500, 503):
         sign_in()
         endpoint = Endpoint(graph=[(status, b"title refused", headers(Retry_After="0"))])
-        with scripted(endpoint), patch.object(msgraph, "RATE_KEY", None):
+        with scripted(endpoint), patch.object(msgraph.settings, "rate_key", None):
             warning = onenote.write_page("page", {"title": "Edited", "body": ""},
                                          {"title": "Original", "body": ""}, "")
         failures += check("%d title failure is returned" % status, warning.startswith("title not saved"), warning)
@@ -266,7 +265,7 @@ def test_uncertain_mutations_are_sent_once(verbose):
             for wait in ("0", "999"):
                 sign_in()
                 endpoint = Endpoint(graph=[(status, b"uncertain", headers(Retry_After=wait))])
-                with scripted(endpoint), patch.object(msgraph, "RATE_KEY", None):
+                with scripted(endpoint), patch.object(msgraph.settings, "rate_key", None):
                     result = onenote.patch_page(PAGE, [operation], parts)
                 label = "%s/%s after %s" % (operation["action"], status, wait)
                 failures += check(label + " returns the uncertain response", result == (status, "uncertain"))
@@ -279,7 +278,7 @@ def test_replacement_requires_a_fresh_job_after_503(verbose):
     sign_in()
     endpoint = Endpoint(graph=[(503, b"uncertain", headers(Retry_After="0"))])
     restart = False
-    with scripted(endpoint), patch.object(msgraph, "RATE_KEY", None):
+    with scripted(endpoint), patch.object(msgraph.settings, "rate_key", None):
         try:
             onenote.patch_page(PAGE, [{"target": "p:old", "action": "replace", "content": "<p>new</p>"}], [])
         except msgraph.ratelimit.Throttled:

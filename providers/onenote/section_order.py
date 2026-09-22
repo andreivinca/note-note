@@ -101,7 +101,7 @@ class Remote:
                 raise OrderUnavailable("section metadata download timed out") from error
             except urllib.error.HTTPError as error:
                 with error:
-                    if error.code in msgraph.THROTTLED_STATUSES:
+                    if error.code in provider_io.THROTTLED_STATUSES:
                         raise ratelimit.Retry(msgraph.wait_asked_by(error))
                     return error.code, b""
             except OSError as error:

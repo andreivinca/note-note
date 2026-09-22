@@ -437,6 +437,10 @@ script printed, and the lane reads one field of it:
 
 ### Microsoft retry policies
 
+A script names its own budget and scopes once with `msgraph.configure()`.
+What the library cannot answer it raises as `msgraph.GraphError`, carrying
+the `kind` above; the script's entry point (`run()`) turns it into the JSON
+error line, and nothing in the library writes to stdout on a script's behalf.
 Microsoft adapters pass a `msgraph.RetryPolicy` through `graph()`, `http()`,
 or `request()`: `REPLAY` permits repeating a safe read, `RESTART` returns a
 retry signal so the job fetches and merges again, and `NEVER` returns an

@@ -461,7 +461,7 @@ class SaveTests(unittest.TestCase):
         """Use the actual authentication wrapper, HTTP handling and retry loop."""
         with (patch.object(onenote, "graph_raw", self.raw_transport),
               patch.object(onenote, "access_token", return_value="synthetic-token"),
-              patch.object(onenote.msgraph, "RATE_KEY", None),
+              patch.object(onenote.msgraph.settings, "rate_key", None),
               patch.object(onenote.msgraph.urllib.request, "urlopen", side_effect=endpoint)):
             yield
 

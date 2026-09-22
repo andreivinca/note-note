@@ -191,20 +191,17 @@ def test_transient_statuses(verbose):
     for status in msgraph.TRANSIENT_STATUSES:
         body = {"error": {"code": "InternalServerError", "message": "Transient error"}}
         endpoint = Endpoint(graph=[(status, body, headers())])
-        code = None
-        with scripted(endpoint) as printed:
+        error = None
+        with scripted(endpoint):
             try:
                 msgraph.http("GET", ME)
-            except SystemExit as e:
-                code = e.code
-        answer = answered(printed)
-        failures += check("%d is transient" % status, answer.get("kind") == "transient",
-                          "answered %r" % (answer,))
-        failures += check("%d fails the job" % status, code == 1, "exit %r" % (code,))
+            except msgraph.GraphError as e:
+                error = e
+        failures += check("%d is transient" % status, error is not None and error.kind == "transient",
+                          "raised %r" % (error,))
         failures += check("%d says what happened" % status,
-                          str(status) in answer.get("error", "")
-                          and "Transient error" in answer.get("error", ""),
-                          "%r" % (answer.get("error"),))
+                          str(status) in str(error) and "Transient error" in str(error),
+                          "%r" % (error,))
         failures += check("%d is asked once" % status, len(endpoint.calls) == 1,
                           "%d requests" % len(endpoint.calls))
     if verbose:
@@ -246,7 +243,7 @@ def test_retry_policy_and_cooldown_are_independent(verbose):
         endpoint = Endpoint(graph=[(503, b"busy", headers(Retry_After="999"))])
         restarted = False
         status = None
-        with scripted(endpoint), patch.object(msgraph, "RATE_KEY", key):
+        with scripted(endpoint), patch.object(msgraph.settings, "rate_key", key):
             try:
                 status, _ = msgraph.http("PATCH", ME, {}, retry_policy=policy)
             except ratelimit.Throttled:
@@ -305,18 +302,16 @@ def test_dead_grant_is_forgotten(verbose):
         graph=[(401, {"error": {"message": "InvalidAuthenticationToken"}}, headers())],
         token=[(400, {"error": "invalid_grant",
                       "error_description": "AADSTS50173: token revoked"}, headers())])
-    code = None
-    with scripted(endpoint) as printed:
+    error = None
+    with scripted(endpoint):
         try:
             msgraph.graph("GET", "/me")
-        except SystemExit as e:
-            code = e.code
-    answer = answered(printed)
+        except msgraph.GraphError as e:
+            error = e
     failures = 0
-    failures += check("a dead grant fails", code == 1, "exit %r" % (code,))
-    failures += check("it fails as not signed in", answer.get("error") == "not signed in",
-                      "%r" % (answer,))
-    failures += check("it is not dressed up as retryable", "kind" not in answer, "%r" % (answer,))
+    failures += check("a dead grant fails", error is not None, "no error raised")
+    failures += check("it fails as not signed in", str(error) == "not signed in", "%r" % (error,))
+    failures += check("it is not dressed up as retryable", error is not None and error.kind is None, "%r" % (error,))
     failures += check("the dead token is gone", not os.path.exists(msgraph.TOKENS))
     failures += check("Graph was asked only once", len(endpoint.to("graph")) == 1,
                       "%d requests" % len(endpoint.to("graph")))
@@ -334,20 +329,18 @@ def test_ordinary_expiry_keeps_its_message(verbose):
     sign_in(expires_in=-10)
     endpoint = Endpoint(token=[(400, {"error": "invalid_grant",
                                       "error_description": "expired"}, headers())])
-    code = None
-    with scripted(endpoint) as printed:
+    error = None
+    with scripted(endpoint):
         try:
             msgraph.access_token()
-        except SystemExit as e:
-            code = e.code
-    answer = answered(printed)
+        except msgraph.GraphError as e:
+            error = e
     failures = 0
-    failures += check("an expired sign-in fails", code == 1, "exit %r" % (code,))
-    failures += check("it says the sign-in expired",
-                      answer.get("error", "").startswith("sign-in expired:"), "%r" % (answer,))
+    failures += check("an expired sign-in fails", error is not None, "no error raised")
+    failures += check("it says the sign-in expired", str(error).startswith("sign-in expired:"), "%r" % (error,))
     failures += check("the token is left where it was", os.path.exists(msgraph.TOKENS))
     if verbose:
-        print("  answered %r" % (answer,))
+        print("  raised %r" % (error,))
     print("an ordinary expiry keeps its own message")
     print("  %d checks failed" % failures if failures else "  all green")
     return failures
@@ -367,17 +360,16 @@ def test_a_blip_during_a_forced_refresh_keeps_the_token(verbose):
     endpoint = Endpoint(
         graph=[(401, {"error": {"message": "InvalidAuthenticationToken"}}, headers())],
         token=[(500, {"error": "temporarily_unavailable"}, headers())])
-    code = None
-    with scripted(endpoint) as printed:
+    error = None
+    with scripted(endpoint):
         try:
             msgraph.graph("GET", "/me")
-        except SystemExit as e:
-            code = e.code
-    answer = answered(printed)
+        except msgraph.GraphError as e:
+            error = e
     failures = 0
-    failures += check("a blip fails the job", code == 1, "exit %r" % (code,))
+    failures += check("a blip fails the job", error is not None, "no error raised")
     failures += check("a blip is transient, not a sign-out",
-                      answer.get("kind") == "transient", "%r" % (answer,))
+                      error is not None and error.kind == "transient", "%r" % (error,))
     failures += check("the sign-in survives a blip", os.path.exists(msgraph.TOKENS),
                       "the token file was deleted")
     failures += check("and survives it intact",
@@ -408,7 +400,7 @@ def test_optional_scopes_cannot_break_required_refresh(verbose):
             return 200, {"access_token": "new", "refresh_token": "new-refresh", "expires_in": 3600,
                          "scope": base_grant + (" Files.Read" if optional_accepted else "")}
 
-        with patch.object(msgraph, "SCOPES", required), patch.object(msgraph, "OPTIONAL_SCOPES", "Files.Read"):
+        with patch.object(msgraph.settings, "scopes", required), patch.object(msgraph.settings, "optional_scopes", "Files.Read"):
             with patch.object(msgraph, "http", side_effect=refresh), patch.object(msgraph, "forget_token") as forget:
                 access = msgraph.access_token(force=True)
                 failures += check("optional failure never signs out", not forget.called)
@@ -430,8 +422,8 @@ def test_optional_refresh_with_malformed_reply_or_omitted_scope(verbose):
     token = msgraph.load_json(msgraph.TOKENS, {})
     token.update({"expires_at": 0, "scope": "User.Read Notes.ReadWrite Files.Read"})
     msgraph.save_private(msgraph.TOKENS, token)
-    with patch.object(msgraph, "SCOPES", "offline_access User.Read Notes.ReadWrite"):
-        with patch.object(msgraph, "OPTIONAL_SCOPES", "Files.Read"):
+    with patch.object(msgraph.settings, "scopes", "offline_access User.Read Notes.ReadWrite"):
+        with patch.object(msgraph.settings, "optional_scopes", "Files.Read"):
             with patch.object(msgraph, "http", side_effect=[(200, None), (200, {
                 "access_token": "base-only", "refresh_token": "new-refresh", "expires_in": 3600})]) as request:
                 access = msgraph.access_token()
@@ -481,18 +473,48 @@ def test_cache_session_and_inflight_refresh(verbose):
         sign_in()
         with patch.object(msgraph, "out") as output:
             msgraph.cmd_status()
-            printed = io.StringIO()
-            with patch.object(msgraph, "http", side_effect=reply), contextlib.redirect_stdout(printed):
+            with patch.object(msgraph, "http", side_effect=reply):
                 try:
                     msgraph.access_token(force=True)
                     failures += check("late refresh must fail after " + action, False)
-                except SystemExit:
+                except msgraph.GraphError as error:
                     failures += check("late refresh reports account change",
-                                      answered(printed).get("error") == "the signed-in account changed")
+                                      str(error) == "the signed-in account changed")
         current = msgraph.signed_in(CLIENT_ID)
         failures += check("late refresh cannot undo " + action,
                           current is None if action == "logout" else current.get("access_token") == "other-access")
     print("cache sessions survive refresh and reject late account responses")
+    print("  %d checks failed" % failures if failures else "  all green")
+    return failures
+
+
+def test_the_entry_point_answers_for_the_library(verbose):
+    """No function of the library writes to stdout: a failure is raised, with
+    its kind, and the script's entry point is the one place it becomes the
+    JSON error line. `configure` is how a script names its budget."""
+    failures = 0
+    printed = io.StringIO()
+    code = None
+    with patch.object(msgraph, "cmd_status", side_effect=msgraph.GraphError("boom", kind="transient")):
+        with contextlib.redirect_stdout(printed):
+            try:
+                msgraph.run(["msgraph.py", "status"])
+            except SystemExit as e:
+                code = e.code
+    failures += check("the entry point exits once", code == 1, "exit %r" % (code,))
+    failures += check("with the error and its kind", answered(printed) == {"error": "boom", "kind": "transient"},
+                      "%r" % (printed.getvalue(),))
+    before = msgraph.settings.rate_key
+    try:
+        msgraph.configure("graph-test", [(60, 1)], optional_scopes="Files.Read")
+        failures += check("configure names the budget", msgraph.rate_key_for(ME) == "graph-test"
+                          and msgraph.settings.rate_windows == [(60, 1)]
+                          and msgraph.settings.optional_scopes == "Files.Read")
+        failures += check("the sign-in endpoints stay unpaced",
+                          msgraph.rate_key_for(msgraph.token_url("common")) is None)
+    finally:
+        msgraph.configure(before, [], optional_scopes="")
+    print("the library raises; the entry point answers")
     print("  %d checks failed" % failures if failures else "  all green")
     return failures
 
@@ -548,6 +570,7 @@ def main():
         total += test_optional_scopes_cannot_break_required_refresh(args.verbose)
         total += test_optional_refresh_with_malformed_reply_or_omitted_scope(args.verbose)
         total += test_cache_session_and_inflight_refresh(args.verbose)
+        total += test_the_entry_point_answers_for_the_library(args.verbose)
         total += test_bounded_reader_holds_size_and_time(args.verbose)
     finally:
         shutil.rmtree(WORK, ignore_errors=True)

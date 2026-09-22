@@ -27,8 +27,9 @@ import msgraph  # noqa: E402
 import provider_io  # noqa: E402
 import fileio  # noqa: E402
 import ratelimit  # noqa: E402
-from msgraph import (graph, http, fail, fail_throttled, out, load_json, save_private,  # noqa: E402
-                     read_payload, access_token, TRANSIENT_STATUSES, CACHE_DIR, GRAPH)
+from msgraph import graph, http, access_token, GRAPH  # noqa: E402
+from provider_io import (fail, fail_throttled, out, load_json, save_private, read_payload,  # noqa: E402
+                         TRANSIENT_STATUSES, STATE_DIR, CACHE_DIR)
 import onenote_md  # noqa: E402
 import onenote_patch  # noqa: E402
 from notemerge import MergeStore, StaleRemote, snapshot  # noqa: E402
@@ -39,12 +40,11 @@ import search_index  # noqa: E402
 # limits are 120 requests/minute *and* 400/hour per app+user (and 5 concurrent,
 # which lib/ratelimit.py caps at 4); these windows stay under both with room
 # for the other things the account may be doing.
-msgraph.RATE_KEY = "graph-onenote"
-msgraph.RATE_WINDOWS = [(60, 100), (3600, 350)]
-# Keep optional consent out of the required refresh scopes, including when
+# Optional consent stays out of the required refresh scopes, including when
 # an older, still-loaded UI supplies the previous combined scope list.
-msgraph.SCOPES = " ".join(scope for scope in msgraph.SCOPES.split() if scope != "Files.Read")
-msgraph.OPTIONAL_SCOPES = "Files.Read"
+msgraph.configure("graph-onenote", [(60, 100), (3600, 350)],
+                  scopes=" ".join(scope for scope in msgraph.settings.scopes.split() if scope != "Files.Read"),
+                  optional_scopes="Files.Read")
 
 ONENOTE_CACHE = os.path.join(CACHE_DIR, "note-note-onenote.json")
 # The custom section order the last pass established (cmd_section_order):
@@ -215,7 +215,7 @@ def cmd_search_step(payload):
     if ticket is None:
         out({"status": index.status()})
         return
-    delay = ratelimit.background_delay(msgraph.RATE_KEY, msgraph.RATE_WINDOWS)
+    delay = ratelimit.background_delay(msgraph.settings.rate_key, msgraph.settings.rate_windows)
     if delay > 0:
         out({"status": index.status(), "deferred": True, "retryAfter": delay})
         return
@@ -226,7 +226,7 @@ def cmd_search_step(payload):
     try:
         status, html = graph_raw("GET", "/me/onenote/pages/" + urllib.parse.quote(ticket["id"], safe="")
                                  + "/content", retry_policy=msgraph.RetryPolicy.NEVER)
-    except (ratelimit.Throttled, SystemExit):
+    except (ratelimit.Throttled, msgraph.GraphError):
         index.failed(ticket)
         raise
     if status == 200:
@@ -455,11 +455,10 @@ def cmd_onenote_list(cached, max_age=0, force=False):
         found = []
         url = section_pages_url(sct["id"])
         while url and len(found) < MAX_PAGES:
-            # A worker must not answer for the whole run: `fail()` writes the
-            # one JSON line and exits, and doing that from inside the pool
-            # would step over the other three threads' stdout *and* jump the
-            # `listing.save(False)` below, throwing away every section already
-            # fetched. So the classification is carried back instead.
+            # A worker answers for its own section only: the classification
+            # is carried back, and the run below keeps what did arrive before
+            # it reports. A GraphError raised in here (a network error)
+            # reaches the run through its future and is kept the same way.
             status, res = http("GET", url if url.startswith("http") else GRAPH + url, headers={
                 "Authorization": "Bearer " + token, "Accept": "application/json"},
                 max_bytes=MAX_LIST_BODY, retry_policy=msgraph.RetryPolicy.NEVER)
@@ -484,7 +483,7 @@ def cmd_onenote_list(cached, max_age=0, force=False):
                         break
                     listing.record(futures[future], result)
                     listing.checkpoint()
-        except ratelimit.Throttled:
+        except (ratelimit.Throttled, msgraph.GraphError):
             # Keep what did arrive: the sections stored here are skipped by
             # their own stamp next time, so the run after the cooldown fetches
             # only the tail instead of spending the budget again from scratch.
@@ -687,7 +686,7 @@ def cached_image(src, width=0):
         # An image is a Graph request like any other and is paced like one:
         # forty of them is what a picture-heavy page costs, and that is most
         # of a minute's budget on its own.
-        with ratelimit.slot(msgraph.RATE_KEY, msgraph.RATE_WINDOWS):
+        with ratelimit.slot(msgraph.settings.rate_key, msgraph.settings.rate_windows):
             with _image_opener.open(req, timeout=20) as r:
                 # Bounded in size and in time: a TimeoutError is an OSError, caught below.
                 data = provider_io.read_bounded(r, MAX_IMAGE, deadline)
@@ -713,7 +712,7 @@ def cached_image(src, width=0):
         # would the next process: record it once and let them all fail fast.
         # The page still loads — it shows the alt text — and the incomplete
         # image list keeps a save from writing it back (remember_images).
-        ratelimit.report_throttle(msgraph.RATE_KEY, pause)
+        ratelimit.report_throttle(msgraph.settings.rate_key, pause)
     return None
 
 
@@ -778,7 +777,7 @@ def merge_account():
 
 
 def merge_store(page_id):
-    return MergeStore(os.path.join(msgraph.STATE_DIR, "note-note-merges"),
+    return MergeStore(os.path.join(STATE_DIR, "note-note-merges"),
                       "onenote", merge_account(), page_id,
                       normalize=normalize_note, stale_seconds=120)
 
@@ -1189,14 +1188,21 @@ def main(argv):
         fail("usage: onenote.py list [--cached|--max-age S|--force]|section-order|page <id>|update <id> <file>|create <sectionId> <file>|delete <id>|create-section <notebookId> <file>|clear-cache", 2)
 
 
-if __name__ == "__main__":
+def run(argv):
+    """The entry point: the one place a failure becomes the JSON error line."""
     try:
-        main(sys.argv)
+        main(argv)
     except SystemExit:
         raise
+    except msgraph.GraphError as error:
+        fail(str(error), kind=error.kind)
     except StaleRemote:
         fail("OneNote is still syncing the previous save — try again shortly", kind="transient")
     except ratelimit.Throttled as t:
         fail_throttled(t)
     except Exception as e:
         fail("%s: %s" % (type(e).__name__, e))
+
+
+if __name__ == "__main__":
+    run(sys.argv)

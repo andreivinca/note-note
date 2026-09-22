@@ -87,9 +87,10 @@ Sticky Notes and OneNote run the same `msgraph.py`, and nothing else about
 their sign-ins is shared: each has **its own app registration, its own
 token file and its own scopes** (`note-note-ms-<provider>.json`). Signing
 out of one leaves the other signed in. The cost is signing in twice; the
-benefit is that "everything separate" actually means separate. A token from
-before the token files split is adopted once into each provider's file so
-nobody had to re-authenticate.
+benefit is that "everything separate" actually means separate. A token
+names the registration that issued it, and one from another registration
+— a token from before the split, which named none — is no sign-in at all:
+the provider asks again.
 
 ### An app registration per provider, owned by the author
 

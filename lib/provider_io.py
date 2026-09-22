@@ -25,6 +25,13 @@ import json, os, sys, time, urllib.request
 
 import fileio
 
+# Where a provider keeps what it keeps: its state (tokens, merge records)
+# and its caches. The host names them (services/platform/Platform.qml);
+# a script run by hand falls back to the Omarchy locations.
+HOME = os.path.expanduser("~")
+STATE_DIR = os.environ.get("NOTE_NOTE_STATE_DIR") or os.path.join(os.environ.get("XDG_STATE_HOME", HOME + "/.local/state"), "omarchy")
+CACHE_DIR = os.environ.get("NOTE_NOTE_CACHE_DIR") or os.path.join(os.environ.get("XDG_CACHE_HOME", HOME + "/.cache"), "omarchy")
+
 
 def out(obj):
     sys.stdout.write(json.dumps(obj) + "\n")
@@ -159,14 +166,16 @@ def error_message(body, limit=200):
     return " ".join(text.split())[:limit]
 
 
-def fail_transient(status, body=b""):
-    """A `TRANSIENT_STATUSES` response as the queue expects to read it.
-
-    The status and the server's own words travel with it because the third
-    attempt's answer is delivered as it stands, and by then this line is all
-    the user gets. Graph is why that matters: it returns transient 500s in
-    normal operation and says so in the body.
-    """
+def transient_message(status, body=b""):
+    """What a `TRANSIENT_STATUSES` response says, for the user. The status
+    and the server's own words travel with it because the third attempt's
+    answer is delivered as it stands, and by then this line is all the user
+    gets. Graph is why that matters: it returns transient 500s in normal
+    operation and says so in the body."""
     detail = error_message(body)
-    fail("server error %d%s" % (status, ": " + detail if detail else ""),
-         kind="transient")
+    return "server error %d%s" % (status, ": " + detail if detail else "")
+
+
+def fail_transient(status, body=b""):
+    """A `TRANSIENT_STATUSES` response as the queue expects to read it."""
+    fail(transient_message(status, body), kind="transient")

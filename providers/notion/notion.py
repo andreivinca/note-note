@@ -27,13 +27,10 @@ import ratelimit  # noqa: E402
 # docstring for why one of each is the point.
 from provider_io import (  # noqa: E402
     out, fail, fail_throttled, fail_transient, load_json, save_private, read_payload,
-    THROTTLED_STATUSES, TRANSIENT_STATUSES, read_bounded,
+    THROTTLED_STATUSES, TRANSIENT_STATUSES, read_bounded, STATE_DIR, CACHE_DIR,
 )
 import notion_md  # noqa: E402
 
-HOME = os.path.expanduser("~")
-STATE_DIR = os.environ.get("NOTE_NOTE_STATE_DIR") or os.path.join(os.environ.get("XDG_STATE_HOME", HOME + "/.local/state"), "omarchy")
-CACHE_DIR = os.environ.get("NOTE_NOTE_CACHE_DIR") or os.path.join(os.environ.get("XDG_CACHE_HOME", HOME + "/.cache"), "omarchy")
 TOKEN_FILE = os.path.join(STATE_DIR, "note-note-notion.json")
 CACHE = os.path.join(CACHE_DIR, "note-note-notion.json")
 API = "https://api.notion.com/v1"
