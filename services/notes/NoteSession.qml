@@ -40,7 +40,7 @@ Item {
     }
     var provider = session.providerFor(path)
     editor.readOnly = true
-    editor.showView(conflictView, {
+    editor.showView("", conflictView, {
       conflict: conflict,
       remoteName: provider ? provider.name : "Elsewhere",
       retry: function() {

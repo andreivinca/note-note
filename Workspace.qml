@@ -47,6 +47,9 @@ Item {
   readonly property bool pageOpen: root.page !== ""
   property string filterText: ""
   property string statusText: ""
+  // Who said it: a message that refreshes itself (the rate-limit countdown)
+  // replaces only its own text, never another's.
+  property string statusKey: ""
   // The status bar's provider badge follows the active notebook.
   property string sourceName: "Note Note"
   property url sourceLogo: ""
@@ -409,8 +412,7 @@ Item {
 
     root.detached = next
     saveState()
-    root.statusText = next ? "Detached — an ordinary window now, so move, resize and tile it as usual" : "Back to the summoned overlay"
-    statusTimer.restart()
+    root.showStatus(next ? "Detached — an ordinary window now, so move, resize and tile it as usual" : "Back to the summoned overlay")
   }
 
   // A page stands in for the workspace, so it is not dismissed the way a
@@ -465,8 +467,9 @@ Item {
     }
   }
 
-  function showStatus(text) {
+  function showStatus(text, key) {
     root.statusText = text
+    root.statusKey = text ? (key || "") : ""
     if (text) {
       statusTimer.restart()
     }
@@ -514,8 +517,11 @@ Item {
         }
       }])
     })
+    // The "signed in" notice clears itself once the account reports in —
+    // and only itself, by the serial the editor handed back.
+    var signedInNotice = 0
     acc.loginSucceeded.connect(function() {
-      editor.showNotice("Signed in", "Fetching your notes…", "", [])
+      signedInNotice = editor.showNotice("Signed in", "Fetching your notes…", "", [])
     })
     acc.loginFailed.connect(function(error) {
       editor.showNotice("Sign-in failed", error, "", [{
@@ -527,10 +533,10 @@ Item {
       }])
     })
     acc.updated.connect(function() {
-      if (acc.signedIn && editor.noticeTitle === "Signed in") {
-        editor.clearNotice()
+      if (acc.signedIn && signedInNotice) {
+        editor.clearNotice(signedInNotice)
+        signedInNotice = 0
       }
-
       root.rebuildRows()
     })
     root.accounts = root.accounts.concat([acc])
@@ -675,8 +681,7 @@ Item {
       editor.clearNotice()
     })
     p.viewRequested.connect(function(title, component, props) {
-      editor.showNotice(title, " ", "", [])
-      editor.showView(component, props)
+      editor.showView(title, component, props)
     })
     p.viewCleared.connect(function() {
       editor.clearNotice()
@@ -2172,7 +2177,7 @@ Item {
   Timer {
     id: statusTimer
     interval: 3500
-    onTriggered: root.statusText = ""
+    onTriggered: root.showStatus("")
   }
 
   Component {
@@ -2222,11 +2227,10 @@ Item {
       var lead = (root.queueNames[q.domain] || q.domain) + " is rate-limited"
       // Something else is being said — a save's error, "Section created". Let
       // it have its few seconds; the countdown picks up when it clears.
-      if (root.statusText && root.statusText.indexOf(lead) !== 0) {
+      if (root.statusText && root.statusKey !== "cooldown") {
         return
       }
-
-      root.showStatus(lead + " — retrying in " + Math.ceil(q.cooldownRemaining) + "s" + (q.depth > 0 ? " (" + q.depth + " queued)" : ""))
+      root.showStatus(lead + " — retrying in " + Math.ceil(q.cooldownRemaining) + "s" + (q.depth > 0 ? " (" + q.depth + " queued)" : ""), "cooldown")
     }
   }
 

@@ -127,6 +127,11 @@ Item {
   property string noticeCode: ""
   // [{ label, icon, action }] — action is a function.
   property var noticeActions: []
+  // Which notice or view is showing: showNotice and showView hand it back,
+  // and clearNotice(serial) clears only that one, if it is still the one
+  // showing — a notice that clears itself once its reason has passed must
+  // not take a newer notice with it.
+  property int noticeSerial: 0
   // A provider-supplied view (setup screens, settings) rendered instead of
   // the note; the provider owns what is inside.
   property Component customView: null
@@ -144,9 +149,15 @@ Item {
   readonly property int titleSize: Math.round(root.bodyFontSize * 2)
   readonly property bool showingNotice: noticeText.length > 0 || customView !== null
   readonly property bool showingSkeleton: root.hasNote && root.loading && !root.showingNotice
-  function showView(component, props) {
-    // Loading a Component can finish synchronously. Supply its properties
-    // first, and recreate even the same view so no previous state survives.
+  // A provider-supplied view under `title`, in the note's place. Loading a
+  // Component can finish synchronously, so its properties are supplied
+  // first, and even the same view is recreated so no previous state
+  // survives.
+  function showView(title, component, props) {
+    noticeTitle = title
+    noticeText = ""
+    noticeCode = ""
+    noticeActions = []
     customView = null
     customViewProps = props || ({})
     customView = component
@@ -157,6 +168,7 @@ Item {
         customLoader.item.forceActiveFocus()
       }
     })
+    return ++noticeSerial
   }
   function clearView() {
     customView = null
@@ -165,9 +177,22 @@ Item {
   readonly property bool viewHasFocus: customLoader.item ? customLoader.item.activeFocus : false
   function showNotice(title, text, code, actions) {
     clearView()
-    noticeTitle = title; noticeText = text; noticeCode = code || ""; noticeActions = actions || []
+    noticeTitle = title
+    noticeText = text
+    noticeCode = code || ""
+    noticeActions = actions || []
+    return ++noticeSerial
   }
-  function clearNotice() { noticeTitle = ""; noticeText = ""; noticeCode = ""; noticeActions = []; clearView() }
+  function clearNotice(serial) {
+    if (serial !== undefined && serial !== noticeSerial) {
+      return
+    }
+    noticeTitle = ""
+    noticeText = ""
+    noticeCode = ""
+    noticeActions = []
+    clearView()
+  }
 
   // (KeyEvent) -> bool. Runs before the inputs' own key handling so app
   // shortcuts win over TextEdit's built-in Ctrl+K / Ctrl+D bindings.

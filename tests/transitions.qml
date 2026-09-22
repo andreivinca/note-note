@@ -214,7 +214,7 @@ ShellRoot {
     function viewState() { return { cursor: 0, scroll: 0 } }
     function restoreViewState(state) {}
     function clearNotice() { viewProps = null }
-    function showView(component, props) { viewProps = props }
+    function showView(title, component, props) { viewProps = props }
     function setNote(t, b, shown) {
       title = t
       body = b
@@ -757,6 +757,23 @@ ShellRoot {
   // stored note when the backend has taken it, a delete removes it when the
   // backend has, a cancelled delete is a failure, and a failed one leaves
   // the note where it was.
+  Ui.NoteEditor { id: noticeEditor; visible: false }
+  Component { id: blankView; Item {} }
+  // A notice clears only itself: the serial it was shown under names it,
+  // and a newer notice is left standing; a view carries its own title.
+  function noticeCases() {
+    var first = noticeEditor.showNotice("First", "text", "", [])
+    var second = noticeEditor.showNotice("Second", "text", "", [])
+    noticeEditor.clearNotice(first)
+    check("clearing an older notice leaves the newer one", noticeEditor.showingNotice && noticeEditor.noticeTitle === "Second")
+    noticeEditor.clearNotice(second)
+    check("clearing the notice showing clears it", !noticeEditor.showingNotice && noticeEditor.noticeTitle === "")
+    var view = noticeEditor.showView("Setup", blankView, {})
+    check("a view carries its title and no notice text", noticeEditor.showingNotice && noticeEditor.noticeTitle === "Setup" && noticeEditor.noticeText === "")
+    noticeEditor.clearNotice(view)
+    check("a view clears by its serial too", !noticeEditor.showingNotice && noticeEditor.customView === null)
+  }
+
   function remoteModelCases() {
     var sticky = stickyFactory.createObject(test, { services: test.recordingServices })
     sticky.notes = [{ id: "a", title: "", body: "old", modified: "1" }]
@@ -1026,6 +1043,7 @@ ShellRoot {
       processCases()
       localCases()
       remoteModelCases()
+      noticeCases()
       accountCases()
     } catch (error) {
       check("test setup completed", false, error.message + " " + error.stack)
