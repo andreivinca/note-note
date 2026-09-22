@@ -4,7 +4,7 @@
 Sticky Notes sync into the Outlook mailbox's "Notes" folder, which Microsoft
 Graph exposes as a well-known mail folder.
 
-  sticky.py list [--cached]   -> {"notes":[{id,title,body,modified}], "cached":bool}
+  sticky.py list [--cached]   -> {"notes":[{id,title,body,modified,truncatedAt?}], "cached":bool}
   sticky.py update <id> <file> -> reads {"title","body"} from file, PATCHes the note
   sticky.py create             -> {"ok":true,"note":{...}}
   sticky.py delete <id>
@@ -29,19 +29,24 @@ CACHE = os.path.join(CACHE_DIR, "note-note-sticky.json")
 # This provider's limits: what it will read from Graph and keep around.
 MAX_NOTES = 500                 # sticky notes listed
 MAX_LIST_BODY = 4 * 1024 * 1024  # one page of the listing
-MAX_NOTE_BODY = 256 * 1024      # a single note's text (longer is truncated)
+MAX_NOTE_BODY = 256 * 1024      # a single note's text; a longer one is cut and opens read-only
 
 
 def to_note(m):
-    body = (m.get("body") or {}).get("content", "") or ""
+    body = ((m.get("body") or {}).get("content", "") or "").replace("\r\n", "\n").rstrip("\n")
     # Sticky Notes keep subject == first line of the body, so the title is
     # not a separate thing to show or edit; the body is the note.
-    return {
+    note = {
         "id": m["id"],
         "title": "",
-        "body": body.replace("\r\n", "\n").rstrip("\n")[:MAX_NOTE_BODY],
+        "body": body[:MAX_NOTE_BODY],
         "modified": m.get("lastModifiedDateTime", ""),
     }
+    # A cut note is still worth reading, but writing it back would replace
+    # the whole note with its first part: the provider opens it read-only.
+    if len(body) > MAX_NOTE_BODY:
+        note["truncatedAt"] = MAX_NOTE_BODY
+    return note
 
 
 def cmd_list(cached):

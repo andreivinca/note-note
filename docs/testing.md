@@ -295,12 +295,13 @@ did not save, and it will not show up in any other test.
 
 ## Testing the provider scripts
 
-Four suites, and none of them needs the shell, a display, an account or the
+These suites need no shell, a display, an account or the
 network — every request is answered by a stub:
 
 ```bash
 python3 providers/local/selftest.py       # the listing's order, and statx(2)
 python3 providers/notion/selftest.py      # a page is never emptied to save it
+python3 providers/sticky/selftest.py      # a cut note opens read-only, never as a partial note
 python3 providers/onenote/selftest.py     # which writes may be run again
 python3 lib/notemerge/selftest.py         # shared merging and recovery storage
 python3 providers/onenote/merge_selftest.py # concurrent edits, conflicts and OneNote saves
@@ -315,6 +316,11 @@ Each pins a bug that shipped, and was found by a review of the Python:
   through to a tie-break that compared *size as text*, so a note reordered
   itself as it was typed into. It checks the `struct statx` layout as well,
   since an offset wrong by eight bytes still hands back a plausible timestamp.
+- **`providers/sticky/selftest.py`** — a note longer than the provider's
+  256 KiB ceiling is cut to it and says so (`truncatedAt`), and the
+  provider opens such a note read-only with the reason. It used to open
+  editable, so the next save would have written the first part over the
+  whole note.
 - **`providers/notion/selftest.py`** — a save PATCHes the new blocks in
   **before** deleting the old ones. Written the other way round it deleted
   first, so a refused insert — a 400 on a block Notion will not take, or the

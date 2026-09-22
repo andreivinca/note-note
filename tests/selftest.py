@@ -13,6 +13,7 @@ SUITES = [
     "lib/notemerge/selftest.py",
     "providers/local/selftest.py",
     "providers/notion/selftest.py",
+    "providers/sticky/selftest.py",
     "providers/onenote/selftest.py",
     "providers/onenote/merge_selftest.py",
     "providers/onenote/search_selftest.py",

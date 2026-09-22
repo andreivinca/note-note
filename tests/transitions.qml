@@ -311,12 +311,13 @@ ShellRoot {
     mergeSession.currentPath = ""
     document.body = "B"
   }
+  property var sessionReports: []
   Notes.NoteSession {
     id: session
     editor: document
     providerFor: function(path) { return provider }
     versionFor: function(path) { return "1" }
-    report: function(message) {}
+    report: function(message) { test.sessionReports.push(message) }
   }
   function sessionCases() {
     session.selectPath("test:A")
@@ -342,16 +343,23 @@ ShellRoot {
     document.conversions.shift()("unsaved A", true)
     provider.saves.shift().callback({ version: "2" })
     check("successful retry releases the retained draft", !session.drafts["test:A"] && !session.busy && session.loadedVersion === "2")
+    test.sessionReports = []
+    session.selectPath("test:C")
+    provider.loads[4]({ body: "cut", editable: false, reason: "only part of it could be read" })
+    check("a read-only load holds the editor and says the provider's reason",
+          document.readOnly && test.sessionReports.join("|") === "only part of it could be read")
+    session.selectPath("test:A")
+    provider.loads[5]({ body: "A again" })
+    check("a writable load releases the editor again", !document.readOnly && test.sessionReports.length === 1)
     session.reloadCurrent()
     session.selectPath("test:B")
-    provider.loads[4]({ body: "late reload" })
-    provider.loads[5]({ body: "B" })
+    provider.loads[6]({ body: "late reload" })
+    provider.loads[7]({ body: "B" })
     check("reload and selection share the same generation guard", document.body === "B")
     session.onEdited()
     session.remove("test:B", function(result) {})
     provider.deletions.shift()({ error: "delete refused" })
     check("failed delete preserves the editable unsaved note", session.dirty && document.body === "B" && !document.readOnly)
-
   }
 
   QtObject {

@@ -218,7 +218,16 @@ Item {
 
   function load(path, cb) {
     var n = noteAt(path)
-    cb(n ? { title: "", body: n.body, editable: true, version: n.modified || "" } : { error: "unknown note" })
+    if (!n) {
+      cb({ error: "unknown note" })
+      return
+    }
+    if (n.truncatedAt) {
+      cb({ title: "", body: n.body, editable: false, version: n.modified || "",
+           reason: "Only the first " + Math.round(n.truncatedAt / 1024) + " KB of this note could be read, so it opened read-only" })
+      return
+    }
+    cb({ title: "", body: n.body, editable: true, version: n.modified || "" })
   }
 
   // A save the lane never sent. Superseded means a newer save of the same

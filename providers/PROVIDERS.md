@@ -164,7 +164,11 @@ them.
 ## Functions
 
 - `refresh()` — (re)load; emit `changed` when `sections` are ready.
-- `load(path, cb)` → `cb({ title, body, editable, error, base, view, recovered, conflict })`
+- `load(path, cb)` → `cb({ title, body, editable, reason, error, base, view, recovered, conflict })`
+  `reason` says, in the user's words, why `editable` is false — a note cut at
+  a size limit, a page holding what the backend cannot write back. The host
+  shows it once when the note opens. A read-only note without one opens in
+  silence, so give one.
   `view` (optional) is an opaque editing baseline. The host accepts it with
   the displayed document and passes it back in `save` options. A provider
   must not infer the active editor's baseline from its body cache or from a

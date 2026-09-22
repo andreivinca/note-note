@@ -121,7 +121,7 @@ Item {
     if (draft) {
       editor.restoreDocument(draft.document)
       session.editingView = draft.view || null
-      session.noteReady(false)
+      session.noteReady(false, "")
       session.dirty = !!draft.error
       if (draft.conflict) {
         session.showConflict(path, draft.conflict)
@@ -156,7 +156,7 @@ Item {
           editor.restoreViewState(view)
         }
         session.editingView = result.view || null
-        session.noteReady(result.editable === false)
+        session.noteReady(result.editable === false, result.reason || "")
         if (result.recovered) {
           session.dirty = true
           session.drafts[path] = { document: editor.snapshotDocument(),
@@ -187,12 +187,17 @@ Item {
     return session.currentPath === path && session.noteLoadSeq === generation
   }
 
-  function noteReady(readOnly) {
+  // `reason` is the provider's own words for why the note is read-only, said
+  // once on the status line; the view bar keeps showing "Read-only" after it.
+  function noteReady(readOnly, reason) {
     editor.readOnly = readOnly || session.locked
     session.loadFailed = false
     session.loadingNote = false
     session.loadingPath = ""
     session.dirty = false
+    if (readOnly && reason) {
+      session.report(reason)
+    }
   }
 
   function noteUnavailable(message) {
