@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+from xml.etree import ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN_ROOTS = {"assets", "cpp", "design", "lib", "providers", "services", "ui"}
@@ -62,6 +63,10 @@ def main():
         parser.error("configure --build-dir with -DCMAKE_BUILD_TYPE=Release first")
     manifest = json.loads((ROOT / "manifest.json").read_text())
     version = manifest["version"]
+    metainfo = ET.parse(ROOT / "packaging/desktop/io.github.andreivinca.note-note.metainfo.xml")
+    release = metainfo.find("releases/release")
+    if release is None or release.get("version") != version:
+        parser.error("the AppStream release metadata does not lead with version " + version)
     binary_version = run([str(build / "note-note"), "--version"], capture_output=True, text=True,
                          env=dict(os.environ, QT_QPA_PLATFORM="offscreen", QT_QPA_PLATFORMTHEME="generic")).stdout.strip()
     if binary_version != "note-note " + version:

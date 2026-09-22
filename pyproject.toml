@@ -4,7 +4,8 @@
 
 [project]
 name = "note-note"
-version = "1.0.21"
+# The version is written once, in manifest.json; nothing reads it from here.
+dynamic = ["version"]
 description = "Notes for Linux and the Omarchy shell: your Markdown notebooks on disk alongside Microsoft Sticky Notes, OneNote and Notion."
 # Nothing in the tree uses syntax newer than 3.8 — no match statement, no
 # walrus, no PEP 604 unions — so the floor is set by what is still supported

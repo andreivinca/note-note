@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 3.21)
-project(NoteNote VERSION 1.0.21 LANGUAGES CXX)
+# manifest.json is the one place the version is written; the executable,
+# the build info and the packager all read it from here.
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/manifest.json" NOTE_NOTE_MANIFEST)
+string(JSON NOTE_NOTE_VERSION GET "${NOTE_NOTE_MANIFEST}" version)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS manifest.json)
+project(NoteNote VERSION ${NOTE_NOTE_VERSION} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

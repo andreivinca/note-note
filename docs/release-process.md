@@ -24,7 +24,9 @@ runtime, permissions and bundle checksum.
 
 1. Work is committed **only when the author asks for it**.
 2. Bump `version` in `manifest.json` (semver: breaking layout/contract change
-   → major, feature → minor, fix → patch).
+   → major, feature → minor, fix → patch) and add the release to
+   `packaging/desktop/io.github.andreivinca.note-note.metainfo.xml`. Nothing
+   else carries the version: CMake and the packagers read it from there.
 3. `omarchy plugin validate .` must pass.
 4. Commit, push to `master`.
 5. `gh release create vX.Y.Z --title "Note Note X.Y.Z" --notes "…"` — notes

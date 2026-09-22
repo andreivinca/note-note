@@ -71,6 +71,9 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
+The version comes from `manifest.json`; CMake reads it at configure time,
+so a bump there is the whole bump.
+
 The native text inspector is compiled into the executable. `sh cpp/build.sh`
 continues to build the optional QML module used by the Omarchy plugin.
 

@@ -6,10 +6,10 @@ Both use the shared workspace and providers in this repository.
 
 ## Install and run
 
-With Flatpak installed, install the local 1.0.21 x86_64 bundle:
+With Flatpak installed, install the local bundle for your architecture:
 
 ```bash
-flatpak install --user ./note-note-1.0.21-x86_64.flatpak
+flatpak install --user ./note-note-<version>-x86_64.flatpak
 flatpak run io.github.andreivinca.note-note
 ```
 
@@ -65,8 +65,11 @@ JOBS=4 ./build-flatpak.sh
 The checksum is generated and checked after the bundle is built. Build output
 also appears in the terminal, and a failed build stops the script before
 bundling. The runtime is downloaded separately when installing the bundle.
-Keep `manifest.json`, the CMake project version and the AppStream release
-metadata in sync when changing versions.
+The version is `manifest.json`'s alone: CMake reads it into the executable
+and the build info, this script names the bundle from it, and
+`packaging/package.py` refuses to package when the AppStream release
+metadata does not lead with it — the one file that still needs a release
+entry written by hand.
 
 The script builds locally; it does not install the app, create commits, or
 publish releases. Flathub uses its own build automation and the manifest in
