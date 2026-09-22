@@ -22,6 +22,7 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "lib"))
 from notewalk import notebook_keys  # noqa: E402
 from readfile import read_capped  # noqa: E402
+import notefile  # noqa: E402
 
 DEADLINE = 10.0     # seconds for the whole search; expired = partial answer
 MAX_MATCHES = 1000
@@ -46,7 +47,9 @@ def main():
             if matched >= MAX_MATCHES or time.monotonic() > deadline:
                 return
             text = read_capped(path, max_bytes, deadline).decode("utf-8", "replace")
-            if needle in text.casefold():
+            # The body only: the host already matches titles, and the front
+            # matter's own words ("title:") are nobody's search.
+            if needle in notefile.split(text)[1].casefold():
                 sys.stdout.write(path + "\n")
                 matched += 1
 

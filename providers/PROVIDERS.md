@@ -520,5 +520,9 @@ processes before exiting. Failed saves keep the window and draft open.
 Use `services/processes/ProcessRunner.qml` for framed script requests. It sends
 stdin after startup, waits for both output and exit, and settles failure,
 cancellation or timeout exactly once. Streaming device-code sign-in remains a
-separate protocol. Editable local files use `lib/readfile.py --json`, which
-returns either complete UTF-8 text with byte count/version or an explicit error.
+separate protocol. An editable file is read through `lib/readfile.read_document`,
+which answers with either the complete UTF-8 text, its byte count and version,
+or an explicit error — never a partial note. The local provider's
+`operations.py read` splits that text the one way its format is split
+(`providers/local/notefile.py`, which the listing, the search and the save
+share): a front-matter line the app does not own is kept and written back.

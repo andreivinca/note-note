@@ -18,6 +18,7 @@ sys.path[:0] = [str(ROOT / path) for path in (
 import fileio  # noqa: E402 — plugin modules are imported from the source tree
 import readfile  # noqa: E402 — plugin modules are imported from the source tree
 import operations  # noqa: E402 — plugin modules are imported from the source tree
+import notefile  # noqa: E402 — plugin modules are imported from the source tree
 import images  # noqa: E402 — plugin modules are imported from the source tree
 import notion_md  # noqa: E402 — plugin modules are imported from the source tree
 from mdtext import code_span, code_fence  # noqa: E402 — plugin modules are imported from the source tree
@@ -55,6 +56,32 @@ class Files(unittest.TestCase):
 
     def operation(self, action, **payload):
         return operations.execute(dict(root=str(self.root), file=str(self.note), action=action, **payload))
+
+    def test_front_matter_the_app_does_not_own_survives_a_save(self):
+        # A hand-written front matter (an outside editor's `tags:`) used to
+        # open as body text and be written back under a second, empty one.
+        self.note.write_text("---\ntitle: Shopping\ntags: a, b\n---\nmilk\n", encoding="utf-8")
+        read = self.operation("read")
+        self.assertEqual((read["title"], read["body"]), ("Shopping", "milk\n"))
+        saved = self.operation("save", title="Groceries", body="milk\neggs\n")
+        self.assertEqual(saved["preview"], "milk")
+        self.assertEqual(self.note.read_text(encoding="utf-8"),
+                         "---\ntitle: Groceries\ntags: a, b\n---\nmilk\neggs\n")
+
+    def test_the_note_format_has_one_reading(self):
+        for text, expected in (
+                ("---\ntitle: X\ntags: a\n---\nbody\n", ("X", "body\n", ["tags: a"])),
+                ("---\ntitle:\tTabbed  \n---\n# Head\n", ("Tabbed", "# Head\n", [])),
+                ("no front matter\n", ("", "no front matter\n", [])),
+                ("---\ntitle: never closed\nbody", ("", "---\ntitle: never closed\nbody", [])),
+                ("---\n---\n", ("", "", []))):
+            with self.subTest(text):
+                title, body, extra = notefile.split(text)
+                self.assertEqual((title, body, extra), expected)
+                self.assertEqual(notefile.split(notefile.serialize(title, body, extra)), expected)
+        self.assertEqual(notefile.serialize("two\nlines", "b"), "---\ntitle: two lines\n---\nb")
+        self.assertEqual(notefile.preview("\n\n## *Hello* `world`\nnext"), "Hello world")
+        self.assertEqual(len(notefile.preview("x" * 500)), notefile.PREVIEW_CHARS)
 
     def test_empty_missing_refused_and_oversize_are_distinct(self):
         self.note.write_bytes(b"")

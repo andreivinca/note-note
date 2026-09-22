@@ -66,7 +66,6 @@ Item {
   // cannot be trusted to be a plain file.
   readonly property string listScript: dir + "/list.py"
   readonly property string searchScript: dir + "/search.py"
-  readonly property string readScript: dir + "/../../lib/readfile.py"
   // This provider's limits: a note bigger than this is listed but not loaded
   // (it is almost certainly not a note), and the listing itself is capped.
   readonly property int maxNoteBytes: 2 * 1024 * 1024
@@ -115,24 +114,9 @@ Item {
     return key || "Notes"
   }
 
-  // ── file format ─────────────────────────────────────────────────────
-  function parseNote(raw) {
-    var m = /^---\n(?:title:[ \t]?(.*))?\n?---\n?/.exec(raw)
-    if (!m) {
-      return { title: "", body: raw }
-    }
-    return { title: (m[1] || "").trim(), body: raw.substring(m[0].length) }
-  }
-  function previewOf(body) {
-    var lines = body.split("\n")
-    for (var i = 0; i < lines.length; i++) {
-      var l = lines[i].replace(/^[#>\-\*\s]+/, "").replace(/[*_`]/g, "").trim()
-      if (l) {
-        return l
-      }
-    }
-    return ""
-  }
+  // The file format — the front matter, the title, the preview — is
+  // notefile.py's alone; the listing, the search and the operations all
+  // read it there, and nothing here parses a note.
 
   // ── sections ────────────────────────────────────────────────────────
   // Notebooks the user folded shut (single-tab shape only), by key — kept in
@@ -340,13 +324,13 @@ Item {
 
   function load(path, cb) {
     var file = root.fileOf(path)
-    return runner.run({ command: ["python3", root.readScript, "--json", file, String(root.maxNoteBytes)] }, function(result) {
+    var request = JSON.stringify({ action: "read", root: root.notesRoot, file: file })
+    return runner.run({ command: ["python3", root.dir + "/operations.py"], payload: request }, function(result) {
       if (result.error) {
         cb(result)
         return
       }
-      var note = root.parseNote(result.text)
-      cb({ title: note.title, body: note.body, editable: true, version: result.version,
+      cb({ title: result.title, body: result.body, editable: true, version: result.version,
            base: file.substring(0, file.lastIndexOf("/")) })
     })
   }
@@ -385,7 +369,7 @@ Item {
           return note
         }
         return { key: note.key, file: note.file, path: path, title: title.trim(),
-                 preview: previewOf(result.body), size: result.bytes, version: result.version }
+                 preview: result.preview, size: result.bytes, version: result.version }
       })
       rebuild()
     }, cb)

@@ -32,7 +32,6 @@ not the one lookup in this module that follows a link.
 import ctypes
 import errno
 import os
-import re
 import stat
 import sys
 import time
@@ -40,6 +39,7 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "lib"))
 from notewalk import notebook_keys  # noqa: E402
 from readfile import read_capped  # noqa: E402
+import notefile  # noqa: E402
 
 HEAD_BYTES = 4096          # of a note: the front matter and the first content line
 ORDER_BYTES = 256 * 1024   # .order / .notebooks hold file names, one per line
@@ -124,21 +124,12 @@ def birth_time(path):
 
 
 def head_of(path, deadline):
-    """(title, preview) from a note's first bytes: `title:` inside the ---
-    front matter, and the first non-empty content line, markers stripped."""
+    """(title, preview) from a note's first bytes, read the one way the
+    format is read (notefile): the front matter sits at the top and the
+    preview is the first content line, so the head is enough."""
     text = read_capped(path, HEAD_BYTES, deadline).decode("utf-8", "replace")
-    title, preview, fm = "", "", False
-    for i, line in enumerate(text.split("\n")):
-        if i == 0 and line == "---":
-            fm = True
-        elif fm and line == "---":
-            fm = False
-        elif fm and line.startswith("title:"):
-            title = line[len("title:"):]
-        elif not fm and not preview and line.strip():
-            preview = re.sub(r"^[#>*\- \t]+", "", line[:200])
-            preview = re.sub(r"[*_`]", "", preview)
-    return title.replace("\t", " ").lstrip(" "), preview.replace("\t", " ")
+    title, body, _ = notefile.split(text)
+    return title, notefile.preview(body)
 
 
 def main():
