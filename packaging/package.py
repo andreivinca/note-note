@@ -29,8 +29,6 @@ def tracked_files():
 def plugin_file(path):
     if path.name.startswith(".") or "selftest" in path.name:
         return False
-    if path.parts[:2] == ("services", "theme"):
-        return False
     return path.name in PLUGIN_FILES or path.parts[0] in PLUGIN_ROOTS or path.parts[:2] == ("hosts", "omarchy")
 
 

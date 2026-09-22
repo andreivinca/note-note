@@ -11,9 +11,9 @@ configure_file(packaging/build-info.json.in note-note-build.json @ONLY)
 file(RELATIVE_PATH NOTE_NOTE_DATA_FROM_BIN "${CMAKE_INSTALL_FULL_BINDIR}" "${CMAKE_INSTALL_FULL_DATADIR}/note-note")
 
 add_library(note-note-theme STATIC
-    services/theme/palette.cpp services/theme/palette.h
-    services/theme/portalsettings.cpp services/theme/portalsettings.h
-    services/theme/desktoptheme.cpp services/theme/desktoptheme.h)
+    hosts/standalone/theme/palette.cpp hosts/standalone/theme/palette.h
+    hosts/standalone/theme/portalsettings.cpp hosts/standalone/theme/portalsettings.h
+    hosts/standalone/theme/desktoptheme.cpp hosts/standalone/theme/desktoptheme.h)
 target_link_libraries(note-note-theme PUBLIC Qt6::Gui Qt6::DBus)
 
 add_executable(note-note
@@ -32,12 +32,22 @@ target_compile_definitions(note-note PRIVATE
 )
 install(TARGETS note-note RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES Workspace.qml LICENSE NOTICE.md DESTINATION ${CMAKE_INSTALL_DATADIR}/note-note)
+# Runtime data is installed by what it is: the QML, scripts and logos the
+# application loads, the fonts, and the licences and notes of what is
+# vendored. A source file, a test or a build product in these trees is not
+# a runtime file and stays out by that alone; the two directory excludes are
+# for generated trees whose contents would otherwise match.
 install(DIRECTORY assets design ui providers services lib
     DESTINATION ${CMAKE_INSTALL_DATADIR}/note-note
-    PATTERN "__pycache__" EXCLUDE PATTERN "*.pyc" EXCLUDE PATTERN "graphify-out" EXCLUDE
-    PATTERN "*selftest*" EXCLUDE)
-install(DIRECTORY hosts/standalone DESTINATION ${CMAKE_INSTALL_DATADIR}/note-note/hosts
-    FILES_MATCHING PATTERN "*.qml")
+    FILES_MATCHING
+    PATTERN "__pycache__" EXCLUDE
+    PATTERN "graphify-out" EXCLUDE
+    PATTERN "*selftest*" EXCLUDE
+    PATTERN "*.qml" PATTERN "*.js" PATTERN "*.py" PATTERN "qmldir"
+    PATTERN "*.svg" PATTERN "*.ttf" PATTERN "*.otf"
+    PATTERN "*.md" PATTERN "LICENSE*" PATTERN "COPYING*")
+install(FILES hosts/standalone/Main.qml hosts/standalone/Backend.qml hosts/standalone/TextInspector.qml
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/note-note/hosts/standalone)
 install(FILES packaging/desktop/io.github.andreivinca.note-note.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 install(FILES packaging/desktop/io.github.andreivinca.note-note.metainfo.xml DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo)
 install(FILES packaging/desktop/io.github.andreivinca.note-note.svg DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)

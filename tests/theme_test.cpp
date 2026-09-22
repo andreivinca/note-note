@@ -1,4 +1,4 @@
-#include "../services/theme/desktoptheme.h"
+#include "../hosts/standalone/theme/desktoptheme.h"
 
 #include <QDBusArgument>
 #include <QDBusMetaType>

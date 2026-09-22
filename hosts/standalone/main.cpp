@@ -1,7 +1,7 @@
 #include "processbackend.h"
 #include "runtime.h"
 #include "../../cpp/textblocks.h"
-#include "../../services/theme/desktoptheme.h"
+#include "theme/desktoptheme.h"
 
 #include <QCommandLineParser>
 #include <QDir>

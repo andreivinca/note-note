@@ -11,7 +11,7 @@ executable creates a normal Qt window on Wayland or X11.
 | `Workspace.qml` | Application state, provider lifecycle, note selection, autosave, settings, shortcuts and shared UI |
 | `ui/`, `services/`, `providers/`, `lib/` | Editor, document conversion, request queues and backend behavior, shared by both hosts |
 | `design/` | Shared color facade, dimensions and reusable controls |
-| `services/theme/` | Standalone desktop detection, palette resolution, portal preferences and live theme updates |
+| `hosts/standalone/theme/` | Standalone desktop detection, palette resolution, portal preferences and live theme updates — C++ the standalone executable links, kept inside its host so the shared runtime tree holds only what both hosts load |
 | `services/platform/Platform.qml` | Host services, XDG paths, process creation, clipboard, external URLs and text inspector selection |
 | `services/processes/` | Process lifecycle, stdin payloads, JSON parsing, streaming lines, timeouts, output limits and exactly-once completion |
 | `hosts/omarchy/` | `Notes.qml` shell entry point, overlay and detached windows, Quickshell process transport and theme adapter |

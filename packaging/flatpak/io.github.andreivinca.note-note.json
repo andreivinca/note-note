@@ -23,8 +23,7 @@
     "/lib/pkgconfig",
     "/lib/*.la",
     "/share/man",
-    "/share/doc",
-    "/share/note-note/services/theme"
+    "/share/doc"
   ],
   "modules": [
     {
