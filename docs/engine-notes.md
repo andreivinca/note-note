@@ -362,10 +362,16 @@ and bold.
 grow a backslash on every save — that was Qt's own habit, and copying it just
 moves the complaint. `_` does not emphasise inside a word (`user_name_field`
 is not emphasis), `*` and `~` matter only next to a non-space character, and
-`- ` at a line start is a bullet while `**bold**` is not. `qthtml/mdtext.py`
+`- ` at a line start is a bullet while `**bold**` is not. `services/markdown/mdtext.py`
 holds the rules, and `reader` checks its own output by re-parsing it: if a
 single character would have changed meaning, the note is rendered again with
-strict escaping.
+strict escaping. That fallback is blunt — it escapes every marker in the
+whole note — and it cannot mend a line start, so the lenient rules must know
+every construct the parser enables: `==` (a highlight), a line of nothing but
+dashes or equals signs (a setext underline, which an e-mail signature's `--`
+is; it used to make the note unsavable), a table's `---|---` row, a
+`[name]: url` reference definition, and `<!--`. A construct enabled in
+`parse.py` gets its rule there first.
 
 ---
 

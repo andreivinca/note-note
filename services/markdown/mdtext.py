@@ -6,6 +6,13 @@ Markdown writer earned. A marker is escaped only where it could actually
 open or close something — and `reader` verifies the result by re-parsing it,
 falling back to `strict` escaping if a single character would have changed
 the meaning.
+
+The lenient rules have to know every construct `parse.py` enables, because
+the fallback is blunt: it escapes every marker in the whole note, which is
+the complaint above all over again, and it cannot repair a line start at
+all — a two-dash line under text, the shape of an e-mail signature, was a
+setext underline the strict pass could not undo, and the note could not be
+saved. Add a rule here for a construct before enabling it there.
 """
 import re
 
@@ -13,8 +20,17 @@ ALWAYS = set("\\`")
 # `*` and `~` only mean something next to a non-space character; a lone one
 # between spaces is literal in every dialect we care about.
 ADJACENT = set("*~")
-LINE_START = re.compile(r"^(\s*)([#>]|[-+*](?=\s)|[-=]{3,}\s*$|\|)")
+# What can start a heading, a quote, a bullet, a rule, a table row — and a
+# line made of nothing but dashes or equals signs, however few: under a line
+# of text it is a setext underline, which turns that line into a heading and
+# is itself consumed. An e-mail signature's `--` is exactly that.
+LINE_START = re.compile(r"^(\s*)([#>]|[-+*](?=\s)|[-=](?=[-=\s]*$)|\|)")
 LINE_NUMBER = re.compile(r"^(\s*\d+)([.)])")
+# A table's delimiter row without a leading pipe (`---|---`): with a line of
+# text above it, the two become a table and the row disappears.
+TABLE_DELIMITER = re.compile(r"^(\s*:?)(-)(?=-*:?\s*(?:\|\s*:?-+:?\s*)+\|?\s*$)")
+# A link reference definition (`[name]: url`) is consumed whole by the parser.
+LINK_DEFINITION = re.compile(r"^(\s*)(\[)(?=[^\]\n]*\]:)")
 STRICT = re.compile(r"([\\*_`~=\[\]<>|])")
 UNESCAPED_PIPE = re.compile(r"(?<!\\)((?:\\\\)*)\|")
 LINK_DESTINATION_MARKERS = re.compile(r"([\\()])")
@@ -34,7 +50,10 @@ def escape_inline(text, strict=False):
         escape = (char in ALWAYS
                   or (char in ADJACENT and not (before.isspace() and after.isspace()))
                   or (char == "_" and _emphasises(before, after))
-                  or (char == "<" and (after.isalpha() or after == "/"))
+                  # `==` opens or closes a highlight; a lone `=` is arithmetic.
+                  or (char == "=" and (before == "=" or after == "="))
+                  # A tag, a closing tag, a comment or a processing instruction.
+                  or (char == "<" and (after.isalpha() or after in "/!?"))
                   or (char in "[]" and link_ahead))
         out.append("\\" + char if escape else char)
     return "".join(out)
@@ -59,6 +78,8 @@ def escape_line_start(line):
     are, which is what keeps emphasis at the start of a line intact.
     """
     line = LINE_START.sub(r"\1\\\2", line or "")
+    line = TABLE_DELIMITER.sub(r"\1\\\2", line)
+    line = LINK_DEFINITION.sub(r"\1\\\2", line)
     return LINE_NUMBER.sub(r"\1\\\2", line)
 
 

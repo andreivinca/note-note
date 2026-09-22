@@ -201,6 +201,27 @@ class Content(unittest.TestCase):
         saved = to_markdown(to_html(fence + "\n" + value + "\n" + fence))
         self.assertEqual(parse(saved)[0]["raw"], value + "\n")
 
+    def test_text_shapes_the_parser_would_consume_stay_text(self):
+        # Each of these used to vanish on re-parse: a two-dash signature line
+        # (a setext underline), a table delimiter row, a link reference
+        # definition and an HTML comment. The signature line could not be
+        # saved at all; the others flipped the whole note to strict escaping.
+        for html_in, words in (
+                ("<p>Regards,<br />--<br />Andrei</p>", "Regards,--Andrei"),
+                ("<p>a | b<br />---|---<br />c | d</p>", "a|b---|---c|d"),
+                ("<p>a | b<br />:---|---:<br />c | d</p>", "a|b:---|---:c|d"),
+                ("<p>[foo]: /url</p><p>see [foo]</p>", "[foo]:/urlsee[foo]"),
+                ("<p>&lt;!-- hidden --&gt; shown</p>", "<!--hidden-->shown"),
+                ("<p>Foo<br />==<br />Bar</p>", "Foo==Bar")):
+            with self.subTest(html_in):
+                saved = to_markdown(html_in)
+                self.assertEqual("".join(walk_text(parse(saved)).split()), words)
+                self.assertEqual(to_markdown(to_html(saved)), saved)
+
+    def test_a_literal_highlight_does_not_escape_the_rest_of_the_note(self):
+        saved = to_markdown("<p>a ==mark== b</p><p>2 * 3 = 6 and user_name [ok] a|b</p>")
+        self.assertEqual(saved, "a \\=\\=mark\\=\\= b\n\n2 * 3 = 6 and user_name [ok] a|b\n")
+
     def test_literal_highlight_markers_are_escaped_on_fallback(self):
         self.assertEqual(walk_text(parse(to_markdown("<p>==literal==</p>"))), "==literal==")
 
