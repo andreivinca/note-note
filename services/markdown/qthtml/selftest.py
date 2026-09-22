@@ -332,9 +332,16 @@ def check_as_text(verbose):
     ]
     for name, markdown, block, expected in cases:
         actual = convert(to_html(markdown), as_text=block)
+        # The read serves the caret map; `note` is checked once, below.
+        actual = {key: value for key, value in actual.items() if key != "note"}
+        expected = {key: value for key, value in expected.items() if key != "note"}
         if actual != expected:
             failures += 1
             report(name, "as text", expected, actual, verbose)
+    blank = convert(to_html("```\n\n```\n"), as_text=0)
+    if blank["note"] != "":
+        failures += 1
+        report("a lone blank is not a note", "as text", "", blank["note"], verbose)
     print("as text (one code block read as paragraphs)")
     print("  %d/%d cases" % (len(cases) - failures, len(cases)))
     return failures

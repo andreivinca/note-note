@@ -87,7 +87,7 @@ Item {
   // content, so it may ride on argv.
   function toMarkdown(html, callback, base, asText) {
     if (!html) {
-      callback("", { blocks: [], count: 0, ok: true })
+      callback("", { blocks: [], count: 0, note: "", ok: true })
       return
     }
     var args = ["to-markdown"].concat(base ? ["--base", base] : [])
@@ -95,12 +95,12 @@ Item {
       args = args.concat(["--as-text", String(asText)])
     }
     run(args, html, function(answer) {
-      if (!answer || typeof answer.markdown !== "string") {
+      if (!answer || typeof answer.markdown !== "string" || typeof answer.note !== "string") {
         console.warn("note-note: could not read the editor's document")
-        callback("", { blocks: [], count: 0, ok: false })
+        callback("", { blocks: [], count: 0, note: "", ok: false })
         return
       }
-      callback(answer.markdown, { blocks: answer.blocks || [], count: answer.count || 0, ok: true })
+      callback(answer.markdown, { blocks: answer.blocks || [], count: answer.count || 0, note: answer.note, ok: true })
     })
   }
 

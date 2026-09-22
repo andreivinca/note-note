@@ -99,9 +99,9 @@ Item {
   // The note as it belongs on disk.  callback(markdown, ok)
   // The blank landing paragraph the editor parks after a trailing rule or
   // table (insertSnippet, leaveBlock) is its own furniture, not the note's:
-  // one still holding nothing but its filler at save time stays out of the
-  // file. Reloading such a note ends it with the rule again, and
-  // escapeForward is what steps past it.
+  // the converter's `note` answer leaves every trailing blank line out of the
+  // file (qthtml/reader.py, as_note). Reloading such a note ends it with the
+  // rule again, and escapeForward is what steps past it.
   //
   // `ok` is the converter's, passed on rather than swallowed: the caller is
   // autosave, and an empty answer from a converter that died is not an empty
@@ -116,7 +116,7 @@ Item {
         callback("", false)
         return
       }
-      callback(md.replace(/(^|\n) \n?$/, "$1"), true)
+      callback(map.note, true)
     }, root.documentBase)
   }
 

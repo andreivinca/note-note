@@ -48,12 +48,17 @@ LIST_BLOCK_TAGS = frozenset({"p", "div", "h1", "h2", "h3", "h4", "h5", "h6",
 
 def to_markdown(html, base=""):
     """HTML from a RichText `TextEdit` -> Markdown text, as it belongs on
-    disk: trailing blank lines are the editor's (the line the caret parks on
-    after leaving a block), not the note's, so they are trimmed here — and
-    only here. `convert` keeps them, because the toolbar's caret map must
-    name every line the caret can be on; trimming there sent block tools to
-    the line above whenever the caret sat on a trailing blank."""
-    markdown = convert(html, base)["markdown"]
+    disk. It is `convert`'s `note`, the one answer the editor saves, so
+    what the tests certify through this call is what ships."""
+    return convert(html, base)["note"]
+
+
+def as_note(markdown):
+    """Markdown as it belongs on disk: trailing blank lines are the editor's
+    (the line the caret parks on after leaving a block), not the note's, so
+    they come off here — and only here. The caret map keeps them, because it
+    must name every line the caret can be on; trimming there sent block
+    tools to the line above whenever the caret sat on a trailing blank."""
     lines = markdown.rstrip("\n").split("\n") if markdown else []
     while lines and not lines[-1].strip():
         lines.pop()
@@ -63,8 +68,10 @@ def to_markdown(html, base=""):
 def convert(html, base="", as_text=None):
     """Markdown plus the line -> block map the editor needs for the caret.
 
-        {"markdown": str, "blocks": [int], "count": int}
+        {"markdown": str, "note": str, "blocks": [int], "count": int}
 
+    `markdown` names every line the caret can be on, for the block tools;
+    `note` is the same text as it belongs on disk (`as_note`), for the save.
     `blocks[i]` is the index of the document paragraph line `i` came from,
     counted the way Qt counts them (docs/engine-notes.md): every paragraph,
     list item, table cell and rule is one, in document order. `base` is the
@@ -82,6 +89,7 @@ def convert(html, base="", as_text=None):
         result = _Reader(strict=True, base=base, as_text=as_text).render(tree)
     if _loses_text(result["markdown"], tree):
         raise ValueError("the document cannot be saved without changing its text")
+    result["note"] = as_note(result["markdown"])
     return result
 
 

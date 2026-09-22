@@ -249,7 +249,20 @@ class Content(unittest.TestCase):
                 "<tr><td><p>1</p><p></p><p>extra</p></td><td><p>2</p></td></tr></table><p>After</p>")
         self.assertEqual(convert(html), {
             "markdown": "Before\n\n| a more | b |\n|---|---|\n| 1 extra | 2 |\n\nAfter\n",
+            "note": "Before\n\n| a more | b |\n|---|---|\n| 1 extra | 2 |\n\nAfter\n",
             "blocks": [0, -1, 1, -1, 4, -1, 8], "count": 9})
+
+    def test_the_shipped_answer_carries_the_note_as_saved(self):
+        # The editor saves the converter's `note`, so the trailing blank lines
+        # it parks the caret on stay out of the file — through the command
+        # line the app runs, not only through to_markdown().
+        html = to_html("Text\n") + '<p style="margin-top:0;margin-bottom:0">\u00a0</p>' * 2
+        answer = json.loads(subprocess.run(
+            [sys.executable, str(ROOT / "services/markdown/qthtml/__main__.py"), "to-markdown"],
+            input=html, capture_output=True, text=True, check=True).stdout)
+        self.assertEqual(answer["note"], "Text\n")
+        self.assertEqual(answer["note"], to_markdown(html))
+        self.assertEqual(answer["markdown"].count("\n"), 5)
 
     def test_document_dialect_agrees_across_adapters(self):
         js = (ROOT / "ui/Dialect.js").read_text()
