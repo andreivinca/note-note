@@ -1,9 +1,13 @@
-#!/bin/sh -e
+#!/bin/sh
 # Builds the optional native text inspector against the system Qt.
 # Needs cmake, a C++ compiler and the qt6-declarative package (on Arch the
 # headers ship with it). The editor works without this — it falls back to
 # scanning the document's HTML — so building is never required.
+#
+# `set -e` lives in the body, not the shebang: everything that mentions this
+# script says `sh cpp/build.sh`, and run that way the shebang is a comment.
+set -eu
 cd "$(dirname "$0")"
-cmake -B build >/dev/null
+cmake -B build
 cmake --build build --parallel
 echo "built: cpp/build/NoteNoteText (restart the shell to pick it up)"

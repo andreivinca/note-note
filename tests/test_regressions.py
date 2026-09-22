@@ -83,6 +83,19 @@ class Files(unittest.TestCase):
         self.assertEqual(notefile.preview("\n\n## *Hello* `world`\nnext"), "Hello world")
         self.assertEqual(len(notefile.preview("x" * 500)), notefile.PREVIEW_CHARS)
 
+    def test_native_build_script_stops_at_the_first_failed_step(self):
+        # `sh cpp/build.sh` ignores the shebang, so a `-e` there never
+        # applied: a failed build still printed "built:" and exited 0.
+        fake = self.root / "bin"
+        fake.mkdir()
+        (fake / "cmake").write_text("#!/bin/sh\necho 'configure failed' >&2\nexit 3\n")
+        (fake / "cmake").chmod(0o755)
+        result = subprocess.run(["sh", str(ROOT / "cpp/build.sh")], capture_output=True, text=True, timeout=30,
+                                env=dict(os.environ, PATH=str(fake) + os.pathsep + os.environ.get("PATH", "")))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("built:", result.stdout)
+        self.assertIn("configure failed", result.stderr)
+
     def test_empty_missing_refused_and_oversize_are_distinct(self):
         self.note.write_bytes(b"")
         self.assertEqual(readfile.read_document(self.note, 8)["text"], "")
