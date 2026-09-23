@@ -361,8 +361,12 @@ class Content(unittest.TestCase):
             match = re.search(r'var ' + name + r' = ("[^"]*")', js)
             self.assertIsNotNone(match, name)
             self.assertEqual(json.loads(match[1]), getattr(dialect, name), name)
+        native = (ROOT / "cpp/dialect.h").read_text()
+        for name in ("QUOTE_PX", "LINE_HEIGHT_PCT"):
+            self.assertEqual(int(re.search(r"constexpr qreal " + name + r" = (\d+);", native)[1]), getattr(dialect, name), name)
+        self.assertEqual(chr(int(re.search(r"BLANK_PARAGRAPH = QChar\(0x([0-9a-f]+)\)", native)[1], 16)), dialect.BLANK_PARAGRAPH)
+        self.assertEqual(re.search(r'MONO_FAMILY = QStringLiteral\("([^"]*)"\)', native)[1], dialect.MONO_FAMILY)
         native = (ROOT / "cpp/textblocks.h").read_text()
-        self.assertEqual(int(re.search(r"constexpr qreal percent = (\d+)", native)[1]), dialect.LINE_HEIGHT_PCT)
         # The editor and the native module agree on the interface version.
         self.assertEqual(int(re.search(r"var NATIVE_VERSION = (\d+)", js)[1]),
                          int(re.search(r"static constexpr int Version = (\d+);", native)[1]))

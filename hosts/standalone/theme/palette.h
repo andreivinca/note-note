@@ -9,6 +9,15 @@
 
 namespace NoteNoteTheme {
 
+// One place a desktop keeps its theme: the palette file, and the surface
+// files layered over it, in the order they apply.
+struct ThemeSource {
+    enum Kind { Omarchy, Kde };
+    Kind kind;
+    QString colors;
+    QStringList surfaces;
+};
+
 struct Environment {
     QString desktop;
     QString configHome;
@@ -17,7 +26,10 @@ struct Environment {
 
     static Environment current();
     static QString detectDesktop(const QString &current, const QString &session, const QString &loginSession);
-    QStringList omarchyDirectories() const;
+    // The theme sources this desktop keeps, first choice first: what
+    // `resolve` reads and what the live theme watches, from one list.
+    QList<ThemeSource> themeSources() const;
+    QStringList themeFiles() const;
 };
 
 struct Appearance {

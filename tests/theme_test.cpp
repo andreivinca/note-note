@@ -183,13 +183,17 @@ private slots:
     {
         QTemporaryDir home;
         auto env = environment(home);
-        write(env.omarchyDirectories().first() + "/colors.toml", omarchyColors());
+        write(env.themeSources().first().colors, omarchyColors());
         write(env.configHome + "/kdeglobals", kdeColors());
+        // The resolver reads and the watcher watches the same files.
+        QVERIFY(env.themeFiles().contains(env.themeSources().first().colors));
+        QVERIFY(env.themeFiles().contains(env.configHome + "/omarchy/shell.toml"));
         write(env.configHome + "/omarchy/shell.toml", "[menu]\nbackground='#203040'\n");
         const QPalette native = fallback(Qt::ColorScheme::Light).qt;
         const Appearance dark{Qt::ColorScheme::Dark, QColor("#a02080")};
         QCOMPARE(resolve(env, dark, native, Qt::ColorScheme::Unknown).qt.color(QPalette::Window), QColor("#203040"));
         env.desktop = "kde";
+        QCOMPARE(env.themeFiles(), QStringList{env.configHome + "/kdeglobals"});
         QCOMPARE(resolve(env, dark, native, Qt::ColorScheme::Unknown).source, "kde");
         env.desktop = "gnome";
         auto palette = resolve(env, dark, native, Qt::ColorScheme::Unknown);
@@ -206,9 +210,9 @@ private slots:
         QCOMPARE(resolve(env, {}, native, Qt::ColorScheme::Unknown).qt.color(QPalette::Window), QColor("#f4f5f7"));
         env.desktop = "hyprland";
         QCOMPARE(resolve(env, {}, native, Qt::ColorScheme::Unknown).source, "omarchy");
-        QVERIFY(QFile::remove(env.omarchyDirectories().first() + "/colors.toml"));
+        QVERIFY(QFile::remove(env.themeSources().first().colors));
         QCOMPARE(resolve(env, {}, native, Qt::ColorScheme::Unknown).source, "builtin");
-        write(env.omarchyDirectories().last() + "/colors.toml", omarchyColors());
+        write(env.themeSources().last().colors, omarchyColors());
         QCOMPARE(resolve(env, {}, native, Qt::ColorScheme::Unknown).source, "omarchy");
     }
 
@@ -231,7 +235,7 @@ private slots:
         const auto env = environment(home);
         DesktopTheme theme(env, QDBusConnection("no-theme-test-bus"));
         QCOMPARE(theme.source(), "builtin");
-        const QString path = env.omarchyDirectories().first() + "/colors.toml";
+        const QString path = env.themeSources().first().colors;
         write(path, omarchyColors());
         QTRY_COMPARE(theme.source(), "omarchy");
         write(path, omarchyColors("#223344"));
@@ -255,7 +259,7 @@ private slots:
         const QString second = home.filePath("second");
         write(first + "/colors.toml", omarchyColors());
         write(second + "/colors.toml", omarchyColors("#405060"));
-        const QString link = env.omarchyDirectories().first();
+        const QString link = QFileInfo(env.themeSources().first().colors).path();
         QVERIFY(QDir().mkpath(QFileInfo(link).absolutePath()));
         QVERIFY(QFile::link(first, link));
         DesktopTheme theme(env, QDBusConnection("no-theme-test-bus"));

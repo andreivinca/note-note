@@ -32,6 +32,7 @@
 // inspector agree.
 #pragma once
 
+#include "dialect.h"
 #include "textlinks.h"
 
 #include <QImage>
@@ -149,8 +150,8 @@ public:
         if (!next.isValid()) {
             return -1;
         }
-        const bool emptyParagraph = (block.text().isEmpty() || block.text() == QString(QChar(0xa0)))
-                && !block.textList() && !isCodeBlock(block)
+        const bool emptyParagraph = (block.text().isEmpty() || block.text() == QString(NoteNoteDialect::BLANK_PARAGRAPH))
+                && !block.textList() && !NoteNoteDialect::isCodeBlock(block.blockFormat())
                 && !block.blockFormat().hasProperty(QTextFormat::BlockTrailingHorizontalRulerWidth);
         QTextCursor cursor(doc);
         cursor.setPosition(position);
@@ -393,8 +394,7 @@ public:
     // block's line height).
     Q_INVOKABLE void normalizeLineHeights()
     {
-        // Mirrors LINE_HEIGHT_PCT in qthtml/dialect.py.
-        constexpr qreal percent = 130;
+        constexpr qreal percent = NoteNoteDialect::LINE_HEIGHT_PCT;
         QTextDocument *doc = m_document ? m_document->textDocument() : nullptr;
         if (!doc) {
             return;
@@ -425,11 +425,11 @@ public:
             return;
         }
         for (QTextBlock block = doc->begin(); block.isValid(); block = block.next()) {
-            if (!isCodeBlock(block)) {
+            if (!NoteNoteDialect::isCodeBlock(block.blockFormat())) {
                 continue;
             }
-            const qreal top = isCodeBlock(block.previous()) ? 0 : codeMargin;
-            const qreal bottom = isCodeBlock(block.next()) ? 0 : codeMargin;
+            const qreal top = neighbourIsCode(block.previous()) ? 0 : codeMargin;
+            const qreal bottom = neighbourIsCode(block.next()) ? 0 : codeMargin;
             QTextBlockFormat format = block.blockFormat();
             if (format.topMargin() == top && format.bottomMargin() == bottom) {
                 continue;
@@ -478,7 +478,7 @@ public:
                 continue;
             }
             cursor.joinPreviousEditBlock();
-            cursor.insertText(QString(QChar(0xa0)));
+            cursor.insertText(QString(NoteNoteDialect::BLANK_PARAGRAPH));
             cursor.endEditBlock();
             if (filled < 0) {
                 filled = block.position();
@@ -494,14 +494,10 @@ signals:
 private:
     TextLinks *m_links;
     int m_linkRevision = 0;
-    static bool isCodeBlock(const QTextBlock &block)
+    // A neighbour past the document's ends is no block at all.
+    static bool neighbourIsCode(const QTextBlock &block)
     {
-        if (!block.isValid()) {
-            return false;
-        }
-        const QTextBlockFormat format = block.blockFormat();
-        return format.background().style() != Qt::NoBrush
-            && !(format.leftMargin() >= 40 && format.rightMargin() >= 40);
+        return block.isValid() && NoteNoteDialect::isCodeBlock(block.blockFormat());
     }
 
     // The image file's own size, from the resource the document already

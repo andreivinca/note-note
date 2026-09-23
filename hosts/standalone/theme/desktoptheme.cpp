@@ -76,15 +76,7 @@ void DesktopTheme::reload()
 
 void DesktopTheme::watchFiles()
 {
-    QStringList paths;
-    if (m_environment.desktop == "omarchy" || m_environment.desktop == "hyprland") {
-        for (const QString &directory : m_environment.omarchyDirectories()) {
-            paths << directory + "/colors.toml" << directory + "/shell.toml";
-        }
-        paths << m_environment.configHome + "/omarchy/shell.toml";
-    } else if (m_environment.desktop == "kde") {
-        paths << m_environment.configHome + "/kdeglobals";
-    }
+    const QStringList paths = m_environment.themeFiles();
     QSet<QString> wanted;
     for (const QString &path : paths) {
         if (QFileInfo::exists(path)) {

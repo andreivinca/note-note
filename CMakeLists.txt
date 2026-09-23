@@ -25,7 +25,7 @@ add_executable(note-note
     hosts/standalone/main.cpp
     hosts/standalone/runtime.cpp hosts/standalone/runtime.h
     hosts/standalone/processbackend.cpp hosts/standalone/processbackend.h
-    cpp/textblocks.cpp cpp/textblocks.h cpp/textlinks.cpp cpp/textlinks.h
+    cpp/dialect.h cpp/textblocks.cpp cpp/textblocks.h cpp/textlinks.cpp cpp/textlinks.h
 )
 target_link_libraries(note-note PRIVATE Qt6::Quick Qt6::QuickControls2 Qt6::Network note-note-theme)
 # The executable knows its resources by their place next to it and by the

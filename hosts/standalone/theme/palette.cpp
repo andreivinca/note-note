@@ -163,9 +163,28 @@ QString Environment::detectDesktop(const QString &current, const QString &sessio
     return QStringLiteral("unknown");
 }
 
-QStringList Environment::omarchyDirectories() const
+QList<ThemeSource> Environment::themeSources() const
 {
-    return {stateHome + QStringLiteral("/omarchy/current/theme"), configHome + QStringLiteral("/omarchy/current/theme")};
+    QList<ThemeSource> sources;
+    if (desktop == "omarchy" || desktop == "hyprland") {
+        for (const QString &directory : {stateHome + QStringLiteral("/omarchy/current/theme"),
+                                         configHome + QStringLiteral("/omarchy/current/theme")}) {
+            sources.append({ThemeSource::Omarchy, directory + QStringLiteral("/colors.toml"),
+                            {directory + QStringLiteral("/shell.toml"), configHome + QStringLiteral("/omarchy/shell.toml")}});
+        }
+    } else if (desktop == "kde") {
+        sources.append({ThemeSource::Kde, configHome + QStringLiteral("/kdeglobals"), {}});
+    }
+    return sources;
+}
+
+QStringList Environment::themeFiles() const
+{
+    QStringList files;
+    for (const ThemeSource &source : themeSources()) {
+        files << source.colors << source.surfaces;
+    }
+    return files;
 }
 
 QByteArray readThemeFile(const QString &path)
@@ -322,18 +341,18 @@ std::optional<Palette> kde(const Values &values)
 Palette resolve(const Environment &environment, const Appearance &appearance,
                 const QPalette &systemPalette, Qt::ColorScheme systemScheme)
 {
-    if (environment.desktop == "omarchy" || environment.desktop == "hyprland") {
-        for (const QString &directory : environment.omarchyDirectories()) {
-            Values surfaces = parseValues(readThemeFile(directory + "/shell.toml"));
-            surfaces.insert(parseValues(readThemeFile(environment.configHome + "/omarchy/shell.toml")));
-            const auto palette = omarchy(parseValues(readThemeFile(directory + "/colors.toml")), surfaces);
-            if (palette) {
-                return *palette;
+    for (const ThemeSource &source : environment.themeSources()) {
+        const Values colors = parseValues(readThemeFile(source.colors));
+        std::optional<Palette> palette;
+        if (source.kind == ThemeSource::Kde) {
+            palette = kde(colors);
+        } else {
+            Values surfaces;
+            for (const QString &path : source.surfaces) {
+                surfaces.insert(parseValues(readThemeFile(path)));
             }
+            palette = omarchy(colors, surfaces);
         }
-    }
-    if (environment.desktop == "kde") {
-        const auto palette = kde(parseValues(readThemeFile(environment.configHome + "/kdeglobals")));
         if (palette) {
             return *palette;
         }

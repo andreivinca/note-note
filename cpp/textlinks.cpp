@@ -1,4 +1,5 @@
 #include "textlinks.h"
+#include "dialect.h"
 
 #include <QAbstractTextDocumentLayout>
 #include <QRegularExpression>
@@ -31,21 +32,10 @@ QTextCharFormat withoutLink(QTextCharFormat format)
     return format;
 }
 
+// Code, block or inline, is never linked or restyled.
 bool isCode(const QTextBlock &block, const QTextCharFormat &format)
 {
-    const auto paragraph = block.blockFormat();
-    if (paragraph.background().style() != Qt::NoBrush
-        && !(paragraph.leftMargin() >= 40 && paragraph.rightMargin() >= 40)) {
-        return true;
-    }
-    for (const QString &family : format.font().families()) {
-        // The dialect explicitly names this generic family for inline code.
-        // The normal note face is iA Writer Mono S, which is ordinary prose.
-        if (family.compare(QStringLiteral("monospace"), Qt::CaseInsensitive) == 0) {
-            return true;
-        }
-    }
-    return false;
+    return NoteNoteDialect::isCodeBlock(block.blockFormat()) || NoteNoteDialect::isMonoFamily(format);
 }
 
 QVector<Link> anchors(const QTextBlock &block)
@@ -175,7 +165,7 @@ void TextLinks::configure(const QColor &colour, bool plainText, const QColor &qu
 void TextLinks::highlightBlock(const QString &)
 {
     const QTextBlock block = currentBlock();
-    const bool quote = block.blockFormat().leftMargin() >= 40 && block.blockFormat().rightMargin() >= 40;
+    const bool quote = NoteNoteDialect::isQuote(block.blockFormat());
     const auto links = detect(block, m_plainText);
     for (auto it = block.begin(); !it.atEnd(); ++it) {
         const QTextFragment fragment = it.fragment();
