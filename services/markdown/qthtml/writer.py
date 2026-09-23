@@ -40,24 +40,21 @@ INLINE_SPAN = {
 }
 
 
-def to_html(markdown, highlight=dialect.DEFAULT_HIGHLIGHT, ink=dialect.DEFAULT_HIGHLIGHT_INK,
-            link=dialect.DEFAULT_LINK, quote_ink=dialect.DEFAULT_QUOTE_INK,
+def to_html(markdown, highlight=dialect.DEFAULT_HIGHLIGHT,
             code_background=dialect.DEFAULT_CODE_BACKGROUND,
             code_chip=dialect.DEFAULT_CODE_CHIP, base=""):
-    """Markdown text -> HTML for a RichText `TextEdit`. `base` is the note's
-    own directory, for measuring images the note names by a relative path."""
-    return _Renderer(highlight, ink, link, quote_ink, code_background, code_chip,
-                     base).document(parse(markdown or ""))
+    """Markdown text -> HTML for a RichText `TextEdit`. The three colours are
+    the ones the document itself carries (a highlight's marker, a code
+    block's slab, an inline code chip); theme ink is the display
+    highlighter's and never comes here. `base` is the note's own directory,
+    for measuring images the note names by a relative path."""
+    return _Renderer(highlight, code_background, code_chip, base).document(parse(markdown or ""))
 
 
 class _Renderer:
-    def __init__(self, highlight, ink, link, quote_ink=dialect.DEFAULT_QUOTE_INK,
-                 code_background=dialect.DEFAULT_CODE_BACKGROUND,
+    def __init__(self, highlight, code_background=dialect.DEFAULT_CODE_BACKGROUND,
                  code_chip=dialect.DEFAULT_CODE_CHIP, base=""):
         self.highlight = highlight
-        self.ink = ink
-        self.link = link
-        self.quote_ink = quote_ink
         self.code_background = code_background
         self.code_chip = code_chip
         self.base = base

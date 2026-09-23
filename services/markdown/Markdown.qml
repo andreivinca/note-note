@@ -17,23 +17,26 @@ Item {
   readonly property string script: dir + "/qthtml/__main__.py"
 
   // The colours of ==highlighted== text. Neither reaches disk: the note keeps
-  // the markers, the document keeps the background. The display highlighter
-  // paints the ink separately, because a
-  // highlight is a light marker, and the editor's own foreground follows the
-  // theme — on a dark theme that would be light text on a light highlight.
+  // the markers, the document keeps the background. The marker is the
+  // writer's; the ink is the editor's display highlighter's alone, painted
+  // over the document — a highlight is a light marker, and the editor's
+  // own foreground follows the theme, which on a dark theme would be light
+  // text on a light highlight.
   property string highlight: "#f9e2af"
   property string highlightInk: "#1e1e2e"
 
   // The colour of a link. Set by the host from the theme (Workspace.qml,
   // linkColour); this default is only what a caller that names none gets.
-  // The native display highlighter applies it without storing a foreground
-  // brush. Authored text colors remain ordinary brushes and survive saving.
+  // The display highlighter applies it without storing a foreground brush,
+  // so the writer is never told it. Authored text colours remain ordinary
+  // brushes and survive saving.
   property string link: "#4282d7"
 
   // A quote's ink and the slab behind a code block, both set by the host
   // from the theme (Workspace.qml). Neither reaches disk: the quote's meaning is
-  // its margins (its bar is drawn by the editor, over the document), the
-  // code block's is its monospace runs on *a* block background.
+  // its margins (its bar is drawn by the editor, over the document, and its
+  // ink is the display highlighter's), the code block's is its monospace
+  // runs on *a* block background, which the writer does paint.
   property string quoteInk: "#9399b2"
   property string codeBackground: "transparent"
 
@@ -59,8 +62,7 @@ Item {
       callback("", true)
       return
     }
-    run(["to-html", "--highlight", root.highlight, "--highlight-ink", root.highlightInk,
-         "--link", root.link, "--quote-ink", root.quoteInk,
+    run(["to-html", "--highlight", root.highlight,
          "--code-background", root.codeBackground,
          "--code-chip", root.codeChip].concat(base ? ["--base", base] : []),
         markdown, function(answer) {

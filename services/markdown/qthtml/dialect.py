@@ -75,12 +75,10 @@ IMAGE_LEAD = "\u00a0"
 MAX_IMAGE_DISPLAY = 640
 
 DEFAULT_HIGHLIGHT = "#f9e2af"
-# Theme ink is painted by the native display highlighter, outside the saved
-# QTextDocument. Every real foreground brush can therefore be an author's
-# text color, even when it happens to equal a theme color.
-DEFAULT_HIGHLIGHT_INK = "#1e1e2e"
-DEFAULT_LINK = "#4282d7"
-DEFAULT_QUOTE_INK = "#9399b2"
+# Theme ink — the text over a highlight, a link's colour, a quote's — is
+# painted by the display highlighter, outside the saved QTextDocument; the
+# writer is never told it. Every real foreground brush can therefore be an
+# author's text colour, even when it happens to equal a theme colour.
 
 # The marker behind a code block. This one is dialect, not decoration: an
 # all-monospace paragraph WITH a block background — and without a quote's

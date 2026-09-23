@@ -1,9 +1,7 @@
 """Command line for the QML side: one conversion per run, payload on stdin.
 
-    python3 -m qthtml to-html      [--highlight '#f9e2af'] [--highlight-ink '#1e1e2e']
-                                   [--link '#4282d7'] [--quote-ink '#9399b2']
-                                   [--code-background '#313244'] [--code-chip '#2a2c3c']
-                                   [--base /dir]
+    python3 -m qthtml to-html      [--highlight '#f9e2af'] [--code-background '#313244']
+                                   [--code-chip '#2a2c3c'] [--base /dir]
     python3 -m qthtml to-markdown  [--base /dir] [--as-text BLOCK]
 
 `--base` is the note's own directory, for both directions: it is how an image
@@ -42,14 +40,12 @@ else:
 # One note; far above any note the editor will open, and bounded on purpose.
 MAX_BYTES = 8 * 1024 * 1024
 
-FLAGS = {"--highlight": "highlight", "--highlight-ink": "ink", "--link": "link",
-         "--quote-ink": "quote_ink", "--code-background": "code_background",
+FLAGS = {"--highlight": "highlight", "--code-background": "code_background",
          "--code-chip": "code_chip", "--base": "base", "--as-text": "as_text"}
 
 
 def parse_args(argv):
-    options = {"highlight": dialect.DEFAULT_HIGHLIGHT, "ink": dialect.DEFAULT_HIGHLIGHT_INK,
-               "link": dialect.DEFAULT_LINK, "quote_ink": dialect.DEFAULT_QUOTE_INK,
+    options = {"highlight": dialect.DEFAULT_HIGHLIGHT,
                "code_background": dialect.DEFAULT_CODE_BACKGROUND,
                "code_chip": dialect.DEFAULT_CODE_CHIP, "base": "", "as_text": None}
     if not argv or argv[0] not in ("to-html", "to-markdown"):
@@ -76,9 +72,9 @@ def main(argv=None):
     text = payload.decode("utf-8", "replace")
 
     if direction == "to-html":
-        json.dump({"html": to_html(text, options["highlight"], options["ink"], options["link"],
-                                   options["quote_ink"], options["code_background"],
-                                   options["code_chip"], options["base"])}, sys.stdout)
+        json.dump({"html": to_html(text, highlight=options["highlight"],
+                                   code_background=options["code_background"],
+                                   code_chip=options["code_chip"], base=options["base"])}, sys.stdout)
     else:
         as_text = int(options["as_text"]) if options["as_text"] is not None else None
         json.dump(convert(text, options["base"], as_text), sys.stdout)
