@@ -44,9 +44,10 @@ Item {
   property var host: null
   property var services: null
 
-  // The host assigns these from config.providers.local right after creating
-  // this provider (~/.config/notenote/config.json); the initial values only
-  // stand in for the rare case they never arrive.
+  // This provider's settings (PROVIDERS.md): the host records their initial
+  // values as the defaults its config file shows, and assigns whatever the
+  // entry in config.providers.local holds right after creating this provider.
+  readonly property var settings: ["notebookTabs", "notesDir"]
   // notebookTabs: one binder tab per notebook folder — this provider's
   // historic shape — or, false, a single "Notes" tab holding the folders as
   // fold-out trees, the same shape the remote providers use.

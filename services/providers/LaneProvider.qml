@@ -12,6 +12,9 @@ Item {
   property var host: null
   property var services: null
   property var sections: []
+  // The keys of this provider's config entry that are its settings, each a
+  // property whose initial value is the default (PROVIDERS.md).
+  property var settings: []
 
   signal updated()
   signal statusRequested(string text)

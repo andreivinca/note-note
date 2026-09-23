@@ -600,6 +600,19 @@ ShellRoot {
           var malformedConfig = test.appHost.mergeConfigDefaults({ providers: { local: { enabled: false } }, editor: { toolbar: ["bold"] } })
           check("invalid toolbar at startup does not reset valid provider settings", !malformedConfig.providers.local.enabled
                 && JSON.stringify(malformedConfig.editor.toolbar) === JSON.stringify(ToolbarSettings.defaults()))
+          // A provider's defaults are its own: recorded off the instance and
+          // shown in the config; only declared settings are assigned.
+          var declared = { id: "declared", settings: ["a", "b"], a: 1, b: "two", c: 3 }
+          test.appHost.recordProviderDefaults(declared)
+          var filled = test.appHost.withProviderDefaults({ providers: { declared: { a: 9 } } }, "declared").providers.declared
+          check("the config shows a provider's declared defaults under what the entry holds",
+                JSON.stringify(filled) === JSON.stringify({ enabled: true, a: 9, b: "two" }))
+          var hostConfig = test.appHost.config
+          test.appHost.config = { providers: { declared: { enabled: false, a: 5, c: 7 } } }
+          test.appHost.applyProviderSettings(declared)
+          test.appHost.config = hostConfig
+          check("only declared settings are assigned, enabled and the rest untouched",
+                declared.a === 5 && declared.b === "two" && declared.c === 3)
         }
       }
     }

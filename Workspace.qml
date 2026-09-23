@@ -172,6 +172,9 @@ Item {
   // this and the external-provider scan have landed, or a disabled provider
   // would flash on screen for a moment before disappearing.
   property var config: root.defaultConfig()
+  // The config file is still to be written for the first time: it did not
+  // exist when read, and it is written once the providers have loaded.
+  property bool configUnwritten: false
   property bool configReady: false
   property var pendingExternalDirs: null // null = scan not finished yet
   readonly property int maxConfigBytes: 1024 * 1024
@@ -619,26 +622,50 @@ Item {
     return k ? providerOfKey(k) : null
   }
 
-  // A provider's entry in config.providers is the host's file, but most of
-  // its keys are the provider's own settings — local's notesDir, a
-  // notebookTabs flag. Every key that names a property the provider declares
-  // is assigned right after creation; `enabled` never is (whether the
-  // instance exists is what it means), a key the provider does not declare
-  // is not its business, and a read-only property keeps its value — so a
-  // hand-edited config cannot break a provider, only miss it.
+  // A provider's entry in config.providers is the host's file, but its keys
+  // are the provider's own settings: the ones it declares in `settings`,
+  // each a property whose initial value is the default (PROVIDERS.md).
+  // Every declared setting the entry holds is assigned right after
+  // creation, verbatim. `enabled` is never assigned (whether the instance
+  // exists is what it means), and a key the provider does not declare is
+  // not its business — so a hand-edited config cannot break a provider,
+  // only miss it.
   function applyProviderSettings(p) {
-    var entry = (root.config.providers || {})[p.id]
-    for (var k in entry) {
-      if (k === "enabled" || !(k in p)) {
+    var entry = (root.config.providers || {})[p.id] || {}
+    var keys = Array.isArray(p.settings) ? p.settings : []
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i]
+      if (!(k in entry)) {
         continue
       }
-
       try {
         p[k] = entry[k]
       } catch (e) {
         console.warn("note-note: provider", p.id, "setting", k, "was not taken:", e.message)
       }
     }
+  }
+
+  // The defaults each provider declared, read off a fresh instance before
+  // its settings were applied: the one place a default is written is the
+  // provider's own property, and the config file shows it from here.
+  property var providerDefaults: ({})
+  function recordProviderDefaults(p) {
+    var keys = Array.isArray(p.settings) ? p.settings : [], defaults = {}
+    for (var i = 0; i < keys.length; i++) {
+      defaults[keys[i]] = p[keys[i]]
+    }
+    var all = Object.assign({}, root.providerDefaults)
+    all[p.id] = defaults
+    root.providerDefaults = all
+  }
+
+  // The config with this provider's entry filled in from its defaults, so
+  // the file shows every setting that applies; what the entry holds wins.
+  function withProviderDefaults(cfg, id) {
+    var providers = Object.assign({}, cfg.providers || {})
+    providers[id] = Object.assign({ "enabled": true }, root.providerDefaults[id] || {}, providers[id] || {})
+    return Object.assign({}, cfg, { "providers": providers })
   }
 
   function addProvider(url) {
@@ -655,6 +682,8 @@ Item {
       console.warn("note-note: provider has no id:", url)
       return null
     }
+    root.recordProviderDefaults(p)
+    root.config = root.withProviderDefaults(root.config, p.id)
     root.applyProviderSettings(p)
     p.updated.connect(function() {
       root.rebuildRows()
@@ -761,6 +790,10 @@ Item {
       }
     }
     root.providersLoaded = true
+    if (root.configUnwritten) {
+      root.configUnwritten = false
+      root.writeConfig(root.config)
+    }
     if (root.opened) {
       root.open("{}")
     }
@@ -774,32 +807,16 @@ Item {
     root.loadProviders(root.pendingExternalDirs)
   }
 
+  // Every provider known enabled, with the settings it declared at their
+  // defaults (recordProviderDefaults) — nothing about any one provider is
+  // written here. Before the providers are loaded the entries hold only
+  // `enabled`, and an absent entry means enabled anyway (providerEnabledIn).
   function defaultConfig() {
-    return {
-      "editor": ToolbarSettings.editorDefaults(),
-      // notebookTabs: one binder tab per notebook (the local folders'
-      // historic shape) instead of one tab holding them as fold-out trees.
-      // Only sources that have notebooks offer it; sticky and notion are a
-      // single flat list either way, and a setting that changes nothing is
-      // not listed.
-      "providers": {
-        "local": {
-          "enabled": true,
-          "notebookTabs": true,
-          "notesDir": Platform.env("NOTE_NOTE_DIR") || (Platform.env("HOME") + "/Notes")
-        },
-        "sticky": {
-          "enabled": true
-        },
-        "onenote": {
-          "enabled": true,
-          "notebookTabs": false
-        },
-        "notion": {
-          "enabled": true
-        }
-      }
+    var providers = {}
+    for (var id in root.providerUrls) {
+      providers[id] = Object.assign({ "enabled": true }, root.providerDefaults[id] || {})
     }
+    return { "editor": ToolbarSettings.editorDefaults(), "providers": providers }
   }
 
   // Fills in anything the default config has that this one doesn't — a whole
@@ -849,12 +866,12 @@ Item {
   function loadConfig(raw) {
     var trimmed = (raw || "").replace(/^\s+|\s+$/g, "")
     if (trimmed.length === 0) {
-      // Only a missing or successfully read empty file reaches here.
-      // Write the defaults now, so the file is
-      // self-documenting (every known setting, with its default) from the
-      // moment it exists.
+      // Only a missing or successfully read empty file reaches here. The
+      // defaults are written once the providers have recorded theirs
+      // (loadProviders), so the file is self-documenting — every known
+      // setting, with its default — from the moment it exists.
       root.config = root.defaultConfig()
-      root.writeConfig(root.config)
+      root.configUnwritten = true
     } else {
       try {
         root.config = root.mergeConfigDefaults(JSON.parse(trimmed))

@@ -145,16 +145,18 @@ of the opaque `version` used for change detection.
 ## Settings from the host's config
 
 The host keeps one entry per provider in its own config file
-(`~/.config/notenote/config.json`, described in the README). Right after
-creating a provider it assigns every key of that entry that names a property
-the provider declares — verbatim, the provider interprets its own values.
-`enabled` is never assigned (whether the instance exists is what it means),
-a key the provider does not declare is not its business, and a read-only
-property keeps its value. A provider opts into a setting simply by declaring
-the property, external providers included: the user adds the key to your
-entry, and it arrives on creation. When an entry changes, the provider is
-destroyed and recreated with the new values, so a live one never watches for
-them.
+(`~/.config/notenote/config.json`, described in the README). A provider
+declares its settings in `settings`, a list of property names; each
+property's initial value is the default. Right after creating a provider
+the host records those defaults and writes any the entry lacks into it, so
+the file shows every setting that applies with the value it has, and then
+assigns every declared setting the entry holds — verbatim, the provider
+interprets its own values. `enabled` is never assigned (whether the
+instance exists is what it means), and a key the provider does not declare
+is not its business. External providers get the same: declare the setting,
+and its default appears in the user's config. When an entry changes, the
+provider is destroyed and recreated with the new values, so a live one
+never watches for them.
 
 | key | type | meaning |
 |---|---|---|

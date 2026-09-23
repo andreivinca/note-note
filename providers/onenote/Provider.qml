@@ -37,9 +37,10 @@ LaneProvider {
   // of OneNote here signs in through. Sticky Notes has one of its own.
   readonly property string microsoftClientId: "1ed713b0-195a-4360-88b4-993f3aeaa262"
 
-  // Assigned by the host from config.providers.onenote.notebookTabs
-  // (~/.config/notenote/config.json): each notebook a binder tab of its own
-  // when true; the whole tree in one OneNote tab when false, the default.
+  // This provider's one setting (PROVIDERS.md), assigned by the host from
+  // config.providers.onenote.notebookTabs: each notebook a binder tab of its
+  // own when true; the whole tree in one OneNote tab when false, the default.
+  settings: ["notebookTabs"]
   property bool notebookTabs: false
   readonly property string dir: Platform.localPath(Qt.resolvedUrl(".")).replace(/\/$/, "")
   script: dir + "/onenote.py"

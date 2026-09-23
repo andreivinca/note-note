@@ -777,9 +777,10 @@ the other). So the provider builds its `sections` for the shape asked of
 it, and the host stays a thing that renders sections.
 
 The setting travels as a property the host assigns at creation, by a
-general rule: every key of a provider's config entry that names a declared
-property is handed over, `enabled` excepted — which is also how `notesDir`
-arrives now, so nothing about "local" is left in the host's tab pipeline.
+general rule: every setting a provider declares (`settings`) that its
+config entry holds is handed over, and the defaults the config file shows
+are the providers' own, recorded off a fresh instance — which is also how
+`notesDir` arrives now, so nothing about "local" is left in the host.
 The rail's old `local` flag became "ships no logo", which is the rule
 PROVIDERS.md had promised all along.
 
