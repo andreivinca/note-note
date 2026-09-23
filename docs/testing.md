@@ -206,8 +206,9 @@ and image destinations, including OneNote notebook links, through saving and
 Qt reloads without changing the destinations.
 URL cases type new addresses after a linked list item, check their destinations
 as they grow and through undo/redo, and cover punctuation, code spans, named
-links and plain-text notes. These run with the actual iA Writer Mono S note font
-to distinguish prose from inline code. Direct-click checks cover wrapped URLs
+links and plain-text notes. These run the editor in a monospace face the tests
+bundle (`tests/fonts/`), so a monospace note face is proved to be prose and
+inline code told apart by the dialect's family alone. Direct-click checks cover wrapped URLs
 and table cells. Deletion, undo, selection and Markdown checks ensure the
 display styling stays outside the saved document.
 The `http://google.com` cursor regression compares the last character's advance

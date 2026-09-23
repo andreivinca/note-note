@@ -424,8 +424,9 @@ class is set: extended property `String 0x001A` = `IPM.StickyNote`.
   pagelevel`; `search` is in none of them. `filter=contains(tolower(title),…)`
   works but only reaches `title`, and the account-wide `/pages` call anyway
   refuses accounts with many sections (see above) — so it cannot stand in.
-  The provider has no `search()`; the sidebar matches OneNote titles only,
-  the same as Notion.
+  So the provider's `search()` answers from a text cache of its own
+  (onenote-search.md), filled page by page in the background; the sidebar
+  matches titles itself, the same as for Notion.
 - **Throttling, measured.** Delegated OneNote allows **120 requests/minute**,
   **400/hour** and **5 concurrent** per app+user. Going over earns HTTP 429,
   usually **without** a `Retry-After` — and a throttled account stays

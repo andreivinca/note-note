@@ -22,7 +22,7 @@ Window {
   height: 700
 
   Markdown.Markdown { id: converter }
-  FontLoader { id: noteFont; source: "../assets/fonts/ia-writer-mono-s/iAWriterMonoS-Regular.ttf" }
+  FontLoader { id: noteFont; source: "fonts/ia-writer-mono-s/iAWriterMonoS-Regular.ttf" }
   // The clipboard as the editor asks it (services/clipboard/Clipboard.qml):
   // a text and an HTML flavour each case sets, never an image.
   QtObject {

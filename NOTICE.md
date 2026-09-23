@@ -20,11 +20,12 @@
   used to parse Markdown into an AST that the providers render into OneNote
   HTML and Notion blocks.
 
-- **iA Writer Mono S** — `assets/fonts/ia-writer-mono-s/` — Copyright 2018
+- **iA Writer Mono S** — `tests/fonts/ia-writer-mono-s/` — Copyright 2018
   Information Architects Inc. with Reserved Font Name "iA Writer", based on
   IBM Plex Mono, Copyright 2017 IBM Corp. SIL Open Font License 1.1 (see
-  `assets/fonts/ia-writer-mono-s/LICENSE.md`). Bundled Regular, Bold, Italic
-  and Bold Italic static faces for note titles and text. Copied
+  `tests/fonts/ia-writer-mono-s/LICENSE.md`). Bundled Regular, Bold, Italic
+  and Bold Italic static faces for the editor's key tests, which run in a
+  monospace note face to prove it is prose; not shipped. Copied
   unmodified from
   [iaolo/iA-Fonts](https://github.com/iaolo/iA-Fonts/tree/f32c04c3058a75d7ce28919ce70fe8800817491b/iA%20Writer%20Mono/Static)
   at commit `f32c04c3058a75d7ce28919ce70fe8800817491b`.

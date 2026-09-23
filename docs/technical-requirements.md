@@ -81,11 +81,10 @@ lists live as data in `ui/KeyBindings.js`, beside a note in `handleShortcut`
 saying the two are edited together.
 
 **The host must not** know any backend, path format, credential or API. Every
-branch of the form `if (provider.id === "…")` is a design failure; the one
-that exists (`local` for the default "new note" target) is the exception to
-remove first if a second appears — the autosave debounce was another until
-the provider took over its own schedule (`noteEdited` / `saveRequested`,
-PROVIDERS.md). The request
+branch of the form `if (provider.id === "…")` is a design failure, and none
+exists: the last two went when the provider took over the default "new
+note" target (`createTargetFor`) and its own save schedule (`noteEdited` /
+`saveRequested`, PROVIDERS.md). The request
 queues are host-owned but backend-agnostic: the host knows a *rate key* is a
 string a provider chose, and nothing else about it.
 

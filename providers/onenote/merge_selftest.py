@@ -852,7 +852,7 @@ class SaveTests(unittest.TestCase):
 
     def test_invalid_simulation_keeps_the_draft_without_writing(self):
         loaded = self.load()
-        invalid = onenote.onenote_patch.Plan((), "<body><p>Wrong</p></body>", frozenset())
+        invalid = onenote.onenote_patch.Plan((), "<body><p>Wrong</p></body>")
         with patch.object(onenote.onenote_patch, "plan", return_value=invalid):
             result = self.save(note("Edited"), loaded["view"])
         self.assertIn("could not preserve", result["error"])

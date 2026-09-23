@@ -199,9 +199,10 @@ Instead the note is written as text runs in `div`s of our own with the images
 as their siblings, and a save is a set of targeted commands: text runs
 replaced where they stand, a pasted image uploaded as a part and inserted, a
 deleted one replaced with an empty div. Anything the surgical path cannot
-express (an image reordered, a page shaped by the OneNote apps) is rebuilt
-once with every image uploaded from our own cached bytes — never referenced —
-and is surgical from then on.
+express (an image reordered, a page shaped by the OneNote apps) is refused:
+the draft is kept and the failure reported (engine-notes.md). There is no
+rebuild fallback, deliberately — a rebuild would re-upload every image from
+our own cache, and one the cache has not materialised would be lost.
 
 The costs, accepted deliberately: one extra read per save of a page with
 images (a replace can only target a generated id, and OneNote renews those on

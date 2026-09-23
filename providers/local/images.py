@@ -8,17 +8,15 @@ relative (`.assets/name.png`), which the editor resolves through the
 document's base URL. Links pointing anywhere else are the note's own
 business and are left exactly as written.
 
-    python3 images.py <notesDir> <noteFile>      # body on stdin, JSON out:
-                                                 # {"body": …[, "warning": …]}
-
-The body arrives on stdin, never argv (docs/security.md rule 2). Staged
+The one entry is `stage(body, notesDir, noteFile)`, called by the local
+provider's operations on every save; the body is handed over in memory,
+never through argv (docs/security.md rule 2). Staged
 files are read through readfile.py (no symlinks, regular files only, capped,
 against a deadline) and written with O_EXCL, so a name in `.assets` is never
 overwritten: the same bytes reuse it, different bytes take the next name.
 Re-copying is idempotent on purpose — autosave runs this every few hundred
 milliseconds while the staged link is still in the editor's document.
 """
-import json
 import os
 import re
 import sys
@@ -31,7 +29,6 @@ from readfile import read_capped  # noqa: E402
 # Where the clipboard service stages pastes (services/clipboard/Clipboard.qml).
 STAGING = os.environ.get("NOTE_NOTE_PASTE_DIR") or os.path.join(os.path.expanduser("~"), ".cache", "omarchy", "note-note-paste")
 ASSETS = ".assets"
-MAX_BODY = 4 * 1024 * 1024        # over the provider's own note cap
 MAX_IMAGE = 40 * 1024 * 1024      # what the clipboard stages at most
 MAX_SAME_NAME = 100               # distinct contents under one pasted name
 DEADLINE = 15.0                   # seconds for the whole save's copies
@@ -39,11 +36,6 @@ DEADLINE = 15.0                   # seconds for the whole save's copies
 # An image link whose target is a file:// URL. The alt text sits outside the
 # parentheses and is not touched; neither is a `{width=N}` after the link.
 FILE_LINK = re.compile(r"\]\((file://[^)\s]+)\)")
-
-
-def fail(message):
-    json.dump({"error": message}, sys.stdout)
-    sys.exit(0)
 
 
 def place(data, name, assets):
@@ -109,19 +101,3 @@ def stage(body, notes_dir, note_file):
         raise OSError("a pasted image could not be copied into the notebook")
     return result["body"]
 
-
-def main():
-    if len(sys.argv) < 3:
-        fail("usage: images.py <notesDir> <noteFile>")
-    body = sys.stdin.buffer.read(MAX_BODY + 1)
-    if len(body) > MAX_BODY:
-        fail("the note is too large")
-    try:
-        result = {"body": stage(body.decode("utf-8"), sys.argv[1], sys.argv[2])}
-    except (OSError, ValueError) as error:
-        result = {"error": str(error)}
-    json.dump(result, sys.stdout)
-
-
-if __name__ == "__main__":
-    main()

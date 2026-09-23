@@ -29,7 +29,6 @@ class InvalidPlan(ValueError):
 class Plan:
     commands: tuple
     simulated: str
-    preserved_ids: frozenset
 
 
 def parse(source):
@@ -300,7 +299,7 @@ class _Planner:
                 raise InvalidPlan("an unchanged element lost its identity")
             if content is not None and serialize(kept, keep_ids=True) != content:
                 raise InvalidPlan("an unchanged element was modified")
-        return Plan(commands, serialize(simulated, keep_ids=True), frozenset(self.retained))
+        return Plan(commands, serialize(simulated, keep_ids=True))
 
 
 def simulate(tree, commands):
