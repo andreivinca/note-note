@@ -41,9 +41,10 @@ ui/TabColors.js             the tab palette, and the wash both it and the page u
 ui/NoteEditor.qml           the tools strip across the pane's top, the title,
                             the editor, notices and provider views
 ui/QuoteBars.js             where the quote bars go (native blocks or HTML scan)
-ui/NativeBlocks.qml         the optional import of the native inspector
 cpp/                        the native text inspector: QTextDocument block formats
-                            for QML (textblocks.h, build.sh, its own selftest.py)
+                            for QML (textblocks.h, sources.cmake, build.sh, its own
+                            selftest.py); each host imports it through its own
+                            TextInspector.qml
 providers/PROVIDERS.md      the provider contract — the file to read first
 providers/local/            Markdown folders in ~/Notes
 providers/sticky/           Microsoft Sticky Notes  (sticky.py)

@@ -38,7 +38,7 @@ sys.path.insert(0, os.path.join(ROOT, "services", "markdown"))
 from qthtml import dialect, to_html, to_markdown  # noqa: E402
 from qthtml.selftest import CASES     # noqa: E402
 
-MODULE = os.path.join(ROOT, "cpp", "build", "NoteNoteText")
+MODULE = os.path.join(ROOT, "cpp", "build", "NoteNote", "Native")
 QUOTEBARS = os.path.join(ROOT, "ui", "QuoteBars.js")
 
 QML_TEMPLATE = """

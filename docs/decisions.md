@@ -552,7 +552,8 @@ abandoned for it.
 
 *Chosen:* the module is optional. It is built locally against the system Qt
 (`sh cpp/build.sh` — on Arch the headers ship with `qt6-declarative`) and
-loaded through a directory import behind a `Loader` (ui/NativeBlocks.qml);
+loaded through a directory import behind a `Loader`
+(hosts/omarchy/TextInspector.qml; the executable links the same sources);
 when the library is absent the Loader errors and the editor keeps using the
 HTML scan (ui/QuoteBars.js). A module built from older sources is refused
 the same way, whole: it carries an interface version (`TextBlocks::Version`,

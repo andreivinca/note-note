@@ -21,11 +21,14 @@ add_library(note-note-theme STATIC
     hosts/standalone/theme/desktoptheme.cpp hosts/standalone/theme/desktoptheme.h)
 target_link_libraries(note-note-theme PUBLIC Qt6::Gui Qt6::DBus)
 
+# The native text inspector's sources are named once (cpp/sources.cmake):
+# the shell's optional module and this executable are two builds of them.
+include(cpp/sources.cmake)
 add_executable(note-note
     hosts/standalone/main.cpp
     hosts/standalone/runtime.cpp hosts/standalone/runtime.h
     hosts/standalone/processbackend.cpp hosts/standalone/processbackend.h
-    cpp/dialect.h cpp/textblocks.cpp cpp/textblocks.h cpp/textlinks.cpp cpp/textlinks.h
+    ${NOTE_NOTE_NATIVE_SOURCES}
 )
 target_link_libraries(note-note PRIVATE Qt6::Quick Qt6::QuickControls2 Qt6::Network note-note-theme)
 # The executable knows its resources by their place next to it and by the

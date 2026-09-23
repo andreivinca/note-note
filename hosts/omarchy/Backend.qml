@@ -13,7 +13,7 @@ Item {
   readonly property string configName: "omarchy/note-note"
   readonly property string accountConfig: "omarchy/note-note.json"
   // The native text inspector, when the user has built it (cpp/build.sh).
-  readonly property url textInspectorUrl: Qt.resolvedUrl("../../ui/NativeBlocks.qml")
+  readonly property url textInspectorUrl: Qt.resolvedUrl("TextInspector.qml")
   readonly property Component processComponent: Component {
     ProcessBackend {}
   }

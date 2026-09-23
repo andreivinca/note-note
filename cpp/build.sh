@@ -10,4 +10,4 @@ set -eu
 cd "$(dirname "$0")"
 cmake -B build
 cmake --build build --parallel
-echo "built: cpp/build/NoteNoteText (restart the shell to pick it up)"
+echo "built: cpp/build/NoteNote/Native (restart the shell to pick it up)"

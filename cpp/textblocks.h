@@ -22,8 +22,10 @@
 // endEditBlock) write nothing at all: they fence the editor's own strokes
 // into one undo step.
 //
-// The module is OPTIONAL. It is built locally (`sh cpp/build.sh`) against
-// the system Qt and loaded by a directory import (ui/NativeBlocks.qml);
+// The module is OPTIONAL in the shell. It is built locally (`sh cpp/build.sh`)
+// against the system Qt and loaded by a directory import
+// (hosts/omarchy/TextInspector.qml); the executable links the same sources
+// and registers the same types under the same name (hosts/standalone);
 // when the library is absent the editor falls back to the HTML scan
 // (ui/QuoteBars.js) and images simply have no resize handle. A module
 // built from older sources is refused the same way, whole: the editor

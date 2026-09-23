@@ -18,9 +18,10 @@ executable creates a normal Qt window on Wayland or X11.
 | `hosts/standalone/` | Qt window, QProcess transport, QClipboard, activation socket and directly linked text inspector |
 
 Shared code does not import `Quickshell`, `qs.Commons` or `qs.Ui`. Keep new
-desktop-specific dependencies inside a host. `ui/NativeBlocks.qml` is the
-optional native inspector import selected by the Omarchy adapter; the
-standalone host selects its own directly linked implementation.
+desktop-specific dependencies inside a host. Each host ships its own
+`TextInspector.qml`: the Omarchy adapter's imports the optional module the
+user builds, the standalone host's the types linked into the executable —
+one source list (`cpp/sources.cmake`), one module name (`NoteNote.Native`).
 
 Each launcher calls `backend.install()` before `workspace.initialize()` and
 `workspace.open()`. Initialization is explicit and idempotent: a workspace
