@@ -108,7 +108,7 @@ def main():
             env["QT_QPA_PLATFORM"] = "wayland"
             env["NOTE_NOTE_TEST_HOST"] = "1"
         try:
-            command = ([os.environ.get("NOTE_NOTE_BINARY", str(ROOT / "build/note-note")), "--data-dir", str(ROOT),
+            command = ([os.environ.get("NOTE_NOTE_HARNESS", str(ROOT / "build/note-note-harness")), "--data-dir", str(ROOT),
                         "--qml", str(work / "shell.qml")] if standalone
                        else ["qs", "-p", str(work / "shell.qml"), "--no-color"])
             proc = subprocess.run(command,

@@ -21,25 +21,29 @@ add_library(note-note-theme STATIC
     hosts/standalone/theme/desktoptheme.cpp hosts/standalone/theme/desktoptheme.h)
 target_link_libraries(note-note-theme PUBLIC Qt6::Gui Qt6::DBus)
 
-# The native text inspector's sources are named once (cpp/sources.cmake):
-# the shell's optional module and this executable are two builds of them.
+# The application as a library: the product executable and the test harness
+# (BUILD_TESTING) are two entry points over it. The native text inspector's
+# sources are named once (cpp/sources.cmake): the shell's optional module
+# and this library are two builds of them.
 include(cpp/sources.cmake)
-add_executable(note-note
-    hosts/standalone/main.cpp
+add_library(note-note-app STATIC
+    hosts/standalone/application.cpp hosts/standalone/application.h
     hosts/standalone/runtime.cpp hosts/standalone/runtime.h
     hosts/standalone/processbackend.cpp hosts/standalone/processbackend.h
     ${NOTE_NOTE_NATIVE_SOURCES}
 )
-target_link_libraries(note-note PRIVATE Qt6::Quick Qt6::QuickControls2 Qt6::Network note-note-theme)
+target_link_libraries(note-note-app PUBLIC Qt6::Quick Qt6::QuickControls2 Qt6::Network note-note-theme)
 # The executable knows its resources by their place next to it and by the
 # install prefix, never by the tree it was built from: a release binary
 # carries nothing about the build machine, and a build-tree run names the
 # source tree with `--data-dir`.
-target_compile_definitions(note-note PRIVATE
+target_compile_definitions(note-note-app PUBLIC
     NOTE_NOTE_VERSION="${PROJECT_VERSION}"
     NOTE_NOTE_DATA_FROM_BIN="${NOTE_NOTE_DATA_FROM_BIN}"
     NOTE_NOTE_INSTALL_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/note-note"
 )
+add_executable(note-note hosts/standalone/main.cpp)
+target_link_libraries(note-note PRIVATE note-note-app)
 install(TARGETS note-note RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES Workspace.qml LICENSE NOTICE.md DESTINATION ${CMAKE_INSTALL_DATADIR}/note-note)
 # Runtime data is installed by what it is: the QML, scripts and logos the
@@ -75,10 +79,15 @@ if(BUILD_TESTING)
     target_link_libraries(native-runtime-test PRIVATE Qt6::Test Qt6::Gui)
     add_test(NAME native-runtime COMMAND native-runtime-test)
     set_tests_properties(native-runtime PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QPA_PLATFORMTHEME=generic")
+    # The harness runs a QML file of a test's choosing over the application;
+    # it is built beside the product and never installed.
+    add_executable(note-note-harness tests/harness_main.cpp)
+    target_link_libraries(note-note-harness PRIVATE note-note-app)
     add_test(NAME standalone COMMAND ${Python3_EXECUTABLE}
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests/standalone_selftest.py $<TARGET_FILE:note-note>)
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/standalone_selftest.py $<TARGET_FILE:note-note>
+        --harness $<TARGET_FILE:note-note-harness>)
     add_test(NAME native-transitions COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/transition_selftest.py --standalone)
     set_tests_properties(native-transitions PROPERTIES
-        ENVIRONMENT "NOTE_NOTE_BINARY=$<TARGET_FILE:note-note>" TIMEOUT 240)
+        ENVIRONMENT "NOTE_NOTE_HARNESS=$<TARGET_FILE:note-note-harness>" TIMEOUT 240)
 endif()

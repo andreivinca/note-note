@@ -91,8 +91,10 @@ need real files. Installed executables find their resources relative to
 their binary directory, including when the prefix contains spaces, and by
 the configured prefix when the executable was copied elsewhere; nothing
 about the machine it was built on is compiled in. A build-tree executable
-is given the source tree with `--data-dir .`. `--qml` runs isolated test
-harnesses and bypasses single-instance activation.
+is given the source tree with `--data-dir .`. The product binary carries no
+test entry: `note-note-harness`, built beside it with `BUILD_TESTING` and
+never installed, runs a QML harness (`--qml`) over the same application
+library without the single-instance activation.
 
 Distribution packagers can configure `CMAKE_INSTALL_PREFIX=/usr` and stage
 the installation with `DESTDIR`. Package the runtime modules and image

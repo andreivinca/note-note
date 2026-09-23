@@ -30,8 +30,8 @@ def wait_for_marker(stream, marker, timeout=5):
     return output.decode(errors="replace")
 
 
-def check_window_close(binary, resources, harness, env, host):
-    command = [str(binary), "--data-dir", str(resources), "--qml", str(harness)]
+def check_window_close(runner, resources, harness, env, host):
+    command = [str(runner), "--data-dir", str(resources), "--qml", str(harness)]
     if not host:
         return subprocess.run(command, env=env, capture_output=True, text=True, timeout=10)
     display = os.environ.get("WAYLAND_DISPLAY")
@@ -95,9 +95,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", nargs="?", type=Path, default=ROOT / "build/note-note")
     parser.add_argument("--resources", type=Path, default=ROOT)
+    parser.add_argument("--harness", type=Path, help="the note-note-harness executable; beside the binary by default")
     parser.add_argument("--host", action="store_true", help="also exercise Hyprland's window-close dispatcher on Wayland")
     args = parser.parse_args()
     binary = args.binary.resolve()
+    # The harness executable runs a QML file over the application; the
+    # product binary has no such entry, so the launcher, activation and
+    # single-instance checks below are the only ones that run it.
+    runner = (args.harness or binary.parent / "note-note-harness").resolve()
     resources = args.resources.resolve()
     with tempfile.TemporaryDirectory(prefix="note-note-standalone-") as directory:
         work = Path(directory)
@@ -124,7 +129,7 @@ def main():
                    DBUS_SESSION_BUS_ADDRESS="unix:path=" + str(work / "no-session-bus"),
                    QT_QPA_PLATFORMTHEME="generic", QT_FORCE_STDERR_LOGGING="1", QT_QUICK_BACKEND="software")
         try:
-            proc = subprocess.run([str(binary), "--data-dir", str(resources), "--qml", str(harness)], env=env,
+            proc = subprocess.run([str(runner), "--data-dir", str(resources), "--qml", str(harness)], env=env,
                                   capture_output=True, text=True, timeout=45)
         except (OSError, subprocess.SubprocessError) as error:
             print("FAIL:", error)
@@ -157,7 +162,7 @@ def main():
                          NOTE_NOTE_DIR=str(notes))
         first_harness = fresh / "standalone_firstrun.qml"
         first_harness.write_text((ROOT / "tests/standalone_firstrun.qml").read_text().replace('"app/', '"' + resources.as_uri() + '/'))
-        launch = subprocess.run([str(binary), "--data-dir", str(resources), "--qml", str(first_harness)],
+        launch = subprocess.run([str(runner), "--data-dir", str(resources), "--qml", str(first_harness)],
                                 env=first_run, capture_output=True, text=True, timeout=45)
         written = json.loads((fresh / "config/notenote/config.json").read_text())
         if launch.returncode != 0 or "<<<FIRSTRUN_DONE>>>" not in launch.stderr \
@@ -173,7 +178,7 @@ def main():
         source = (ROOT / "tests/standalone_launch.qml").read_text()
         harness.write_text(source.replace('"app/', '"' + resources.as_uri() + '/'))
         try:
-            proc = subprocess.run([str(binary), "--data-dir", str(resources), "--qml", str(harness)], env=env,
+            proc = subprocess.run([str(runner), "--data-dir", str(resources), "--qml", str(harness)], env=env,
                                   capture_output=True, text=True, timeout=20)
         except (OSError, subprocess.SubprocessError) as error:
             print("FAIL: application launch:", error)
@@ -188,7 +193,7 @@ def main():
         try:
             source = (ROOT / "tests/standalone_close.qml").read_text()
             harness.write_text(source.replace('"app/', '"' + resources.as_uri() + '/'))
-            proc = check_window_close(binary, resources, harness, env, args.host)
+            proc = check_window_close(runner, resources, harness, env, args.host)
             output = proc.stdout + proc.stderr
             if proc.returncode or "<<<CLOSE_DONE>>>" not in output or any(marker in output for marker in
                     ("FAIL!", "TypeError:", "ReferenceError:", "Binding loop", "Unable to assign", "QML ", "Error:")):

@@ -33,8 +33,10 @@ write completes, using synthetic processes without an account. Run
 Hyprland's actual window-close dispatcher on Wayland.
 
 The shared transition suite also runs through the native host. Run it directly
-with `python3 tests/transition_selftest.py --standalone`; the binary defaults
-to `build/note-note` and can be selected with `NOTE_NOTE_BINARY`.
+with `python3 tests/transition_selftest.py --standalone`; the harness
+executable defaults to `build/note-note-harness` and can be selected with
+`NOTE_NOTE_HARNESS`. `tests/standalone_selftest.py` takes the product binary
+and finds the harness beside it (or `--harness`).
 See [standalone development](standalone.md) for installed-layout checks.
 
 It requires Python, Qt's `qml6`, Quickshell (`qs`), `inotifywait`, the Omarchy

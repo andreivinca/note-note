@@ -99,7 +99,7 @@ def main():
         # Test the installed, stripped layout, including resource lookup,
         # clipboard, saves, window-close handling and activation.
         run(["python3", "tests/standalone_selftest.py", str(native / "bin/note-note"),
-             "--resources", str(native / "share/note-note")],
+             "--resources", str(native / "share/note-note"), "--harness", str(build / "note-note-harness")],
             env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
         plugin = stage / plugin_name
         for path in tracked_files():
