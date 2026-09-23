@@ -105,8 +105,9 @@ def main():
     runner = (args.harness or binary.parent / "note-note-harness").resolve()
     resources = args.resources.resolve()
     # The version is answered before anything else runs, and the packager
-    # (packaging/package.py) trusts that answer against the manifest.
-    version = json.loads((resources / "manifest.json").read_text())["version"]
+    # (packaging/package.py) trusts that answer against the manifest — the
+    # source tree's, beside this test: an installed layout carries none.
+    version = json.loads((ROOT / "manifest.json").read_text())["version"]
     try:
         asked = subprocess.run([str(binary), "--version"], env=dict(os.environ, QT_QPA_PLATFORM="offscreen"),
                                capture_output=True, text=True, timeout=10)
