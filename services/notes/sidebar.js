@@ -1,5 +1,20 @@
 .pragma library
 
+// A tab's key is the provider's id and the section's own key, and this is
+// the one place that spelling is known: everything else goes through
+// these three, in one direction or the other.
+function sectionKey(provider, section) {
+  return provider.id + "/" + section.key
+}
+
+function providerIdOf(key) {
+  return key.substring(0, key.indexOf("/"))
+}
+
+function ownKey(key) {
+  return key.substring(key.indexOf("/") + 1)
+}
+
 function matchesQuery(row, query) {
   return (row.title || "").toLowerCase().indexOf(query) >= 0
       || (row.preview || "").toLowerCase().indexOf(query) >= 0
@@ -40,7 +55,7 @@ function build(providers, active, query, contentHits) {
       }))
     }
     (provider.sections || []).forEach(function(section) {
-      var key = provider.id + "/" + section.key
+      var key = sectionKey(provider, section)
       var all = section.rows || []
       var notes = section.notes || all.filter(function(item) { return item.kind === "note" })
       var found = q ? notes.filter(function(item) {

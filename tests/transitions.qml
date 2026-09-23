@@ -577,6 +577,9 @@ ShellRoot {
     var treeModel = Sidebar.build([flatProvider], "flat/notes", "", {})
     check("sidebar preserves provider hierarchies",
           treeModel.rows.map(function(item) { return item.path }).join(",") === "section,old,first,second,unknown,create")
+    check("a tab key is spelt in one place and read back by the same",
+          Sidebar.sectionKey({ id: "p" }, { key: "s/t" }) === "p/s/t"
+          && Sidebar.providerIdOf("p/s/t") === "p" && Sidebar.ownKey("p/s/t") === "s/t")
     check("modification captions accept numeric and ISO dates and reject invalid dates",
           Sidebar.timestamp(today) === today && Sidebar.timestamp(new Date(today).toISOString()) === today
           && Sidebar.timestamp("invalid") === 0)

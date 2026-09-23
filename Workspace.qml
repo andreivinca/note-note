@@ -598,22 +598,18 @@ Item {
     return worst
   }
 
+  // A note's path is its provider's id, a colon, and the rest (PROVIDERS.md).
   function providerOf(path) {
-    if (!path) {
-      return null
-    }
+    return path ? providerById(path.substring(0, path.indexOf(":"))) : null
+  }
 
-    var pid = path.substring(0, path.indexOf(":"))
+  function providerById(id) {
     for (var i = 0; i < root.providers.length; i++) {
-      if (root.providers[i].id === pid) {
+      if (root.providers[i].id === id) {
         return root.providers[i]
       }
     }
     return null
-  }
-
-  function providerById(id) {
-    return providerOf(id + ":")
   }
 
   // The provider of the open tab. Section keys start with the provider's id.
@@ -1005,19 +1001,18 @@ Item {
     })
   }
 
-  // A tab's key is the provider's id and the section's own key, and these two
-  // are the only places that spelling is known: everything else goes through
-  // them, in one direction or the other.
+  // A tab's key: the spelling lives in sidebar.js, which builds the tabs;
+  // everything here goes through these, in one direction or the other.
   function sectionKey(p, s) {
-    return p.id + "/" + s.key
+    return Sidebar.sectionKey(p, s)
   }
 
   function providerOfKey(key) {
-    return providerById(key.substring(0, key.indexOf("/")))
+    return providerById(Sidebar.providerIdOf(key))
   }
 
   function ownKey(key) {
-    return key.substring(key.indexOf("/") + 1)
+    return Sidebar.ownKey(key)
   }
 
   function sectionKeys() {
@@ -1171,7 +1166,7 @@ Item {
 
   function activeSearchStatus() {
     var provider = root.activeProvider(), key = root.activeKey()
-    return provider && typeof provider.searchStatus === "function" ? provider.searchStatus(key.substring(key.indexOf("/") + 1)) : ""
+    return provider && typeof provider.searchStatus === "function" ? provider.searchStatus(root.ownKey(key)) : ""
   }
 
   function runContentSearch() {
@@ -1879,7 +1874,7 @@ Item {
         showStatus(p.name + ": " + r.error)
         return
       }
-      setActiveSection(p.id + "/" + r.key)
+      setActiveSection(root.sectionKey(p, r))
       // Where a note in the new section goes is the provider's to say.
       if (r.target) {
         root.newNote(p.id, r.target)
