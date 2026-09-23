@@ -12,9 +12,11 @@ QQC.AbstractButton {
   property string tooltipText: ""
   property color foreground: style.foreground
   property color accent: style.accent
-  property color backgroundColor: Util.alpha(foreground, 0.06)
+  // Quiet at rest: the fill and border show under the pointer. The border
+  // keeps its width so the content never shifts; only its colour fades in.
+  property color backgroundColor: "transparent"
   property real radius: style.radius
-  property var borderSpec: Border.flat(Util.alpha(foreground, hovered || activeFocus ? 0.45 : 0.2), style.borderWidth)
+  property var borderSpec: Border.flat(Util.alpha(foreground, hovered || activeFocus ? 0.45 : 0), style.borderWidth)
   leftPadding: style.horizontalPadding + style.borderWidth
   rightPadding: leftPadding
   topPadding: style.verticalPadding + style.borderWidth
@@ -33,6 +35,11 @@ QQC.AbstractButton {
       : root.checked ? Style.selectedFillFor(root.foreground, root.accent)
       : root.backgroundColor
     Behavior on color {
+      ColorAnimation {
+        duration: 120
+      }
+    }
+    Behavior on border.color {
       ColorAnimation {
         duration: 120
       }
