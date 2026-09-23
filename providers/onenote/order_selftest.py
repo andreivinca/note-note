@@ -3,7 +3,9 @@ import builtins
 import contextlib
 import io
 import json
+import os
 import struct
+import tempfile
 import time
 import unittest
 import urllib.error
@@ -504,6 +506,16 @@ class BoundaryTests(unittest.TestCase):
 
 
 class TransportTests(unittest.TestCase):
+    def setUp(self):
+        # A request takes a slot from the section-order limiter before it
+        # opens anything (ratelimit.slot), and the limiter keeps its stamps
+        # on disk: this test's go to a directory of its own, never the user's.
+        rate_dir = tempfile.TemporaryDirectory(prefix="note-note-rate-")
+        self.addCleanup(rate_dir.cleanup)
+        environment = patch.dict(os.environ, {"NOTE_NOTE_RATE_DIR": rate_dir.name})
+        environment.start()
+        self.addCleanup(environment.stop)
+
     def test_download_origin_allowlist(self):
         for host in order.DOWNLOAD_HOSTS:
             url = "https://test" + host + "/signed?secret=redacted"
