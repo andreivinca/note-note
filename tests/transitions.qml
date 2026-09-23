@@ -218,7 +218,7 @@ ShellRoot {
     function viewState() { return { cursor: 0, scroll: 0 } }
     function restoreViewState(state) {}
     function clearNotice() { viewProps = null }
-    function showView(title, component, props) { viewProps = props }
+    function showConflict(props) { viewProps = props }
     function setNote(t, b, shown) {
       title = t
       body = b

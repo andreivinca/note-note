@@ -49,7 +49,6 @@ Tool {
 
       function focusInput() {
         if (tool.panelOpen) {
-          monthField.value = String(tool.selectedMonth)
           yearField.forceActiveFocus()
           yearField.selectAll()
         }
@@ -76,10 +75,11 @@ Tool {
             showLabel: false
             label: "Month"
             options: tool.months
+            value: String(tool.selectedMonth)
             foreground: tool.editor.foreground
             accent: tool.editor.accent
             fontFamily: tool.editor.fontFamily
-            onChanged: function(value) {
+            onSelected: function(value) {
               tool.selectedMonth = Number(value)
             }
           }

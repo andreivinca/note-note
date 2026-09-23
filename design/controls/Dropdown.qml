@@ -2,6 +2,9 @@ import QtQuick
 import QtQuick.Controls as Controls
 import ".."
 
+// A choice among `options`, showing `value`. The control announces a
+// choice with `selected` and writes nothing back: the value shown is the
+// caller's, bound or set, the way every control here keeps its inputs.
 Controls.ComboBox {
   id: control
   property var options: []
@@ -12,7 +15,7 @@ Controls.ComboBox {
   property color accent: Color.accent
   property string fontFamily: Style.font.family
   readonly property bool popupOpen: popup.opened
-  signal changed(string value)
+  signal selected(string value)
   model: options
   textRole: "label"
   valueRole: "value"
@@ -22,10 +25,7 @@ Controls.ComboBox {
   palette.text: foreground
   palette.buttonText: foreground
   palette.highlight: accent
-  onActivated: {
-    value = String(currentValue)
-    changed(value)
-  }
+  onActivated: selected(String(currentValue))
   function open() {
     forceActiveFocus()
     popup.open()

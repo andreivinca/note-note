@@ -1,5 +1,4 @@
 import QtQuick
-import "../../ui" as Ui
 
 // Owns document identity, load generations, drafts and save completion.
 // UI, provider lookup and status presentation are injected, so transitions
@@ -28,18 +27,13 @@ Item {
   readonly property bool busy: Object.keys(session.savesPending).length > 0
   readonly property string notDisplayable: "This note could not be displayed — it has not been changed"
 
-  Component {
-    id: conflictView
-    Ui.MergeConflict {}
-  }
-
   function showConflict(path, conflict) {
     if (path !== session.currentPath || session.saveInFlight(path)) {
       return
     }
     var provider = session.providerFor(path)
     editor.readOnly = true
-    editor.showView("", conflictView, {
+    editor.showConflict({
       conflict: conflict,
       remoteName: provider ? provider.name : "Elsewhere",
       retry: function() {

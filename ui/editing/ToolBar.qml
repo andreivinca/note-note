@@ -38,7 +38,7 @@ Item {
 
   Rectangle {
     anchors.fill: parent
-    color: Qt.tint(bar.background, Util.alpha(bar.editor.foreground, 0.07))
+    color: Style.chromeSurface(bar.background, bar.editor.foreground)
   }
 
   Column {

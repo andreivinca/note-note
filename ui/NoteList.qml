@@ -116,10 +116,6 @@ Item {
     var max = Math.max(0, listView.contentHeight - listView.height)
     listView.contentY = listView.originY + Math.max(0, Math.min(y, max))
   }
-  function debugInfo() {
-    return "contentY=" + listView.contentY + " originY=" + listView.originY + " contentHeight=" + listView.contentHeight + " height=" + listView.height + " count=" + listView.count
-  }
-
   // The notebook's notes in the order now on screen. A drag moves delegates
   // while the model stands still, so until the host writes the order back
   // this walk of the visual items is the only record of it.
@@ -183,7 +179,7 @@ Item {
       id: notebookHeader
       width: parent.width
       height: root.headerHeight
-      color: Qt.tint(root.background, Util.alpha(root.foreground, 0.07))
+      color: Style.chromeSurface(root.background, root.foreground)
       HeaderLabel {
         id: countLabel
         objectName: "notebookHeaderCount"

@@ -59,4 +59,9 @@ QtObject {
   function selectedStateColor(foreground, accent) {
     return source ? source.selectedStateColor(foreground, accent) : Qt.tint(foreground, Util.alpha(accent, 0.6))
   }
+  // The chrome's raised surface — a bar, a header, a popup's fill, the
+  // open tab: one tint of the foreground over the background, everywhere.
+  function chromeSurface(background, foreground) {
+    return Qt.tint(background, Util.alpha(foreground, 0.07))
+  }
 }

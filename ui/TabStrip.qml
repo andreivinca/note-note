@@ -15,7 +15,7 @@ Item {
   property bool filtering: false
   // The exact fill behind the strip, for the overflow fades to fade into.
   property color background: Color.menu.background
-  property color activeBackground: Qt.tint(background, Util.alpha(foreground, 0.07))
+  property color activeBackground: Style.chromeSurface(background, foreground)
   property color foreground: Color.menu.text
   property string fontFamily: Style.font.menuFamily
   property int fontSize: Style.font.bodySmall
@@ -33,11 +33,13 @@ Item {
 
   // The open tab stays in sight: however it was switched — a click here,
   // ctrl+tab, a search hopping to the tab that has hits — the strip
-  // scrolls to show it.
-  onActiveKeyChanged: Qt.callLater(revealActive)
-  onWidthChanged: Qt.callLater(revealActive)
-  onSectionsChanged: Qt.callLater(revealActive)
+  // scrolls to show it. A new set of tabs is revealed as its active one is
+  // made (the repeater says), and the row is laid out here and now so the
+  // tab's place is known.
+  onActiveKeyChanged: revealActive()
+  onWidthChanged: revealActive()
   function revealActive() {
+    row.forceLayout()
     for (var i = 0; i < tabs.count; i++) {
       var it = tabs.itemAt(i)
       if (!it || it.modelData.key !== root.activeKey) {
@@ -82,6 +84,11 @@ Item {
       Repeater {
         id: tabs
         model: root.sections
+        onItemAdded: function(index, item) {
+          if (item.modelData.key === root.activeKey) {
+            root.revealActive()
+          }
+        }
 
         delegate: Rectangle {
           id: tab

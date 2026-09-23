@@ -173,6 +173,16 @@ Item {
     })
     return ++noticeSerial
   }
+  // A merge conflict, shown as the editor's own view: the session says
+  // what the conflict is and what to do about it (services/notes/
+  // NoteSession.qml, showConflict), and owns no view of its own.
+  Component {
+    id: conflictView
+    MergeConflict {}
+  }
+  function showConflict(props) {
+    return showView("", conflictView, props)
+  }
   function clearView() {
     customView = null
     customViewProps = ({})

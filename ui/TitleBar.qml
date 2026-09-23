@@ -89,7 +89,7 @@ Item {
       activeKey: root.activeKey
       filtering: root.filterText.length > 0
       background: root.fill
-      activeBackground: Qt.tint(root.background, Util.alpha(root.foreground, 0.07))
+      activeBackground: Style.chromeSurface(root.background, root.foreground)
       foreground: root.foreground
       fontFamily: root.fontFamily
       fontSize: root.tabFontSize
