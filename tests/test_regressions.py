@@ -351,6 +351,20 @@ class Content(unittest.TestCase):
         js = (ROOT / "ui/Dialect.js").read_text()
         self.assertEqual(re.search(r'var MONO_FAMILY = "([^"]*)"', js)[1], dialect.MONO_FAMILY)
 
+    def test_clipboard_readers_share_one_policy(self):
+        # The two hosts read the system clipboard on their own (QClipboard in
+        # runtime.cpp, wl-paste in hosts/omarchy/clipboard.py); the ceilings and
+        # the image types they accept are the staging policy's, once.
+        sys.path.insert(0, str(ROOT / "services/clipboard"))
+        import clipboard
+        native = (ROOT / "hosts/standalone/runtime.cpp").read_text()
+        self.assertEqual(eval(re.search(r"constexpr qsizetype maxText = ([^;]+);", native)[1]), clipboard.MAX_TEXT)
+        self.assertEqual(eval(re.search(r"constexpr qsizetype maxImage = ([^;]+);", native)[1]), clipboard.MAX_CLIPBOARD)
+        types = re.findall(r'QStringLiteral\("(image/[a-z]+)"\)', re.search(r"const QStringList types = \{([^}]*)\}", native, re.S)[1])
+        self.assertEqual(types, list(clipboard.MIME_SUFFIX))
+        shell = (ROOT / "hosts/omarchy/clipboard.py").read_text()
+        self.assertIn("from clipboard import MIME_SUFFIX, MAX_CLIPBOARD, MAX_TEXT", shell)
+
     def test_document_dialect_agrees_across_adapters(self):
         js = (ROOT / "ui/Dialect.js").read_text()
         for name in ("QUOTE_PX", "CODE_PAD_PX", "MAX_IMAGE_DISPLAY", "LINE_HEIGHT_PCT"):
