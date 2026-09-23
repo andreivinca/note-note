@@ -30,25 +30,20 @@
 // checks `version` once at load (ui/Dialect.js, NATIVE_VERSION) instead of
 // feeling for each method. cpp/selftest.py asserts the fallback and the
 // inspector agree.
+//
+// The header says what each call means; textblocks.cpp is how.
 #pragma once
 
 #include "dialect.h"
 #include "textlinks.h"
 
-#include <QImage>
 #include <QObject>
-#include <QPixmap>
 #include <QQmlEngine>
 #include <QQuickTextDocument>
 #include <QTextBlock>
 #include <QTextBlockFormat>
-#include <QTextCursor>
 #include <QTextDocument>
 #include <QTextImageFormat>
-#include <QTextLayout>
-#include <QTextList>
-#include <QTextTable>
-#include <QUrl>
 #include <QVariantList>
 #include <QVariantMap>
 
@@ -72,30 +67,13 @@ public:
     Q_INVOKABLE int appendTableRow(int position);
     Q_INVOKABLE int deletePreviousTable(int position);
 
-    explicit TextBlocks(QObject *parent = nullptr) : QObject(parent), m_links(new TextLinks(this))
-    {
-        connect(m_links, &TextLinks::linksChanged, this, [this]() {
-            ++m_linkRevision;
-            emit linksChanged();
-        });
-    }
+    explicit TextBlocks(QObject *parent = nullptr);
 
     int linkRevision() const { return m_linkRevision; }
     int version() const { return Version; }
 
     QQuickTextDocument *document() const { return m_document; }
-    void setDocument(QQuickTextDocument *document)
-    {
-        if (document == m_document) {
-            return;
-        }
-        m_document = document;
-        m_links->setDocument(document ? document->textDocument() : nullptr);
-        // A depth carried across documents would end blocks the new
-        // document never began.
-        m_editDepth = 0;
-        emit documentChanged();
-    }
+    void setDocument(QQuickTextDocument *document);
 
     // The editor's tools edit in strokes — highlight inserts the restyled
     // copy and then removes the original; a block tool removes the whole
@@ -108,28 +86,8 @@ public:
     // throwaway cursor is enough. The depth guard keeps a stray end from
     // underflowing Qt's counter — the QML side brackets in try/finally
     // (NoteEditor.atomic), so depth here never outlives a tool.
-    Q_INVOKABLE void beginEditBlock(bool joinPrevious = false)
-    {
-        QTextDocument *doc = m_document ? m_document->textDocument() : nullptr;
-        if (!doc) {
-            return;
-        }
-        if (joinPrevious) {
-            QTextCursor(doc).joinPreviousEditBlock();
-        } else {
-            QTextCursor(doc).beginEditBlock();
-        }
-        ++m_editDepth;
-    }
-    Q_INVOKABLE void endEditBlock()
-    {
-        QTextDocument *doc = m_document ? m_document->textDocument() : nullptr;
-        if (!doc || m_editDepth <= 0) {
-            return;
-        }
-        QTextCursor(doc).endEditBlock();
-        --m_editDepth;
-    }
+    Q_INVOKABLE void beginEditBlock(bool joinPrevious = false);
+    Q_INVOKABLE void endEditBlock();
 
     // Forward Delete across a paragraph boundary is one undo transaction,
     // including the margin repairs it triggers. joinPreviousEditBlock cannot
@@ -139,46 +97,7 @@ public:
     // and discard its list membership. The surviving paragraph owns the
     // format: an empty heading must not enlarge the list item moved up into it.
     // Return the new caret position, or -1 when ordinary Delete should apply.
-    Q_INVOKABLE int deleteParagraphBoundary(int position)
-    {
-        QTextDocument *doc = m_document ? m_document->textDocument() : nullptr;
-        if (!doc || position < 0 || position >= doc->characterCount() - 1) {
-            return -1;
-        }
-        const QTextBlock block = doc->findBlock(position);
-        const QTextBlock next = block.next();
-        if (!next.isValid()) {
-            return -1;
-        }
-        const bool emptyParagraph = (block.text().isEmpty() || block.text() == QString(NoteNoteDialect::BLANK_PARAGRAPH))
-                && !block.textList() && !NoteNoteDialect::isCodeBlock(block.blockFormat())
-                && !block.blockFormat().hasProperty(QTextFormat::BlockTrailingHorizontalRulerWidth);
-        QTextCursor cursor(doc);
-        cursor.setPosition(position);
-        if (!emptyParagraph && !cursor.atBlockEnd()) {
-            return -1;
-        }
-        const QTextCursor following(next);
-        // Paragraph deletion must not merge table cells or remove a frame's
-        // required anchor paragraph. Qt handles those structural boundaries.
-        if (cursor.currentTable() || cursor.currentFrame() != following.currentFrame()) {
-            return -1;
-        }
-        cursor.beginEditBlock();
-        if (emptyParagraph) {
-            const QTextBlockFormat format = next.blockFormat();
-            const QTextCharFormat characters = following.blockCharFormat();
-            cursor.setPosition(block.position());
-            cursor.setBlockFormat(format);
-            cursor.setBlockCharFormat(characters);
-            cursor.setPosition(next.position(), QTextCursor::KeepAnchor);
-            cursor.removeSelectedText();
-        } else {
-            cursor.deleteChar();
-        }
-        cursor.endEditBlock();
-        return cursor.position();
-    }
+    Q_INVOKABLE int deleteParagraphBoundary(int position);
 
     // Every block in document order — paragraphs, list items and table
     // cells alike, the same order the document's plain text walks them.
@@ -193,36 +112,7 @@ public:
     // Qt Quick paints the marker as a raw ☐/☒ glyph hardcoded in its
     // renderer, so the editor covers it and draws its own box over the
     // glyph's cell (NoteEditor.qml, block decorations).
-    Q_INVOKABLE QVariantList blocks() const
-    {
-        QVariantList out;
-        QTextDocument *doc = m_document ? m_document->textDocument() : nullptr;
-        if (!doc) {
-            return out;
-        }
-        for (QTextBlock block = doc->begin(); block.isValid(); block = block.next()) {
-            const QTextBlockFormat format = block.blockFormat();
-            QVariantMap entry;
-            entry.insert(QStringLiteral("position"), block.position());
-            entry.insert(QStringLiteral("end"), block.position() + qMax(0, block.length() - 1));
-            entry.insert(QStringLiteral("marginLeft"), format.leftMargin());
-            entry.insert(QStringLiteral("marginRight"), format.rightMargin());
-            entry.insert(QStringLiteral("background"), format.background().style() != Qt::NoBrush);
-            entry.insert(QStringLiteral("list"), block.textList() != nullptr);
-            // A horizontal rule: Qt keeps it as an empty block wearing this
-            // property, and the editor needs to know — a rule that ends the
-            // note leaves the caret no position after it (escapeForward).
-            entry.insert(QStringLiteral("rule"),
-                         format.hasProperty(QTextFormat::BlockTrailingHorizontalRulerWidth));
-            const QTextBlockFormat::MarkerType marker = format.marker();
-            entry.insert(QStringLiteral("marker"),
-                         marker == QTextBlockFormat::MarkerType::Checked         ? 2
-                                 : marker == QTextBlockFormat::MarkerType::Unchecked ? 1
-                                                                                     : 0);
-            out.append(entry);
-        }
-        return out;
-    }
+    Q_INVOKABLE QVariantList blocks() const;
 
     // Every inline image in document order: where it sits (`position` is
     // its object-replacement character, valid for positionToRectangle),
@@ -233,50 +123,7 @@ public:
     // 0 while the resource has not loaded), and `ascent` — the image's
     // baseline within its line, which is where its bottom edge sits, so the
     // editor can place the resize handle on the drawn corner exactly.
-    Q_INVOKABLE QVariantList images() const
-    {
-        QVariantList out;
-        QTextDocument *doc = m_document ? m_document->textDocument() : nullptr;
-        if (!doc) {
-            return out;
-        }
-        for (QTextBlock block = doc->begin(); block.isValid(); block = block.next()) {
-            for (QTextBlock::iterator it = block.begin(); !it.atEnd(); ++it) {
-                const QTextFragment fragment = it.fragment();
-                if (!fragment.isValid() || !fragment.charFormat().isImageFormat()) {
-                    continue;
-                }
-                const QTextImageFormat format = fragment.charFormat().toImageFormat();
-                const QSizeF natural = naturalSize(doc, format);
-                qreal width = format.hasProperty(QTextFormat::ImageWidth) ? format.width() : 0;
-                qreal height = format.hasProperty(QTextFormat::ImageHeight) ? format.height() : 0;
-                if (width > 0 && height <= 0 && natural.width() > 0) {
-                    height = natural.height() * width / natural.width();
-                } else if (height > 0 && width <= 0 && natural.height() > 0) {
-                    width = natural.width() * height / natural.height();
-                }
-                if (width <= 0 && height <= 0) {
-                    width = natural.width();
-                    height = natural.height();
-                }
-                const QTextLine line =
-                        block.layout()->lineForTextPosition(fragment.position() - block.position());
-                // A fragment can hold several adjacent copies of one image.
-                for (int i = 0; i < fragment.length(); ++i) {
-                    QVariantMap entry;
-                    entry.insert(QStringLiteral("position"), fragment.position() + i);
-                    entry.insert(QStringLiteral("source"), format.name());
-                    entry.insert(QStringLiteral("width"), width);
-                    entry.insert(QStringLiteral("height"), height);
-                    entry.insert(QStringLiteral("naturalWidth"), natural.width());
-                    entry.insert(QStringLiteral("naturalHeight"), natural.height());
-                    entry.insert(QStringLiteral("ascent"), line.isValid() ? line.ascent() : height);
-                    out.append(entry);
-                }
-            }
-        }
-        return out;
-    }
+    Q_INVOKABLE QVariantList images() const;
 
     // The corner-handle resize: the image keeps its source and alignment and
     // gets a display width; the stored height is cleared so Qt scales it by
@@ -284,33 +131,7 @@ public:
     // agreeing. One format-only edit — its own undo step, or joined to the
     // edit before it (`join`, for the paste that fits its fresh image so one
     // Ctrl+Z takes both). False when `position` does not hold an image.
-    Q_INVOKABLE bool setImageWidth(int position, qreal width, bool join = false)
-    {
-        QTextDocument *doc = m_document ? m_document->textDocument() : nullptr;
-        if (!doc || width <= 0 || position < 0 || position >= doc->characterCount()) {
-            return false;
-        }
-        QTextCursor cursor(doc);
-        cursor.setPosition(position);
-        cursor.setPosition(position + 1, QTextCursor::KeepAnchor);
-        // charFormat() answers for the character before position(), which
-        // with this selection is the image character itself.
-        const QTextCharFormat current = cursor.charFormat();
-        if (!current.isImageFormat()) {
-            return false;
-        }
-        QTextImageFormat format = current.toImageFormat();
-        format.setWidth(width);
-        format.clearProperty(QTextFormat::ImageHeight);
-        if (join) {
-            cursor.joinPreviousEditBlock();
-        } else {
-            cursor.beginEditBlock();
-        }
-        cursor.setCharFormat(format);
-        cursor.endEditBlock();
-        return true;
-    }
+    Q_INVOKABLE bool setImageWidth(int position, qreal width, bool join = false);
 
     // The plain paste inside a code block: `text` replaces the selection
     // from `from` to `to` the way typing would put it there — each newline
@@ -321,68 +142,22 @@ public:
     // only while it is all-monospace on the block background. One undo
     // step. Answers with the caret's place after the text, or -1 for a
     // range the document does not have.
-    Q_INVOKABLE int insertPlainText(int from, int to, const QString &text)
-    {
-        QTextDocument *doc = m_document ? m_document->textDocument() : nullptr;
-        if (!doc || from < 0 || from > to || to >= doc->characterCount()) {
-            return -1;
-        }
-        QTextCursor cursor(doc);
-        cursor.setPosition(from);
-        cursor.setPosition(to, QTextCursor::KeepAnchor);
-        cursor.insertText(text);
-        return cursor.position();
-    }
+    Q_INVOKABLE int insertPlainText(int from, int to, const QString &text);
 
-    Q_INVOKABLE void normalizeLinks()
-    {
-        TextLinks::normalizeAnchors(m_document ? m_document->textDocument() : nullptr);
-    }
+    Q_INVOKABLE void normalizeLinks();
 
     Q_INVOKABLE void configureLinks(const QColor &colour, bool plainText,
                                    const QColor &quoteInk = QColor("#9399b2"),
-                                   const QColor &highlightInk = QColor("#1e1e2e"))
-    {
-        m_links->configure(colour, plainText, quoteInk, highlightInk);
-    }
+                                   const QColor &highlightInk = QColor("#1e1e2e"));
 
-    Q_INVOKABLE QString linkAt(qreal x, qreal y) const
-    {
-        return m_links->linkAt(QPointF(x, y));
-    }
+    Q_INVOKABLE QString linkAt(qreal x, qreal y) const;
 
     // Qt gives an outer list 12px above its first item and below its last,
     // with zero between items. Nested lists (indent > 1) have zero margins
     // throughout. Enter copies the split item's margins, so restore this
     // imported form as the items change. The repair joins the triggering
     // edit for undo and never reaches the note: the reader ignores margins.
-    Q_INVOKABLE void normalizeListMargins()
-    {
-        QTextDocument *doc = m_document ? m_document->textDocument() : nullptr;
-        if (!doc) {
-            return;
-        }
-        for (QTextBlock block = doc->begin(); block.isValid(); block = block.next()) {
-            QTextList *list = block.textList();
-            if (!list) {
-                continue;
-            }
-            const bool nested = list->format().indent() > 1;
-            const int item = list->itemNumber(block);
-            const qreal top = !nested && item == 0 ? 12 : 0;
-            const qreal bottom = !nested && item == list->count() - 1 ? 12 : 0;
-            QTextBlockFormat format = block.blockFormat();
-            if (format.topMargin() == top && format.bottomMargin() == bottom) {
-                continue;
-            }
-            format.setTopMargin(top);
-            format.setBottomMargin(bottom);
-            QTextCursor cursor(block);
-            cursor.joinPreviousEditBlock();
-            cursor.setBlockFormat(format);
-            cursor.endEditBlock();
-        }
-    }
+    Q_INVOKABLE void normalizeListMargins();
 
     // The dialect states its line height on every block it writes
     // (qthtml/writer.py), but a block born outside the writer — the first
@@ -392,56 +167,12 @@ public:
     // way normalizeListMargins does: format-only, joined to the edit that
     // made the block, and never reaching the note (the reader ignores a
     // block's line height).
-    Q_INVOKABLE void normalizeLineHeights()
-    {
-        constexpr qreal percent = NoteNoteDialect::LINE_HEIGHT_PCT;
-        QTextDocument *doc = m_document ? m_document->textDocument() : nullptr;
-        if (!doc) {
-            return;
-        }
-        for (QTextBlock block = doc->begin(); block.isValid(); block = block.next()) {
-            QTextBlockFormat format = block.blockFormat();
-            if (format.lineHeightType() == QTextBlockFormat::ProportionalHeight
-                && qFuzzyCompare(format.lineHeight(), percent)) {
-                continue;
-            }
-            format.setLineHeight(percent, QTextBlockFormat::ProportionalHeight);
-            QTextCursor cursor(block);
-            cursor.joinPreviousEditBlock();
-            cursor.setBlockFormat(format);
-            cursor.endEditBlock();
-        }
-    }
+    Q_INVOKABLE void normalizeLineHeights();
 
     // Enter copies a code line's margins onto both halves. Keep the outer
     // margins on the run's first and last lines so editing cannot introduce
     // gaps inside the slab or remove its clearance from neighbouring text.
-    Q_INVOKABLE void normalizeCodeMargins()
-    {
-        // Mirrors CODE_MARGIN_PX in qthtml/dialect.py.
-        constexpr qreal codeMargin = 20;
-        QTextDocument *doc = m_document ? m_document->textDocument() : nullptr;
-        if (!doc) {
-            return;
-        }
-        for (QTextBlock block = doc->begin(); block.isValid(); block = block.next()) {
-            if (!NoteNoteDialect::isCodeBlock(block.blockFormat())) {
-                continue;
-            }
-            const qreal top = neighbourIsCode(block.previous()) ? 0 : codeMargin;
-            const qreal bottom = neighbourIsCode(block.next()) ? 0 : codeMargin;
-            QTextBlockFormat format = block.blockFormat();
-            if (format.topMargin() == top && format.bottomMargin() == bottom) {
-                continue;
-            }
-            format.setTopMargin(top);
-            format.setBottomMargin(bottom);
-            QTextCursor cursor(block);
-            cursor.joinPreviousEditBlock();
-            cursor.setBlockFormat(format);
-            cursor.endEditBlock();
-        }
-    }
+    Q_INVOKABLE void normalizeCodeMargins();
 
     // A block with no characters directly above a table takes no height:
     // Qt hides it — the same rule that hides the empty block Qt itself
@@ -457,35 +188,7 @@ public:
     // a filler beside typed text, so it never reaches the note. Answers
     // with the filled position, for the caller to put the caret back in
     // front of the filler; -1 when every block already had its height.
-    Q_INVOKABLE int fillEmptyBlocksBeforeTables()
-    {
-        QTextDocument *doc = m_document ? m_document->textDocument() : nullptr;
-        if (!doc) {
-            return -1;
-        }
-        int filled = -1;
-        for (QTextBlock block = doc->begin(); block.isValid(); block = block.next()) {
-            const QTextBlock following = block.next();
-            if (block.length() > 1 || !following.isValid()) {
-                continue;
-            }
-            QTextCursor cursor(block);
-            QTextTable *table = QTextCursor(following).currentTable();
-            // Leaving a nested table also changes currentTable(), but its
-            // last cell is not an empty paragraph above the parent table.
-            if (!table || table == cursor.currentTable()
-                    || following.position() != table->firstPosition()) {
-                continue;
-            }
-            cursor.joinPreviousEditBlock();
-            cursor.insertText(QString(NoteNoteDialect::BLANK_PARAGRAPH));
-            cursor.endEditBlock();
-            if (filled < 0) {
-                filled = block.position();
-            }
-        }
-        return filled;
-    }
+    Q_INVOKABLE int fillEmptyBlocksBeforeTables();
 
 signals:
     void documentChanged();
@@ -494,28 +197,6 @@ signals:
 private:
     TextLinks *m_links;
     int m_linkRevision = 0;
-    // A neighbour past the document's ends is no block at all.
-    static bool neighbourIsCode(const QTextBlock &block)
-    {
-        return block.isValid() && NoteNoteDialect::isCodeBlock(block.blockFormat());
-    }
-
-    // The image file's own size, from the resource the document already
-    // loaded to paint it (the document caches these, so this is a lookup,
-    // not a read). Empty while a resource has not loaded — `images()` then
-    // reports natural 0 and the next pass sees it.
-    static QSizeF naturalSize(QTextDocument *doc, const QTextImageFormat &format)
-    {
-        const QVariant resource =
-                doc->resource(QTextDocument::ImageResource, QUrl(format.name()));
-        if (resource.canConvert<QImage>()) {
-            return resource.value<QImage>().size();
-        }
-        if (resource.canConvert<QPixmap>()) {
-            return resource.value<QPixmap>().size();
-        }
-        return QSizeF();
-    }
 
     QQuickTextDocument *m_document = nullptr;
     int m_editDepth = 0;

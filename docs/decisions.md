@@ -536,9 +536,11 @@ document only as serialised HTML, so the first implementation scanned that
 with a regex — workable, but a third private copy of "what counts as a
 block, in what order" (the reader and the caret map are the other two), and
 its first disagreement was found the day a second opinion existed. So block
-formats are now read natively: a ~80-line C++ class (`cpp/textblocks.h`)
-that takes the TextEdit's `textDocument` and answers with each block's
-position and margins — read-only, so the worst it can do is misplace a bar.
+formats are now read natively: a C++ class (`cpp/textblocks.h`, its bodies
+in `textblocks.cpp`) that takes the TextEdit's `textDocument` and answers
+with each block's position and margins. It began read-only and has since
+taken on the edits QML cannot make — list margins, tables, image widths,
+undo brackets — each described where it is declared.
 
 *Considered:* requiring the native module. *Rejected:* every user would need
 a compile step `omarchy plugin add` cannot run, and native code loads into
