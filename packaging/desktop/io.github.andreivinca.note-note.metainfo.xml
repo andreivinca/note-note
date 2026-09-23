@@ -34,6 +34,17 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.0.22" date="2026-09-23">
+      <description>
+        <p>Review fixes since 1.0.21. The status bar's sidebar toggle is quiet
+        until hovered and the status message shows the link under the pointer.
+        OneNote refuses a save that would flatten formatting and keeps sections
+        in their owner's order; a Notion page opens for editing only when a
+        save can put it back; a cut Sticky note opens read-only. Pasting says
+        why it did nothing, headings four to six survive the editor, and every
+        network response is read through one bounded, deadline-aware reader.</p>
+      </description>
+    </release>
     <release version="1.0.21" date="2026-09-14">
       <description>
         <p>Local Markdown notebooks, OneNote, Sticky Notes and Notion in one
