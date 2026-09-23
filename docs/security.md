@@ -151,8 +151,10 @@ the existing bounded Graph transport and OneNote permission.
 
 The cache uses `save_private` (0600 atomic replacement) and a separate
 0600 `flock` file for transactions between provider processes. A random
-`cacheSession` in the provider's token file scopes text and listing caches
-to one sign-in; refresh retains it and a new sign-in replaces it. Late jobs
+`cacheSession` in the provider's token file scopes the text, listing and
+order caches, and the Sticky Notes listing cache, to one sign-in (`msgraph`
+`load_for_session` / `save_for_session`); refresh retains it and a new
+sign-in replaces it, so a cache another account left is never read. Late jobs
 verify their session and page revision before committing. Parallel workers
 claim different pages under that lock; claims record the worker PID and a
 bounded lease, so a stopped worker cannot block indexing indefinitely. Sign-out removes

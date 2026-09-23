@@ -8,6 +8,9 @@ Graph exposes as a well-known mail folder.
   sticky.py update <id> <file> -> reads {"title","body"} from file, PATCHes the note
   sticky.py create             -> {"ok":true,"note":{...}}
   sticky.py delete <id>
+
+The listing cache is the signed-in account's (msgraph load_for_session /
+save_for_session): one left by another account is never answered from.
 """
 import os, sys, time, urllib.parse
 
@@ -17,7 +20,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "..", "lib"))
 import msgraph  # noqa: E402
 import ratelimit  # noqa: E402
 from msgraph import graph  # noqa: E402
-from provider_io import fail, fail_throttled, out, load_json, save_private, read_payload, CACHE_DIR  # noqa: E402
+from provider_io import fail, fail_throttled, out, read_payload, CACHE_DIR  # noqa: E402
 
 # Sticky Notes' own budget, separate from OneNote's: a OneNote throttle must
 # never stop a sticky note being saved. Mailbox limits are far higher than
@@ -51,7 +54,7 @@ def to_note(m):
 
 def cmd_list(cached):
     if cached:
-        c = load_json(CACHE, None)
+        c = msgraph.load_for_session(CACHE, None)
         if c is not None:
             out({"notes": c.get("notes", []), "cached": True})
             return
@@ -68,8 +71,7 @@ def cmd_list(cached):
         notes.extend(to_note(m) for m in res.get("value", []))
         url = res.get("@odata.nextLink")
     notes = notes[:MAX_NOTES]
-    os.makedirs(CACHE_DIR, exist_ok=True)
-    save_private(CACHE, {"notes": notes, "fetched": time.time()})
+    msgraph.save_for_session(CACHE, {"notes": notes, "fetched": time.time()})
     out({"notes": notes, "cached": False})
 
 
@@ -85,12 +87,12 @@ def cmd_update(note_id, path):
         fail((res.get("error") or {}).get("message", "Graph error %s" % status) if isinstance(res.get("error"), dict)
              else str(res.get("error", status)))
     # Keep the cache in step so a reopen shows the edit even before a refresh.
-    c = load_json(CACHE, {"notes": []})
+    c = msgraph.load_for_session(CACHE, {"notes": []})
     for n in c.get("notes", []):
         if n["id"] == note_id:
             n["body"] = body
             n["modified"] = res.get("lastModifiedDateTime", n.get("modified", ""))
-    save_private(CACHE, c)
+    msgraph.save_for_session(CACHE, c)
     out({"ok": True})
 
 
@@ -105,9 +107,9 @@ def cmd_create():
         fail((res.get("error") or {}).get("message", "Graph error %s" % status) if isinstance(res.get("error"), dict)
              else str(res.get("error", status)))
     note = to_note(res)
-    c = load_json(CACHE, {"notes": []})
+    c = msgraph.load_for_session(CACHE, {"notes": []})
     c["notes"] = [note] + [n for n in c.get("notes", []) if n["id"] != note["id"]]
-    save_private(CACHE, c)
+    msgraph.save_for_session(CACHE, c)
     out({"ok": True, "note": note})
 
 
@@ -118,9 +120,9 @@ def cmd_delete(note_id):
     if status not in (204, 200, 404):
         fail((res.get("error") or {}).get("message", "Graph error %s" % status) if isinstance(res.get("error"), dict)
              else str(res.get("error", status)))
-    c = load_json(CACHE, {"notes": []})
+    c = msgraph.load_for_session(CACHE, {"notes": []})
     c["notes"] = [n for n in c.get("notes", []) if n["id"] != note_id]
-    save_private(CACHE, c)
+    msgraph.save_for_session(CACHE, c)
     out({"ok": True})
 
 

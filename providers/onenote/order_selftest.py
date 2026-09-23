@@ -281,7 +281,7 @@ class OrderingTests(unittest.TestCase):
         pages = [{"id": "second", "sectionId": result[0]["id"]},
                  {"id": "first", "sectionId": result[0]["id"]}]
         listing = onenote.Listing({"pages": pages}, result)
-        with patch.object(onenote, "save_private") as save, patch.object(onenote.os, "makedirs"):
+        with patch.object(onenote.msgraph, "save_private") as save:
             listing.save(False)
         data = save.call_args.args[1]
         self.assertEqual(data["sections"], result)
@@ -394,10 +394,12 @@ class BoundaryTests(unittest.TestCase):
             files[onenote.ONENOTE_CACHE] = listing
         return files
 
+    # The listing and the order are the account's caches, read and written
+    # through msgraph (load_for_session / save_for_session): `files` stands
+    # in for the disk there.
     def on_disk(self, stack, files):
-        stack.enter_context(patch.object(onenote, "load_json", side_effect=lambda path, default=None: files.get(path, default)))
-        stack.enter_context(patch.object(onenote, "save_private", side_effect=files.__setitem__))
-        stack.enter_context(patch.object(onenote.os, "makedirs"))
+        stack.enter_context(patch.object(onenote.msgraph, "load_json", side_effect=lambda path, default=None: files.get(path, default)))
+        stack.enter_context(patch.object(onenote.msgraph, "save_private", side_effect=files.__setitem__))
 
     def test_listing_answers_pages_before_any_order_pass(self):
         source = sections()

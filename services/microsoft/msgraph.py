@@ -365,6 +365,33 @@ def graph(method, path, data=None, extra_headers=None, max_bytes=MAX_BODY, retry
     return status, res
 
 
+# ---------------------------------------------------------------- caches
+
+def current_session():
+    """The signed-in account's cacheSession: what a cache must carry to be
+    read as this account's. Empty when no one is signed in."""
+    return (signed_in(config()[0]) or {}).get("cacheSession", "")
+
+
+def load_for_session(path, default):
+    """A cache of the signed-in account's; another account's stays unread."""
+    cached = load_json(path, None)
+    if not isinstance(cached, dict) or cached.get("cacheSession", "") != current_session():
+        return default
+    return cached
+
+
+def save_for_session(path, data):
+    """A cache stamped with the session it was fetched under — the one the
+    provider asked for (NOTE_NOTE_MS_CACHE_SESSION), which must still be the
+    signed-in one: a write that lands after a new sign-in is dropped."""
+    session = os.environ.get("NOTE_NOTE_MS_CACHE_SESSION") or current_session()
+    if session != current_session():
+        return
+    data["cacheSession"] = session
+    save_private(path, data)
+
+
 # ---------------------------------------------------------------- commands
 
 def cmd_status():

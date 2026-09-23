@@ -146,40 +146,22 @@ def content_index():
     return search_index.Index(CACHE_DIR, session, valid)
 
 
-def current_session():
-    return (msgraph.signed_in(msgraph.config()[0]) or {}).get("cacheSession", "")
-
-
+# The listing and the order are the signed-in account's (msgraph
+# load_for_session / save_for_session): another account's stay unread.
 def load_listing(default=None):
-    return load_for_session(ONENOTE_CACHE, default)
+    return msgraph.load_for_session(ONENOTE_CACHE, default)
 
 
 def save_listing(cached):
-    save_for_session(ONENOTE_CACHE, cached)
+    msgraph.save_for_session(ONENOTE_CACHE, cached)
 
 
 def load_order():
-    return load_for_session(ONENOTE_ORDER, {})
+    return msgraph.load_for_session(ONENOTE_ORDER, {})
 
 
 def save_order(order):
-    save_for_session(ONENOTE_ORDER, order)
-
-
-def load_for_session(path, default):
-    """A cache of the signed-in account's; another account's stays unread."""
-    cached = load_json(path, None)
-    if not isinstance(cached, dict) or cached.get("cacheSession", "") != current_session():
-        return default
-    return cached
-
-
-def save_for_session(path, data):
-    session = os.environ.get("NOTE_NOTE_MS_CACHE_SESSION") or current_session()
-    if session != current_session():
-        return
-    data["cacheSession"] = session
-    save_private(path, data)
+    msgraph.save_for_session(ONENOTE_ORDER, order)
 
 
 def search_ticket(page_id):
@@ -391,7 +373,6 @@ class Listing:
         self.seen = dict((k, v) for k, v in self.seen.items() if k in live)
         if complete:
             self.fetched = time.time()
-        os.makedirs(CACHE_DIR, exist_ok=True)
         save_listing({"sections": self.sections, "pages": self.pages(),
                       "sectionPages": self.seen, "fetched": self.fetched,
                       "inventoryComplete": complete and self.within_limits()})
