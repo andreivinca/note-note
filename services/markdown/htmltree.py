@@ -6,9 +6,11 @@ general HTML implementation.
 """
 from html.parser import HTMLParser
 
-# Written as <br/> or <hr/>; never carry children.
+# Written as <br/> or <hr/>; never carry children, so one written bare —
+# `<meta charset="utf-8">`, the way a browser's clipboard puts it — opens
+# nothing that would have to close.
 VOID_TAGS = {"br", "hr", "img", "meta", "link", "input"}
-# Everything a document's structure is made of; the rest is inline.
+# Not part of the document: dropped with everything inside them.
 SKIPPED_TAGS = {"head", "style", "script", "title", "meta"}
 
 
@@ -43,7 +45,8 @@ class _Builder(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         if tag in SKIPPED_TAGS:
-            self.skipping += 1
+            if tag not in VOID_TAGS:
+                self.skipping += 1
             return
         if self.skipping:
             return
@@ -58,7 +61,8 @@ class _Builder(HTMLParser):
 
     def handle_endtag(self, tag):
         if tag in SKIPPED_TAGS:
-            self.skipping = max(0, self.skipping - 1)
+            if tag not in VOID_TAGS:
+                self.skipping = max(0, self.skipping - 1)
             return
         if self.skipping or tag in VOID_TAGS:
             return

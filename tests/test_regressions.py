@@ -351,6 +351,12 @@ class Content(unittest.TestCase):
         js = (ROOT / "ui/Dialect.js").read_text()
         self.assertEqual(re.search(r'var MONO_FAMILY = "([^"]*)"', js)[1], dialect.MONO_FAMILY)
 
+    def test_a_bare_meta_tag_hides_nothing(self):
+        # A browser's clipboard writes <meta charset="utf-8"> unclosed; a
+        # skipped tag that is also void must not swallow the document.
+        self.assertEqual(convert('<meta charset="utf-8"><p>Text</p>')["markdown"], "Text\n")
+        self.assertEqual(convert('<head><meta charset="utf-8"><title>x</title></head><body><p>Text</p></body>')["markdown"], "Text\n")
+
     def test_clipboard_readers_share_one_policy(self):
         # The two hosts read the system clipboard on their own (QClipboard in
         # runtime.cpp, wl-paste in hosts/omarchy/clipboard.py); the ceilings and
