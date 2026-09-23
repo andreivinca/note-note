@@ -93,11 +93,14 @@ Item {
       return ""
     }
     if (!tool.shortcutLabel || tool.isMenu) {
-      return "shortcuts need a label and an executable tool"
+      return "a shortcut needs a letter or digit key and an executable tool"
     }
     var shortcut = tool.shortcutKey + ":" + tool.shortcutModifiers
+    // A tool's key is pressed in the editor: it competes with the bindings
+    // that are the editor's or everyone's, not with a page's or the search's.
     if (shortcuts[shortcut] || KeyBindings.ACTIONS.concat(KeyBindings.EDITOR_KEYS).some(function(action) {
-      return action.key === tool.shortcutKey && (action.modifiers || 0) === tool.shortcutModifiers
+      return (!action.context || action.context === "editor")
+          && action.key === tool.shortcutKey && (action.modifiers || 0) === tool.shortcutModifiers
     })) {
       return "shortcut already assigned"
     }

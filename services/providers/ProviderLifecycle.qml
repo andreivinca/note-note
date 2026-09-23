@@ -58,7 +58,10 @@ Item {
       return
     }
     var merged = host.mergeConfigDefaults(parsed)
-    var changes = Settings.plan(host.config, merged, Object.keys(host.providerUrls))
+    var changes = Settings.plan(host.config, merged, Object.keys(host.providerUrls), function(id) {
+      var provider = host.providerById(id)
+      return provider && Array.isArray(provider.liveSettings) ? provider.liveSettings : []
+    })
     for (var i = 0; i < changes.length; i++) {
       if (changes[i].replace && changes[i].enabled) {
         var component = Qt.createComponent(host.providerUrls[changes[i].id])

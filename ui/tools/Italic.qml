@@ -10,7 +10,6 @@ Tool {
   icon: "󰉷"
   shortcutKey: Qt.Key_I
   shortcutModifiers: Qt.ControlModifier
-  shortcutLabel: "ctrl+i"
 
   function execute() {
     editor.toggleFont("italic", Dialect.INLINE_MARKERS.italic)

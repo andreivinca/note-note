@@ -193,8 +193,7 @@ QtObject {
   }
 
   function withoutChip(html) {
-    var chip = String(api.codeChipColour).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-    return html.replace(new RegExp("background-color\\s*:\\s*" + chip + "\\s*;?", "gi"), "")
+    return Dialect.withoutBackground(html, api.codeChipColour, false)
   }
 
   function transformBlocks(transform, options) {

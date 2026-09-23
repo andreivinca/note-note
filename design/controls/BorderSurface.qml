@@ -8,10 +8,10 @@ Rectangle {
   property real rightPadding: padding
   property real bottomPadding: padding
   property real leftPadding: padding
-  readonly property real contentTopInset: Border.top(borderSpec) + topPadding
-  readonly property real contentRightInset: Border.right(borderSpec) + rightPadding
-  readonly property real contentBottomInset: Border.bottom(borderSpec) + bottomPadding
-  readonly property real contentLeftInset: Border.left(borderSpec) + leftPadding
-  border.width: Border.left(borderSpec)
+  readonly property real contentTopInset: Border.width(borderSpec) + topPadding
+  readonly property real contentRightInset: Border.width(borderSpec) + rightPadding
+  readonly property real contentBottomInset: Border.width(borderSpec) + bottomPadding
+  readonly property real contentLeftInset: Border.width(borderSpec) + leftPadding
+  border.width: Border.width(borderSpec)
   border.color: borderSpec ? borderSpec.color : "transparent"
 }

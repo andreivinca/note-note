@@ -97,8 +97,6 @@ Item {
           anchors.verticalCenter: parent.verticalCenter
           radius: root.rowRadius
           color: hit.current ? root.selectedBackground : (hitHover.hovered ? Style.hoverFill : "transparent")
-          border.width: 0
-          border.color: Util.alpha(root.selectionAccent, 0.62)
 
           HoverHandler { id: hitHover }
 

@@ -10,7 +10,6 @@ Tool {
   icon: "󰉤"
   shortcutKey: Qt.Key_B
   shortcutModifiers: Qt.ControlModifier
-  shortcutLabel: "ctrl+b"
 
   function execute() {
     editor.toggleFont("bold", Dialect.INLINE_MARKERS.bold)

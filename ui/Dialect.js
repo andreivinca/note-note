@@ -61,6 +61,32 @@ function withoutMonoFamily(html) {
   })
 }
 
+// The background colours a run's style declares, lower-cased.
+function backgroundColours(html) {
+  var re = /background-color\s*:\s*([^;"]*)/gi, out = [], m
+  while ((m = re.exec(html)) !== null) {
+    out.push(m[1].trim().toLowerCase())
+  }
+  return out
+}
+
+// Whether the HTML holds a highlight: a background that is not the inline
+// code chip's (`chip`), which is display only and never a marker.
+function hasHighlight(html, chip) {
+  return backgroundColours(html).some(function(colour) { return colour !== String(chip).toLowerCase() })
+}
+
+// The HTML with one background colour's declarations taken out; every
+// other declaration stays. `keep` true takes out every background *but*
+// that colour instead — the highlight off, the chip left.
+function withoutBackground(html, colour, keep) {
+  var wanted = String(colour).toLowerCase()
+  return html.replace(/background-color\s*:\s*([^;"]*);?\s*/gi, function(declaration, value) {
+    var matches = value.trim().toLowerCase() === wanted
+    return (keep ? !matches : matches) ? "" : declaration
+  })
+}
+
 // The inline tools' Markdown, by tool id — what a tool types inside a code
 // block, where the fence holds the characters literally (NoteEditor,
 // typeMarker). Mirrors reader.INLINE_MARKERS in

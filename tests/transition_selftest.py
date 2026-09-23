@@ -20,6 +20,8 @@ def main():
         shutil.copytree(ROOT / "ui/tools", tool_ui / "tools")
         (tool_ui / "editing").symlink_to(ROOT / "ui/editing", target_is_directory=True)
         (tool_ui / "Dialect.js").symlink_to(ROOT / "ui/Dialect.js")
+        # Tool.qml (ui/editing) reads the shared key bindings beside its directory.
+        (tool_ui / "KeyBindings.js").symlink_to(ROOT / "ui/KeyBindings.js")
         greeting = (ROOT / "tests/InsertGreeting.qml").read_text().replace('"../ui/editing"', '"../editing"')
         (tool_ui / "tools/InsertGreeting.qml").write_text(greeting)
         invalid_tools = tool_ui / "invalid-tools"

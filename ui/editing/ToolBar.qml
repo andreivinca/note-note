@@ -160,7 +160,7 @@ Item {
             popupType: QQC.Popup.Item
             x: bar.popupX(tool.toolId, width)
             y: bar.height
-            padding: chromePopupStyle.padding + Border.left(chromePopupStyle.borderSpec)
+            padding: chromePopupStyle.padding + Border.width(chromePopupStyle.borderSpec)
             focus: true
             visible: tool.panelOpen && bar.registry.canExecute(tool)
             closePolicy: QQC.Popup.CloseOnEscape | QQC.Popup.CloseOnPressOutside

@@ -137,7 +137,7 @@ Item {
         if (button.editable) {
           button.startEditing()
         } else {
-          button.clicked()
+          root.footerActionRequested(button.modelData, "")
         }
         return true
       }

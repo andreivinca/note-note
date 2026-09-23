@@ -98,6 +98,8 @@ Tool {
         verticalPadding: Style.spacing.xxs
         onClicked: tool.cancel()
       }
+      // Once the panel is in the scene: a forceActiveFocus() from within
+      // completion runs before the item can take focus.
       Component.onCompleted: {
         Qt.callLater(panelContent.focusInput)
       }

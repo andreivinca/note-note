@@ -1,4 +1,5 @@
 import QtQuick
+import "KeyBindings.js" as Keys
 import "../design"
 import "../design/controls"
 
@@ -65,11 +66,10 @@ Item {
       root.closeRequested()
       return true
     }
-    // Ctrl+S is the action's shortcut, so a page without an action has no
-    // use for it — and swallowing it there would take the key from whatever
-    // else might want it.
-    if (root.actionText.length > 0
-        && (event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_S) {
+    // The save key is the action's (KeyBindings.js, savePage), so a page
+    // without an action has no use for it — and swallowing it there would
+    // take the key from whatever else might want it.
+    if (root.actionText.length > 0 && Keys.match(event, "page") === "savePage") {
       root.actionRequested(bodyArea.text)
       return true
     }

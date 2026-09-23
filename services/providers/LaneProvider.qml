@@ -13,8 +13,11 @@ Item {
   property var services: null
   property var sections: []
   // The keys of this provider's config entry that are its settings, each a
-  // property whose initial value is the default (PROVIDERS.md).
+  // property whose initial value is the default, and the ones among them a
+  // running instance takes in place with a rebuild rather than being
+  // replaced for (PROVIDERS.md).
   property var settings: []
+  property var liveSettings: []
 
   signal updated()
   signal statusRequested(string text)

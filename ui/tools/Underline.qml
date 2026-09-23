@@ -10,7 +10,6 @@ Tool {
   icon: "󰊇"
   shortcutKey: Qt.Key_U
   shortcutModifiers: Qt.ControlModifier
-  shortcutLabel: "ctrl+u"
 
   function execute() {
     editor.toggleFont("underline", Dialect.INLINE_MARKERS.underline)

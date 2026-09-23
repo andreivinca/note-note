@@ -45,9 +45,32 @@ var ACTIONS = [
   { id: "newNote", key: Qt.Key_N, modifiers: CTRL, group: "Notes", label: "ctrl+n", description: "A new note in the open notebook" },
   { id: "newNotebook", key: Qt.Key_N, modifiers: CTRL | SHIFT, group: "Notes", label: "ctrl+shift+n", description: "A new notebook" },
   { id: "deleteNote", key: Qt.Key_D, modifiers: CTRL, group: "Notes", label: "ctrl+d", description: "Delete the note you are reading" },
+  { id: "savePage", key: Qt.Key_S, modifiers: CTRL, context: "page", group: "Notes", label: "ctrl+s", description: "On the settings page: save it" },
   { id: "paste", key: Qt.Key_V, modifiers: CTRL, context: "editor" },
   { id: "pastePlain", key: Qt.Key_V, modifiers: CTRL | SHIFT, context: "editor" }
 ]
+
+// The label of a key with its modifiers, the way the table above spells
+// them: "ctrl+shift+h". A letter or digit key only; the tools' shortcuts
+// are those (ui/editing/Tool.qml), and the table spells the rest by hand.
+function label(key, modifiers) {
+  var letter = (key >= Qt.Key_A && key <= Qt.Key_Z) || (key >= Qt.Key_0 && key <= Qt.Key_9)
+  if (!letter) {
+    return ""
+  }
+  var parts = []
+  if (modifiers & CTRL) {
+    parts.push("ctrl")
+  }
+  if (modifiers & ALT) {
+    parts.push("alt")
+  }
+  if (modifiers & SHIFT) {
+    parts.push("shift")
+  }
+  parts.push(String.fromCharCode(key).toLowerCase())
+  return parts.join("+")
+}
 
 function match(event, context) {
   var modifiers = event.modifiers & (Qt.ControlModifier | Qt.ShiftModifier | Qt.AltModifier | Qt.MetaModifier)

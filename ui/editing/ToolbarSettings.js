@@ -16,7 +16,11 @@ function defaults() {
   ]
 }
 
-// Upgrade only the uncustomized previous layout. User arrangements are retained.
+// The default layout before the current one, kept so a config that still
+// holds it — written by an earlier version and never customised — reads
+// as the new default rather than as an arrangement of the user's. It may
+// go once no installed config can hold it: a config is rewritten only on
+// Save, so that is when every user has saved once on the new default.
 function previousDefaults() {
   return [
     ["bold", "italic", "underline", "strikeout"],

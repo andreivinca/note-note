@@ -168,6 +168,8 @@ Item {
           if (result.conflict) {
             session.showConflict(path, result.conflict)
           } else if (result.retry) {
+            // Once this load has settled: the save it asks for reads the
+            // session's state, which this very callback is still writing.
             Qt.callLater(function() {
               if (session.ownsLoad(path, generation) && !session.saveInFlight(path)) {
                 session.flushSave()

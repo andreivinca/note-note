@@ -9,7 +9,6 @@ Controls.AbstractButton {
   property string tooltipText: ""
   property bool selected: false
   property bool active: false
-  property bool hasCursor: false
   property bool focusable: false
   property bool bordered: false
   property color foreground: Color.foreground
@@ -18,11 +17,8 @@ Controls.AbstractButton {
   property string fontFamily: Style.font.family
   property real fontSize: Style.font.body
   property real iconSize: Style.font.icon
-  property real iconRotation: 0
-  property bool iconSpinning: false
   horizontalPadding: Style.spacing.controlPaddingX
   verticalPadding: Style.spacing.xs
-  property bool leftAlign: false
   property real radius: Style.cornerRadius
   property var borderSpec: bordered || activeFocus ? Border.flat(Util.alpha(foreground, 0.4), 1) : Border.none()
   signal rightClicked()
@@ -42,7 +38,7 @@ Controls.AbstractButton {
     radius: button.radius
     borderSpec: button.borderSpec
     color: button.down ? Style.pressedFillFor(button.foreground, button.accent)
-      : button.hovered || button.hasCursor || button.activeFocus ? Style.hoverFillFor(button.foreground, button.accent)
+      : button.hovered || button.activeFocus ? Style.hoverFillFor(button.foreground, button.accent)
       : button.selected || button.active ? Style.selectedFillFor(button.foreground, button.accent)
       : button.backgroundColor
   }
@@ -52,7 +48,7 @@ Controls.AbstractButton {
 
     RowLayout {
       id: contentRow
-      x: button.leftAlign ? 0 : (parent.width - width) / 2
+      x: (parent.width - width) / 2
       anchors.verticalCenter: parent.verticalCenter
       anchors.alignWhenCentered: false
       spacing: Style.spacing.controlGap
@@ -64,15 +60,7 @@ Controls.AbstractButton {
         color: button.foreground
         font.family: button.fontFamily
         font.pixelSize: button.iconSize
-        rotation: button.iconRotation
         Layout.alignment: Qt.AlignVCenter
-        RotationAnimation on rotation {
-          from: 0
-          to: 360
-          duration: 900
-          loops: Animation.Infinite
-          running: button.iconSpinning
-        }
       }
       Text {
         visible: button.text.length > 0

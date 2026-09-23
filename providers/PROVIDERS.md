@@ -156,7 +156,9 @@ instance exists is what it means), and a key the provider does not declare
 is not its business. External providers get the same: declare the setting,
 and its default appears in the user's config. When an entry changes, the
 provider is destroyed and recreated with the new values, so a live one
-never watches for them.
+never watches for them — except for the settings it names in
+`liveSettings`, a presentation it can change in place: those are assigned
+to the running instance and `rebuild()` is called.
 
 | key | type | meaning |
 |---|---|---|

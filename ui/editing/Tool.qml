@@ -1,4 +1,5 @@
 import QtQuick
+import "../KeyBindings.js" as Keys
 
 // One instance belongs to one editor. A tool supplies metadata, its action,
 // and optionally a panel; the registry supplies editor and dispatches actions.
@@ -13,9 +14,11 @@ QtObject {
   property string capability: toolId
   property bool available: true
   property bool checked: false
+  // A letter or digit key with its modifiers; the label the help and the
+  // tooltip show follows from it (KeyBindings.label).
   property int shortcutKey: 0
   property int shortcutModifiers: Qt.NoModifier
-  property string shortcutLabel: ""
+  readonly property string shortcutLabel: shortcutKey ? Keys.label(shortcutKey, shortcutModifiers) : ""
   readonly property string tooltip: label + (shortcutLabel ? " (" + shortcutLabel + ")" : "")
 
   // A tool can own a fixed set of choices. Other menus take their members

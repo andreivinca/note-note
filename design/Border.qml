@@ -8,16 +8,8 @@ QtObject {
   function none() {
     return flat("transparent", 0)
   }
-  function left(spec) {
+  // A spec is one width all round; none is a width of zero.
+  function width(spec) {
     return spec ? spec.width : 0
-  }
-  function right(spec) {
-    return left(spec)
-  }
-  function top(spec) {
-    return left(spec)
-  }
-  function bottom(spec) {
-    return left(spec)
   }
 }

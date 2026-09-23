@@ -48,6 +48,9 @@ Item {
   // values as the defaults its config file shows, and assigns whatever the
   // entry in config.providers.local holds right after creating this provider.
   readonly property var settings: ["notebookTabs", "notesDir"]
+  // The tab shape is a presentation the instance changes in place; the
+  // directory is what it reads, and a new one means a new instance.
+  readonly property var liveSettings: ["notebookTabs"]
   // notebookTabs: one binder tab per notebook folder — this provider's
   // historic shape — or, false, a single "Notes" tab holding the folders as
   // fold-out trees, the same shape the remote providers use.

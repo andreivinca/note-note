@@ -9,7 +9,6 @@ Tool {
   icon: "+"
   shortcutKey: Qt.Key_G
   shortcutModifiers: Qt.ControlModifier | Qt.ShiftModifier
-  shortcutLabel: "ctrl+shift+g"
 
   function execute() {
     editor.insertHtml("Hello")

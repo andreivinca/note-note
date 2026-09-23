@@ -210,7 +210,7 @@ Item {
             label: "Key bindings" }
         ].filter(function(row) { return row.id !== "detach" || root.supportsOverlay })
 
-        padding: popupStyle.padding + Border.left(popupStyle.borderSpec)
+        padding: popupStyle.padding + Border.width(popupStyle.borderSpec)
         background: BorderSurface {
           color: popupStyle.fill
           borderSpec: popupStyle.borderSpec

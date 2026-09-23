@@ -9,7 +9,6 @@ Tool {
   icon: "󰙒"
   shortcutKey: Qt.Key_H
   shortcutModifiers: Qt.ControlModifier | Qt.ShiftModifier
-  shortcutLabel: "ctrl+shift+h"
 
   function execute() {
     if (!editor.acceptsInline() || editor.markedInCode(Dialect.INLINE_MARKERS.highlight)) {
@@ -19,15 +18,11 @@ Tool {
     if (range.from === range.to) {
       return
     }
-    var lit = editor.withoutChip(range.html).indexOf("background-color") >= 0
-    var html = lit ? unhighlight(range.html)
+    var lit = Dialect.hasHighlight(range.html, editor.codeChipColour)
+    // Off: only the marker background goes; text keeps its colour and code
+    // its chip.
+    var html = lit ? Dialect.withoutBackground(range.html, editor.codeChipColour, true)
                    : '<span style="background-color:' + editor.highlightColour + ';">' + range.html + "</span>"
     editor.replaceInline(html, true)
-  }
-
-  // Remove only the marker background; text keeps its color and code its chip.
-  function unhighlight(fragment) {
-    var chip = String(editor.codeChipColour).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-    return fragment.replace(new RegExp('background-color\\s*:(?!\\s*' + chip + '\\s*[;"])[^;"]*;?', "gi"), "")
   }
 }

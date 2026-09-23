@@ -167,7 +167,6 @@ Tool {
   icon: "+"
   shortcutKey: Qt.Key_G
   shortcutModifiers: Qt.ControlModifier | Qt.ShiftModifier
-  shortcutLabel: "ctrl+shift+g"
 
   function execute() {
     editor.insertHtml("Hello")
@@ -192,7 +191,7 @@ applicable, provider support so its content survives saving and reloading.
 | `capability` | Provider capability required; defaults to `toolId`. All four table alteration tools require `table`. |
 | `checked` | Reactive pressed state for formatting buttons; false by default. |
 | `available` | Reactive context condition, such as `editor.inTable`. Controls both presentation and execution. |
-| `shortcutKey`, `shortcutModifiers`, `shortcutLabel` | Optional key, modifiers and human-readable shortcut. Used for dispatch, tooltips and help. |
+| `shortcutKey`, `shortcutModifiers` | Optional key (a letter or digit) and modifiers. Used for dispatch; the label the tooltip and help show (`shortcutLabel`, read-only) follows from them. |
 | `isMenu` | This entry opens a menu; automatically true when `options` are provided. |
 | `options` | Fixed executable `Tool` choices owned by this file, as in `Heading.qml`. They retain individual action IDs and capabilities but move together in the toolbar. Bind their `editor` and availability to the owning tool. |
 | `previewScale`, `previewBold` | Optional menu-label styling relative to the chrome text size, used by headings. |

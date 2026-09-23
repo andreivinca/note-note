@@ -40,10 +40,10 @@ QQC.Menu {
   }
   width: Math.min(implicitWidth, Math.max(0, maximumWidth))
   implicitHeight: contentItem.implicitHeight + topPadding + bottomPadding
-  leftPadding: Border.left(popupStyle.borderSpec) + popupStyle.padding
-  rightPadding: Border.right(popupStyle.borderSpec) + popupStyle.padding
-  topPadding: Border.top(popupStyle.borderSpec) + popupStyle.padding
-  bottomPadding: Border.bottom(popupStyle.borderSpec) + popupStyle.padding
+  leftPadding: Border.width(popupStyle.borderSpec) + popupStyle.padding
+  rightPadding: Border.width(popupStyle.borderSpec) + popupStyle.padding
+  topPadding: Border.width(popupStyle.borderSpec) + popupStyle.padding
+  bottomPadding: Border.width(popupStyle.borderSpec) + popupStyle.padding
   onRowsChanged: close()
 
   FontMetrics {
@@ -90,9 +90,15 @@ QQC.Menu {
     delegate: QtObject {
       id: holder
       required property var modelData
-      readonly property QtObject entry: modelData.isMenu
-        ? toolMenu.submenuComponent.createObject(holder, { tool: modelData })
-        : actionComponent.createObject(toolMenu.contentItem, { tool: modelData })
+      // Made once the holder is complete, never by a binding: a binding
+      // re-runs whenever its inputs change, and each run would be another
+      // entry.
+      property QtObject entry: null
+      Component.onCompleted: {
+        entry = modelData.isMenu
+          ? toolMenu.submenuComponent.createObject(holder, { tool: modelData })
+          : actionComponent.createObject(toolMenu.contentItem, { tool: modelData })
+      }
     }
     onObjectAdded: function(index, object) {
       if (object.modelData.isMenu) {

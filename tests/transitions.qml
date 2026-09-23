@@ -392,6 +392,7 @@ ShellRoot {
   }
   QtObject {
     id: configured
+    property var liveSettings: ["notebookTabs"]
     property bool notebookTabs: false
     property bool busy: false
     function rebuild() {}
@@ -480,6 +481,13 @@ ShellRoot {
     var codeRun = "<span style=\"font-family:'DejaVu Sans Mono','monospace'; background-color:#222;\">x</span>"
     check("a note face whose name holds mono is prose", !Dialect.hasMonoFamily(proseFace))
     check("the generic family among fallbacks is code", Dialect.hasMonoFamily(codeRun))
+    var chipped = "<span style=\"background-color:#2a2c3c;\">x</span>"
+    var lit = "<span style=\"background-color:#F9E2AF; color:#111;\">x</span>" + chipped
+    check("a code chip is not a highlight, another background is",
+          !Dialect.hasHighlight(chipped, "#2a2c3c") && Dialect.hasHighlight(lit, "#2a2c3c"))
+    check("a highlight comes off without the chip or the colour",
+          Dialect.withoutBackground(lit, "#2a2c3c", true) === "<span style=\"color:#111;\">x</span>" + chipped
+          && Dialect.withoutBackground(chipped, "#2a2c3c", false) === "<span style=\"\">x</span>")
     check("taking the code family out leaves every other declaration",
           Dialect.withoutMonoFamily(codeRun) === "<span style=\"background-color:#222;\">x</span>"
           && Dialect.withoutMonoFamily(proseFace) === proseFace)
@@ -586,11 +594,17 @@ ShellRoot {
     check("modification captions accept numeric and ISO dates and reject invalid dates",
           Sidebar.timestamp(today) === today && Sidebar.timestamp(new Date(today).toISOString()) === today
           && Sidebar.timestamp("invalid") === 0)
+    var noLive = function(id) { return [] }
+    var tabsLive = function(id) { return ["notebookTabs"] }
     check("provider setting order does not cause replacement", Settings.plan(
       { providers: { a: { path: "x", enabled: true } } },
-      { providers: { a: { enabled: true, path: "x" } } }, ["a"]).length === 0)
+      { providers: { a: { enabled: true, path: "x" } } }, ["a"], noLive).length === 0)
     check("changing a resource requires replacement", Settings.plan(
-      { providers: { a: { path: "x" } } }, { providers: { a: { path: "y" } } }, ["a"])[0].replace)
+      { providers: { a: { path: "x" } } }, { providers: { a: { path: "y" } } }, ["a"], noLive)[0].replace)
+    var flip = Settings.plan({ providers: { a: { notebookTabs: false } } }, { providers: { a: { notebookTabs: true } } }, ["a"], tabsLive)
+    check("a live setting the provider declares changes it in place", flip.length === 1 && flip[0].presentation && !flip[0].replace)
+    check("the same key on a provider that did not declare it live replaces the instance",
+          Settings.plan({ providers: { a: { notebookTabs: false } } }, { providers: { a: { notebookTabs: true } } }, ["a"], noLive)[0].replace)
     if (Platform.env("NOTE_NOTE_TEST_HOST") === "1" || Platform.env("NOTE_NOTE_TEST_STANDALONE") === "1") {
       var component = Qt.createComponent(Platform.env("NOTE_NOTE_TEST_STANDALONE") ? "app/Workspace.qml" : "app/hosts/omarchy/Notes.qml")
       check("the complete host component compiles", component.status === Component.Ready, component.errorString())

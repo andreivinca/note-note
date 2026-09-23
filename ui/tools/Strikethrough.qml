@@ -10,7 +10,6 @@ Tool {
   icon: "󰊁"
   shortcutKey: Qt.Key_S
   shortcutModifiers: Qt.ControlModifier
-  shortcutLabel: "ctrl+s"
 
   function execute() {
     editor.toggleFont("strikeout", Dialect.INLINE_MARKERS.strikeout)

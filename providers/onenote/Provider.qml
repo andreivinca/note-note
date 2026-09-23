@@ -41,6 +41,7 @@ LaneProvider {
   // config.providers.onenote.notebookTabs: each notebook a binder tab of its
   // own when true; the whole tree in one OneNote tab when false, the default.
   settings: ["notebookTabs"]
+  liveSettings: ["notebookTabs"]
   property bool notebookTabs: false
   readonly property string dir: Platform.localPath(Qt.resolvedUrl(".")).replace(/\/$/, "")
   script: dir + "/onenote.py"
