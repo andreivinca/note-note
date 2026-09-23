@@ -68,13 +68,18 @@ def as_note(markdown):
 def convert(html, base="", as_text=None):
     """Markdown plus the line -> block map the editor needs for the caret.
 
-        {"markdown": str, "note": str, "blocks": [int], "count": int}
+        {"markdown": str, "note": str, "blocks": [int], "kinds": [str], "count": int}
 
     `markdown` names every line the caret can be on, for the block tools;
     `note` is the same text as it belongs on disk (`as_note`), for the save.
     `blocks[i]` is the index of the document paragraph line `i` came from,
     counted the way Qt counts them (docs/engine-notes.md): every paragraph,
-    list item, table cell and rule is one, in document order. `base` is the
+    list item, table cell and rule is one, in document order. `kinds[i]`
+    says what line `i` is — "text", "heading", "blank", "rule", "item",
+    "code" (a fenced block, fences included), "table" (a row), "html" (a
+    nested table, kept as HTML) or "separator" (the blank between blocks)
+    — so the editor never parses the Markdown it was just handed
+    (ui/MarkdownBlocks.js). `base` is the
     note's own directory — how a relative image is measured, the same way
     `writer` measures it (see `_Reader.image_width`).
 
@@ -94,18 +99,22 @@ def convert(html, base="", as_text=None):
 
 
 class _Chunk:
-    """Markdown lines, plus the document paragraph each line came from.
+    """Markdown lines, plus the document paragraph each line came from and
+    what each line is.
 
     The toolbar works in Markdown lines but the caret lives at a document
     position, so every line remembers its block. `NO_BLOCK` marks a line that
     is not one — the blank line between two blocks, or a table's `---` row.
+    `kinds` is the chunk's kind on every line unless said otherwise (a list
+    holds items, blanks and fenced code, each line its own).
     """
-    __slots__ = ("kind", "lines", "blocks")
+    __slots__ = ("kind", "lines", "blocks", "kinds")
 
-    def __init__(self, kind, lines, blocks=None):
+    def __init__(self, kind, lines, blocks=None, kinds=None):
         self.kind = kind
         self.lines = lines
         self.blocks = blocks if blocks is not None else [NO_BLOCK] * len(lines)
+        self.kinds = kinds if kinds is not None else [kind] * len(lines)
 
 
 class _Reader:
@@ -187,8 +196,8 @@ class _Reader:
         if node.tag in ("ul", "ol"):
             return [self.list(node)]
         if node.tag == "table":
-            lines, blocks = self.table(node)
-            return [_Chunk("table", lines, blocks)]
+            lines, blocks, kind = self.table(node)
+            return [_Chunk("table", lines, blocks, [kind] * len(lines))]
         if node.tag == "blockquote":
             # Qt writes a quote as margins, never as a tag; this is for HTML
             # from elsewhere.
@@ -286,11 +295,11 @@ class _Reader:
             lines = [prefix + marker + body_lines[0]]
             lines.extend(indents[-1] + line for line in body_lines[1:])
             kind = "item" if body else "empty_item"
-            parts.append(("", _Chunk(kind, lines, [self.take()] * len(lines))))
+            parts.append(("", _Chunk(kind, lines, [self.take()] * len(lines), ["item"] * len(lines))))
             parts.extend(self.list_continuation(continuation, depth, indents))
             index += 1
 
-        lines, blocks = [], []
+        lines, blocks, kinds = [], [], []
         previous = ""
         for indent, group in groupby(parts, key=lambda part: part[0]):
             for chunk in self.prepare([part[1] for part in group]):
@@ -299,17 +308,21 @@ class _Reader:
                 # put its code outside the list on the next parse.
                 if previous == "empty_item" and chunk.kind == "fence":
                     lines[-1] += chunk.lines[0]
+                    kinds[-1] = chunk.kinds[0]
                     lines.extend(indent + line if line else "" for line in chunk.lines[1:])
                     blocks.extend(chunk.blocks[1:])
+                    kinds.extend(chunk.kinds[1:])
                     previous = chunk.kind
                     continue
                 if lines and chunk.kind not in ("item", "empty_item", "list"):
                     lines.append("")
                     blocks.append(NO_BLOCK)
+                    kinds.append("separator")
                 lines.extend(indent + line if line else "" for line in chunk.lines)
                 blocks.extend(chunk.blocks)
+                kinds.extend(chunk.kinds)
                 previous = chunk.kind
-        return _Chunk("list", lines, blocks)
+        return _Chunk("list", lines, blocks, kinds)
 
     def list_item_parts(self, item):
         """The marker's inline text, followed by the item's block children."""
@@ -344,11 +357,14 @@ class _Reader:
     # ---- tables ---------------------------------------------------------
 
     def table(self, node):
-        """A row is one Markdown line, owning every paragraph in its cells."""
+        """A row is one Markdown line, owning every paragraph in its cells;
+        a nested table is one line of HTML. The third answer is the kind of
+        every line: "table" or "html"."""
         if self.table_depth or htmltables.nested(node):
             self.table_depth += 1
             try:
-                return self.rich_table(node)
+                lines, blocks = self.rich_table(node)
+                return lines, blocks, "html"
             finally:
                 self.table_depth -= 1
         rows, starts = [], []
@@ -363,7 +379,7 @@ class _Reader:
                 self.take(max(1, sum(child.tag == "p" for child in cell.children)))
             rows.append([self.cell(cell) for cell in cells])
         if not rows:
-            return [], []
+            return [], [], "table"
         width = max(len(row) for row in rows)
         rows = [row + [""] * (width - len(row)) for row in rows]
         lines = [_row(rows[0]), "|" + "|".join(["---"] * width) + "|"]
@@ -371,7 +387,7 @@ class _Reader:
         for index, row in enumerate(rows[1:], start=1):
             lines.append(_row(row))
             blocks.append(starts[index])
-        return lines, blocks
+        return lines, blocks, "table"
 
     def rich_table(self, node):
         """Nested tables keep each cell's block structure in semantic HTML."""
@@ -587,8 +603,9 @@ def _merge_code(chunks):
         if chunk.kind == "code" and merged and merged[-1].kind == "code":
             merged[-1].lines.extend(chunk.lines)
             merged[-1].blocks.extend(chunk.blocks)
+            merged[-1].kinds.extend(chunk.kinds)
         else:
-            merged.append(_Chunk(chunk.kind, list(chunk.lines), list(chunk.blocks)))
+            merged.append(_Chunk(chunk.kind, list(chunk.lines), list(chunk.blocks), list(chunk.kinds)))
     return merged
 
 
@@ -600,7 +617,8 @@ def _fence(chunks):
         if chunk.kind == "code":
             fence = code_fence("\n".join(chunk.lines))
             out.append(_Chunk("fence", [fence] + chunk.lines + [fence],
-                              [NO_BLOCK] + chunk.blocks + [NO_BLOCK]))
+                              [NO_BLOCK] + chunk.blocks + [NO_BLOCK],
+                              ["code"] * (len(chunk.lines) + 2)))
         else:
             out.append(chunk)
     return out
@@ -610,14 +628,16 @@ def _join(chunks, total):
     """Blocks are separated by a blank line; items and rows inside one are
     not. Trailing blanks stay: the caret map covers every line (see
     `to_markdown`, which is where they come off for the note on disk)."""
-    lines, blocks = [], []
+    lines, blocks, kinds = [], [], []
     for index, chunk in enumerate(chunks):
         if index:
             lines.append("")
             blocks.append(NO_BLOCK)
+            kinds.append("separator")
         lines.extend(chunk.lines)
         blocks.extend(chunk.blocks)
-    return {"markdown": "\n".join(lines) + "\n" if lines else "", "blocks": blocks, "count": total}
+        kinds.extend(chunk.kinds)
+    return {"markdown": "\n".join(lines) + "\n" if lines else "", "blocks": blocks, "kinds": kinds, "count": total}
 
 
 def _loses_text(markdown, tree):

@@ -327,7 +327,8 @@ class Content(unittest.TestCase):
         self.assertEqual(convert(html), {
             "markdown": "Before\n\n| a more | b |\n|---|---|\n| 1 extra | 2 |\n\nAfter\n",
             "note": "Before\n\n| a more | b |\n|---|---|\n| 1 extra | 2 |\n\nAfter\n",
-            "blocks": [0, -1, 1, -1, 4, -1, 8], "count": 9})
+            "blocks": [0, -1, 1, -1, 4, -1, 8], "count": 9,
+            "kinds": ["text", "separator", "table", "table", "table", "separator", "text"]})
 
     def test_the_shipped_answer_carries_the_note_as_saved(self):
         # The editor saves the converter's `note`, so the trailing blank lines
@@ -350,6 +351,17 @@ class Content(unittest.TestCase):
             self.assertEqual(dialect.is_mono({"font-family": value}), expected, value)
         js = (ROOT / "ui/Dialect.js").read_text()
         self.assertEqual(re.search(r'var MONO_FAMILY = "([^"]*)"', js)[1], dialect.MONO_FAMILY)
+
+    def test_the_converter_says_what_every_line_is(self):
+        # The editor asks the converter which lines are a fenced block, a table
+        # row or a nested table, instead of parsing the Markdown again itself.
+        html = to_html("para\n\n```\ncode\n```\n\n| a |\n|---|\n| 1 |\n\n- item\n\n  ```\n  c\n  ```\n- next\n\n---\n")
+        self.assertEqual(convert(html)["kinds"],
+                         ["text", "separator", "code", "code", "code", "separator",
+                          "table", "table", "table", "separator",
+                          "item", "separator", "code", "code", "code", "item", "separator", "rule"])
+        nested = ('<table><tr><td><p>x</p><table><tr><td><p>y</p></td></tr></table></td></tr></table>')
+        self.assertEqual(convert(nested)["kinds"], ["html"])
 
     def test_a_bare_meta_tag_hides_nothing(self):
         # A browser's clipboard writes <meta charset="utf-8"> unclosed; a

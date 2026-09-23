@@ -197,9 +197,12 @@ ShellRoot {
     editor.replaceDoc("valid", 0)
     conversions.renders.shift()("<p>valid</p>", true)
     check("an unchanged document accepts the requested edit", editor.plainText() === "valid")
-    var fenced = ["````", "before", "```", "after", "````", "tail"]
-    check("shorter backticks inside code are content", Blocks.fences(fenced)[2].end === 4)
+    // The converter says which lines are a fenced block; the editor asks it.
+    var fenced = { kinds: ["code", "code", "code", "code", "code", "text", "separator", "table", "table", "table"] }
+    check("a fenced block is one run of code lines, fences included", Blocks.fences(fenced)[2].end === 4)
     check("snippets land after the entire code block", editor.blockEndLine(fenced, 2) === 4)
+    check("a table is the run of its rows", editor.blockEndLine(fenced, 8) === 9
+          && Blocks.tables(fenced).length === 1 && Blocks.tables(fenced)[0].start === 7)
   }
 
   QtObject {

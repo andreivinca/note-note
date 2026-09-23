@@ -335,9 +335,10 @@ def check_as_text(verbose):
     ]
     for name, markdown, block, expected in cases:
         actual = convert(to_html(markdown), as_text=block)
-        # The read serves the caret map; `note` is checked once, below.
-        actual = {key: value for key, value in actual.items() if key != "note"}
-        expected = {key: value for key, value in expected.items() if key != "note"}
+        # The read serves the caret map; `note` is checked once, below, and
+        # the line kinds by the regression suite.
+        actual = {key: value for key, value in actual.items() if key not in ("note", "kinds")}
+        expected = {key: value for key, value in expected.items() if key not in ("note", "kinds")}
         if actual != expected:
             failures += 1
             report(name, "as text", expected, actual, verbose)

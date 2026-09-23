@@ -18,7 +18,7 @@ Tool {
 
   function insertCodeBlock() {
     editor.withMarkdown(function(lines, map) {
-      var at = editor.blockEndLine(lines, Math.min(editor.caretLine(map), lines.length - 1))
+      var at = editor.blockEndLine(map, Math.min(editor.caretLine(map), lines.length - 1))
       var rest = lines.slice(at + 1)
       var atEnd = rest.join("").trim() === ""
       var out = lines.slice(0, at + 1).concat(["", "```", "", "```", ""])

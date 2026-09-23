@@ -206,7 +206,7 @@ QtObject {
       var first = lineAt(map, Math.min(textArea.selectionStart, textArea.selectionEnd))
       var last = lineAt(map, Math.max(textArea.selectionStart, textArea.selectionEnd))
       var caret = textArea.cursorPosition, changed = false
-      var code = MarkdownBlocks.fences(lines)
+      var code = MarkdownBlocks.fences(map)
       var isList = !!options.list
       // Selected paragraphs arrive with Markdown's blank separator lines
       // between them, and a separator restyled is an empty item — the extra
@@ -221,7 +221,7 @@ QtObject {
       var out = [], prevItem = false, prevFreed = false
       for (var i = 0; i < lines.length; i++) {
         // Table rows/HTML tables and fenced code are never restyled.
-        if (i < first || i > last || code[i] || /^\s*(\||<table[ >])/.test(lines[i])) {
+        if (i < first || i > last || code[i] || MarkdownBlocks.isTable(map, i)) {
           out.push(lines[i])
           prevItem = false
           prevFreed = false
@@ -232,7 +232,7 @@ QtObject {
           while (j <= last && j < lines.length && lines[j] === "") {
             j++
           }
-          if (prevItem && j <= last && j < lines.length && !code[j] && !/^\s*\|/.test(lines[j])
+          if (prevItem && j <= last && j < lines.length && !code[j] && !MarkdownBlocks.isTable(map, j)
               && itemRx.test(restyle(lines[j]))) {
             changed = true
             continue
@@ -297,23 +297,18 @@ QtObject {
 
   function rewriteTable(transform, lines, map) {
     var at = Math.min(caretLine(map), lines.length - 1)
-    if (/^\s*<table[ >]/.test(lines[at] || "")) {
-      report("Rebuild the native text helper to edit nested table rows and columns")
+    if ((map.kinds || [])[at] === "html") {
+      report("Build the native text helper to edit nested table rows and columns")
       return
     }
-    while (at >= 0 && !/^\s*\|/.test(lines[at])) {
+    while (at >= 0 && !MarkdownBlocks.isRow(map, at)) {
       at--
     }
     if (at < 0) {
       return
     }
-    var first = at, last = at
-    while (first > 0 && /^\s*\|/.test(lines[first - 1])) {
-      first--
-    }
-    while (last + 1 < lines.length && /^\s*\|/.test(lines[last + 1])) {
-      last++
-    }
+    var table = MarkdownBlocks.runs(map, "table")[at]
+    var first = table.start, last = table.end
     var rows = lines.slice(first, last + 1).map(function(line) { return api.host.splitRow(line) }), cols = rows[0].length
     var cell = host.caretCell()
     var rowIdx = cell < 0 ? 0 : Math.floor(cell / cols), colIdx = cell < 0 ? 0 : cell % cols

@@ -1147,18 +1147,9 @@ Item {
 
   // Where the block holding Markdown line `i` ends (a table, a fenced code
   // block or a single line): snippets go after it, never inside.
-  function blockEndLine(lines, i) {
-    if (/^\s*\|/.test(lines[i])) {
-      while (i + 1 < lines.length && /^\s*\|/.test(lines[i + 1])) {
-        i++
-      }
-      return i
-    }
-    var code = MarkdownBlocks.fences(lines)[i]
-    if (code) {
-      return code.end
-    }
-    return i
+  function blockEndLine(map, i) {
+    var run = MarkdownBlocks.runs(map, "table")[i] || MarkdownBlocks.fences(map)[i]
+    return run ? run.end : i
   }
 
   // A snippet lands after the caret's block — or on the caret's own line
@@ -1189,8 +1180,8 @@ Item {
     }
     withMarkdown(function(lines, map) {
       var i = Math.min(caretLine(map), lines.length - 1)
-      var onEmpty = !MarkdownBlocks.fences(lines)[i] && lines[i] === ""
-      var at = onEmpty ? i : blockEndLine(lines, i)
+      var onEmpty = !MarkdownBlocks.fences(map)[i] && lines[i] === ""
+      var at = onEmpty ? i : blockEndLine(map, i)
       var rest = lines.slice(at + 1)
       var atEnd = rest.join("").trim() === ""
       var head = onEmpty ? lines.slice(0, i).concat(md.split("\n"))
@@ -1355,8 +1346,8 @@ Item {
   }
 
   function leaveTableRow() {
-    withMarkdown(function(lines) {
-      if (lines.some(function(line) { return /^\s*<table[ >]/.test(line) })) {
+    withMarkdown(function(lines, map) {
+      if (MarkdownBlocks.hasHtmlTable(map)) {
         root.statusRequested("Build the native text helper to edit nested table rows and columns")
         return
       }
@@ -1365,7 +1356,7 @@ Item {
       var text = area.getText(0, area.length)
       var before = text.substring(0, area.cursorPosition)
       var index = before.split(root.tableEnd).length - 1
-      var table = MarkdownBlocks.tables(lines)[index]
+      var table = MarkdownBlocks.tables(map)[index]
       if (!table) {
         return
       }
@@ -1393,7 +1384,7 @@ Item {
       var target = map.blocks[i]
       if (kind === "code") {
         // the caret's line is the fence's empty last line
-        var code = MarkdownBlocks.fences(lines)[i]
+        var code = MarkdownBlocks.fences(map)[i]
         if (lines[i] !== "" || !code || code.end !== i + 1) {
           return
         }
@@ -1431,7 +1422,7 @@ Item {
   // itself stays exactly as it was.
   function stepPastBlock(seed) {
     withMarkdown(function(lines, map) {
-      var end = blockEndLine(lines, caretLine(map))
+      var end = blockEndLine(map, caretLine(map))
       var out = lines.slice()
       out.splice(end + 1, 0, "", Dialect.BLANK_PARAGRAPH, "")
       landOn(out, lastBlockThrough(map, end) + 1, seed)
