@@ -17,38 +17,61 @@ Item {
   readonly property string script: dir + "/clipboard.py"
   readonly property string stagingDir: Platform.pasteDir
 
+  // Every answer below is callback(value, error): the value, or its empty
+  // form when the clipboard holds nothing of the kind — the ordinary case,
+  // not a failure — and `error` set, in the user's words, when the
+  // clipboard could not be read or the picture could not be staged, for
+  // the editor to say rather than paste nothing in silence.
+
   // Does the clipboard hold a picture?  callback(true|false)
   // Cheap: it only asks the compositor what types are on offer.
   function hasImage(callback) {
     Platform.backend.readClipboard("types", function(result) { callback(!!(result && result.image)) })
   }
 
-  // The clipboard's image, written into the staging directory.
-  //   callback({ path, mime, bytes }) on success, callback(null) otherwise —
-  // "no image in the clipboard" is the ordinary case, not a failure to report.
+  // The clipboard's image, written into the staging directory:
+  // callback({ path, mime, bytes }), or callback(null) with no image on offer.
   function takeImage(callback) {
     Platform.backend.readClipboard("image", function(result) {
-      if (!result || !result.data) {
+      if (!result || result.error) {
+        callback(null, result ? result.error : "the clipboard could not be read")
+        return
+      }
+      if (!result.data) {
         callback(null)
         return
       }
       runner.run({ command: ["python3", root.script, "stage", root.stagingDir],
                    payload: JSON.stringify(result), timeoutMs: 60000 },
-                 function(staged) { callback(staged && staged.path ? staged : null) })
+                 function(staged) {
+        if (!staged || staged.error || !staged.path) {
+          callback(null, staged && staged.error ? staged.error : "the picture could not be staged")
+          return
+        }
+        callback(staged)
+      })
     })
   }
 
-  // The clipboard's text, whatever flavour it is on offer in.  callback(string)
-  // — "" when the clipboard holds no text at all.
+  // The clipboard's text, whatever flavour it is on offer in:
+  // callback(string), "" when the clipboard holds no text at all.
   function takeText(callback) {
-    Platform.backend.readClipboard("text", function(result) { callback(result && result.text ? result.text : "") })
+    Platform.backend.readClipboard("text", function(result) { root.answer(callback, result, "text") })
   }
 
   // The clipboard's HTML flavour, for the editor's own paste (see
   // clipboard.py, clipboard_html).  callback(string) — "" when none is on
   // offer, which sends the paste down Qt's own path.
   function takeHtml(callback) {
-    Platform.backend.readClipboard("html", function(result) { callback(result && result.html ? result.html : "") })
+    Platform.backend.readClipboard("html", function(result) { root.answer(callback, result, "html") })
+  }
+
+  function answer(callback, result, key) {
+    if (!result || result.error) {
+      callback("", result ? result.error : "the clipboard could not be read")
+      return
+    }
+    callback(result[key] || "")
   }
 
   ProcessRunner { id: runner }

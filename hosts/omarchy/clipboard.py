@@ -5,7 +5,7 @@ QClipboard reader does (hosts/standalone/runtime.cpp):
     python3 clipboard.py types   -> {"types": ["image/png", …], "image": "image/png" | ""}
     python3 clipboard.py text    -> {"text": "…"}      ("" when no text is on offer)
     python3 clipboard.py html    -> {"html": "…"}      ("" when no HTML is on offer)
-    python3 clipboard.py image   -> {"mime": …, "data": <base64>}
+    python3 clipboard.py image   -> {"mime": …, "data": <base64>}   ({} when none is on offer)
 
 Staging a picture where the editor can show it is the clipboard service's
 policy, shared by both hosts (services/clipboard/clipboard.py); this only
@@ -44,7 +44,7 @@ def image_type(available):
 def clipboard_image():
     mime = image_type(types())
     if not mime:
-        return {"error": "the clipboard holds no image"}
+        return {}    # no image on offer: the ordinary answer, not a failure
     try:
         proc = subprocess.run(["wl-paste", "--type", mime], capture_output=True, timeout=20)
     except (OSError, subprocess.SubprocessError) as error:

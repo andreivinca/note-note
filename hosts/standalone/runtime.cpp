@@ -55,7 +55,7 @@ QVariantMap DesktopRuntime::clipboard(const QString &format) const
     }
     QImage image = qvariant_cast<QImage>(mime->imageData());
     if (image.isNull()) {
-        return {{QStringLiteral("error"), QStringLiteral("the clipboard holds no image")}};
+        return {};   // no image on offer: the ordinary answer, not a failure
     }
     if (qint64(image.width()) * image.height() > 50000000) {
         return {{QStringLiteral("error"), QStringLiteral("the clipboard image is too large")}};

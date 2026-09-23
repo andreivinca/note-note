@@ -360,11 +360,13 @@ Item {
       return
     }
     var context = root.editContext()
-    root.clipboard.takeImage(function(image) {
+    root.clipboard.takeImage(function(image, error) {
       if (!root.contextCurrent(context)) {
         return
       }
-      if (image) {
+      if (error) {
+        root.statusRequested(error)
+      } else if (image) {
         root.insertImage(image.path)
       } else {
         pasteRich()
@@ -390,8 +392,12 @@ Item {
       return
     }
     var context = root.editContext()
-    root.clipboard.takeHtml(function(html) {
+    root.clipboard.takeHtml(function(html, error) {
       if (!root.contextCurrent(context)) {
+        return
+      }
+      if (error) {
+        root.statusRequested(error)
         return
       }
       if (!html) {
@@ -432,8 +438,12 @@ Item {
     }
     var context = root.editContext()
     var inCode = selectionInCode()
-    root.clipboard.takeText(function(text) {
+    root.clipboard.takeText(function(text, error) {
       if (!root.contextCurrent(context)) {
+        return
+      }
+      if (error) {
+        root.statusRequested(error)
         return
       }
       if (!text) {

@@ -62,6 +62,7 @@ private slots:
         QCOMPARE(decoded.size(), QSize(1600, 800));
         QGuiApplication::clipboard()->clear();
         QVERIFY(!runtime.clipboard("image").contains("data"));
+        QVERIFY(!runtime.clipboard("image").contains("error"));
         QVERIFY(!runtime.clipboard("types").value("image").toBool());
     }
 };

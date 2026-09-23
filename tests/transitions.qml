@@ -852,6 +852,26 @@ ShellRoot {
   // backend has, a cancelled delete is a failure, and a failed one leaves
   // the note where it was.
   Ui.NoteEditor { id: noticeEditor; visible: false }
+  // A clipboard that cannot be read: the editor says so instead of pasting
+  // nothing in silence.
+  QtObject {
+    id: failingClipboard
+    function hasImage(done) { done(true) }
+    function takeImage(done) { done(null, "the clipboard image is too large") }
+    function takeHtml(done) { done("", "the clipboard text is too large") }
+    function takeText(done) { done("", "the clipboard text is too large") }
+  }
+  Ui.NoteEditor { id: pasteEditor; visible: false; hasNote: true; canImages: true; clipboard: failingClipboard }
+  function clipboardCases() {
+    var said = []
+    var record = function(text) { said.push(text) }
+    pasteEditor.statusRequested.connect(record)
+    pasteEditor.paste()
+    pasteEditor.pastePlain()
+    pasteEditor.statusRequested.disconnect(record)
+    check("a clipboard that cannot be read is reported, not pasted in silence",
+          said.join("|") === "the clipboard image is too large|the clipboard text is too large")
+  }
   Ui.NoteEditor { id: staleInspectorEditor; visible: false; inspectorUrl: Qt.resolvedUrl("app/tests/StaleInspector.qml") }
   // The native inspector is taken whole or not at all: the built module
   // speaks the editor's version, a module of another version is refused.
@@ -1148,6 +1168,7 @@ ShellRoot {
       remoteModelCases()
       noticeCases()
       inspectorCases()
+      clipboardCases()
       accountCases()
     } catch (error) {
       check("test setup completed", false, error.message + " " + error.stack)
