@@ -533,8 +533,7 @@ void TextBlocks::normalizeLineHeights()
 
 void TextBlocks::normalizeCodeMargins()
 {
-    // Mirrors CODE_MARGIN_PX in qthtml/dialect.py.
-    constexpr qreal codeMargin = 20;
+    constexpr qreal codeMargin = NoteNoteDialect::CODE_MARGIN_PX;
     QTextDocument *doc = m_document ? m_document->textDocument() : nullptr;
     if (!doc) {
         return;

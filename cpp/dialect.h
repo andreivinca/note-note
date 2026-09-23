@@ -16,6 +16,8 @@ namespace NoteNoteDialect {
 constexpr qreal QUOTE_PX = 40;
 // Every block's line height, in percent of the font's.
 constexpr qreal LINE_HEIGHT_PCT = 130;
+// The clearance a code block's first and last lines carry outside the slab.
+constexpr qreal CODE_MARGIN_PX = 20;
 // Markdown has no empty paragraph: a blank line is a paragraph holding this.
 constexpr QChar BLANK_PARAGRAPH = QChar(0xa0);
 // The inline-code family, exactly: a note face whose name holds "mono" is

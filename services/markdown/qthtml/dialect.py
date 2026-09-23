@@ -113,7 +113,7 @@ CODE_PAD_PX = 14
 # The slab extends 8px above and below its text. A 20px outer margin leaves
 # 12px of clear space between the slab and neighbouring paragraphs. Only
 # the first and last code lines carry it; lines inside the block stay tight.
-# Mirrored by normalizeCodeMargins in cpp/textblocks.h.
+# Mirrored in cpp/dialect.h, for normalizeCodeMargins.
 CODE_MARGIN_PX = 20
 
 # Match the code slab's visible clearance: its 20px margin minus the 8px

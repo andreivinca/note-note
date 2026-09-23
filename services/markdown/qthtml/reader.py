@@ -17,7 +17,7 @@ someone's note, so it is the one failure that is checked for.
 from itertools import groupby
 
 from . import dialect
-from ._vendor import parse, walk_text, htmltree, htmltables, textcolor
+from .siblings import parse, walk_text, htmltree, htmltables, textcolor
 from .imagesize import local_path, width_of
 from .mdtext import escape_inline, escape_line_start, escape_table_cell, code_span, code_fence
 from .mdtext import escape_image_alt, escape_link_destination

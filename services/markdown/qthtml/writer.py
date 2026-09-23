@@ -9,7 +9,7 @@ import html as _html
 import re
 
 from . import dialect
-from ._vendor import parse, textcolor
+from .siblings import parse, textcolor
 from .imagesize import local_path, width_of
 
 RULE = "<hr />"
@@ -51,6 +51,18 @@ def to_html(markdown, highlight=dialect.DEFAULT_HIGHLIGHT,
     return _Renderer(highlight, code_background, code_chip, base).document(parse(markdown or ""))
 
 
+def first_block_kind(tokens):
+    """The kind of the first block the document draws: blank lines draw
+    nothing, and a quote draws whatever it opens with."""
+    for token in tokens or []:
+        if token["type"] == "blank_line":
+            continue
+        if token["type"] == "block_quote":
+            return first_block_kind(token.get("children"))
+        return token["type"]
+    return ""
+
+
 class _Renderer:
     def __init__(self, highlight, code_background=dialect.DEFAULT_CODE_BACKGROUND,
                  code_chip=dialect.DEFAULT_CODE_CHIP, base=""):
@@ -67,7 +79,7 @@ class _Renderer:
         # puts an empty block above the table on its own. Writing that block
         # ourselves keeps our idea of the document and Qt's identical — which
         # is what the caret map depends on. `reader` takes it away again.
-        if blocks and blocks[0].startswith((RULE, "<table")):
+        if blocks and first_block_kind(tokens) in ("thematic_break", "table"):
             blocks.insert(0, BLANK)
         return "\n".join(blocks)
 
