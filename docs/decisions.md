@@ -682,8 +682,8 @@ Qt's copy writes `<!--StartFragment-->` inside a list's first item, and Qt's
 paste — the same parser fed the same HTML — fails on exactly that comment to
 rebuild the list: a pasted checkbox list arrived flat, every box gone,
 bullets alike (engine-notes.md). Stripped of the markers the identical HTML
-round-trips whole, so the editor's paste asks `clipboard.py` for the
-clipboard's HTML flavour, strips the markers the way the save path always
+round-trips whole, so the editor's paste asks the host's clipboard for the
+HTML flavour, strips the markers the way the save path always
 has, and inserts through the same parser inside one `atomic()` step. A
 clipboard with no HTML on offer falls back to Qt's own paste, and the plain
 paste (ctrl+shift+v) is untouched.

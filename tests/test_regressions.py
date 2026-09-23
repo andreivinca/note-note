@@ -40,7 +40,7 @@ class Files(unittest.TestCase):
     def test_native_clipboard_staging_is_private_and_validated(self):
         data = b"synthetic clipboard image"
         staging = self.root / "cache with spaces/paste"
-        command = [sys.executable, str(ROOT / "services/clipboard/clipboard.py"), "image-stdin", str(staging)]
+        command = [sys.executable, str(ROOT / "services/clipboard/clipboard.py"), "stage", str(staging)]
         result = subprocess.run(command, input=json.dumps({"mime": "image/png", "data": base64.b64encode(data).decode()}),
                                 capture_output=True, text=True, timeout=5, check=True)
         payload = json.loads(result.stdout)

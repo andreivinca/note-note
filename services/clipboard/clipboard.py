@@ -1,16 +1,14 @@
-"""The clipboard, read for the editor: its image saved where the editor can
-show it, its text for the plain paste.
+"""A pasted picture, staged where the editor can show it.
 
-    python3 clipboard.py types              -> {"types": ["image/png", …]}
-    python3 clipboard.py image <dir>        -> {"path": …, "mime": …, "bytes": n}
-    python3 clipboard.py image-stdin <dir>  -> same, from Qt's MIME/base64 JSON
-    python3 clipboard.py text               -> {"text": "…"}
-    python3 clipboard.py html               -> {"html": "…"}
+    python3 clipboard.py stage <dir>  <- {"mime": …, "data": <base64>} on stdin
+                                      -> {"path": …, "mime": …, "bytes": n}
 
-The plugin reads through `wl-paste`; the native host supplies Qt clipboard
-images on stdin. Only supported image types are accepted, and an
-image too large for the backends is scaled down rather than refused — a
-pasted screenshot is usually far bigger than anything a note needs.
+The bytes come from the host's own clipboard reader (QClipboard in the
+native host, wl-paste in the Omarchy host — hosts/omarchy/clipboard.py);
+the policy is here, once, for both: only supported image types are
+accepted, an image too large for the backends is scaled down rather than
+refused — a pasted screenshot is usually far bigger than anything a note
+needs — and the staged files are pruned.
 """
 import json
 import base64
@@ -35,21 +33,6 @@ MAGICK_TIMEOUT = 10
 
 def out(obj):
     sys.stdout.write(json.dumps(obj))
-
-
-def types():
-    try:
-        listed = subprocess.run(["wl-paste", "--list-types"], capture_output=True, timeout=5)
-    except (OSError, subprocess.SubprocessError):
-        return []
-    return [t.strip() for t in listed.stdout.decode("utf-8", "replace").split("\n") if t.strip()]
-
-
-def image_type(available):
-    for mime in MIME_SUFFIX:
-        if mime in available:
-            return mime
-    return ""
 
 
 def scaled(path, magick):
@@ -98,19 +81,8 @@ def prune(directory):
                 pass
 
 
-def save_image(directory):
-    mime = image_type(types())
-    if not mime:
-        return {"error": "the clipboard holds no image"}
-    try:
-        proc = subprocess.run(["wl-paste", "--type", mime], capture_output=True, timeout=20)
-    except (OSError, subprocess.SubprocessError) as error:
-        return {"error": "could not read the clipboard: %s" % error}
-    return stage_image(directory, mime, proc.stdout)
-
-
 def stage_image(directory, mime, data):
-    """Shared staging policy for native Qt and the Omarchy clipboard."""
+    """The staging policy both hosts' clipboards go through."""
     if mime not in MIME_SUFFIX:
         return {"error": "unsupported clipboard image type"}
     if not data:
@@ -143,58 +115,12 @@ def image_from_stdin(directory):
     return stage_image(directory, mime, data)
 
 
-def clipboard_text():
-    """The clipboard's text flavour, for the plain paste (Ctrl+Shift+V).
-    "text" is wl-paste's own shorthand for any text type on offer; a
-    clipboard holding none (an image, nothing) answers with empty text —
-    the ordinary case, not a failure."""
-    available = types()
-    if not any(t.startswith("text/") or t in ("TEXT", "STRING", "UTF8_STRING") for t in available):
-        return {"text": ""}
-    try:
-        proc = subprocess.run(["wl-paste", "--no-newline", "--type", "text"],
-                              capture_output=True, timeout=10)
-    except (OSError, subprocess.SubprocessError) as error:
-        return {"error": "could not read the clipboard: %s" % error}
-    if len(proc.stdout) > MAX_TEXT:
-        return {"error": "the clipboard text is too large"}
-    return {"text": proc.stdout.decode("utf-8", "replace")}
-
-
-def clipboard_html():
-    """The clipboard's rich flavour, for the editor's own paste. Qt's paste
-    reads the same text/html, but chokes on the <!--StartFragment--> comment
-    its own copy puts inside a list's first item — every pasted list arrived
-    flat, checkboxes and bullets alike — so the editor takes the HTML here,
-    strips the markers and inserts it through the same parser
-    (NoteEditor.pasteRich). No HTML on offer answers empty — the ordinary
-    case, not a failure — and the paste falls back to Qt's own."""
-    if "text/html" not in types():
-        return {"html": ""}
-    try:
-        proc = subprocess.run(["wl-paste", "--no-newline", "--type", "text/html"],
-                              capture_output=True, timeout=10)
-    except (OSError, subprocess.SubprocessError) as error:
-        return {"error": "could not read the clipboard: %s" % error}
-    if len(proc.stdout) > MAX_TEXT:
-        return {"error": "the clipboard text is too large"}
-    return {"html": proc.stdout.decode("utf-8", "replace")}
-
-
 def main(argv):
     command = argv[1] if len(argv) > 1 else ""
-    if command == "types":
-        out({"types": types(), "image": image_type(types())})
-    elif command == "image" and len(argv) >= 3:
-        out(save_image(argv[2]))
-    elif command == "image-stdin" and len(argv) >= 3:
+    if command == "stage" and len(argv) >= 3:
         out(image_from_stdin(argv[2]))
-    elif command == "text":
-        out(clipboard_text())
-    elif command == "html":
-        out(clipboard_html())
     else:
-        out({"error": "usage: clipboard.py types | image <dir> | image-stdin <dir> | text | html"})
+        out({"error": "usage: clipboard.py stage <dir>"})
         return 2
     return 0
 

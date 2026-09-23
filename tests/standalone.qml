@@ -80,7 +80,7 @@ Window {
     }
 
     function test_02_platform_paths_and_clipboard() {
-      verify(!Platform.backend.omarchy)
+      compare(Platform.backend.storageName, "notenote")
       compare(Platform.stateDir, Platform.env("XDG_STATE_HOME") + "/notenote")
       compare(Platform.cacheDir, Platform.env("XDG_CACHE_HOME") + "/notenote")
       compare(workspace.configPath, Platform.env("XDG_CONFIG_HOME") + "/notenote/config.json")
@@ -88,7 +88,9 @@ Window {
       verify(JSON.parse(configRead.text).providers.onenote.enabled === false)
       var text = "clipboard 📝\nsecond line"
       Platform.copyText(text)
-      compare(Platform.backend.clipboard("text").text, text)
+      var read = null
+      Platform.backend.readClipboard("text", function(result) { read = result })
+      compare(read.text, text)
       var answer = request({ command: ["python3", "-c", "import os,json; print(json.dumps({k:v for k,v in os.environ.items() if k.startswith('NOTE_NOTE_')}))"] })
       compare(answer.NOTE_NOTE_STATE_DIR, Platform.stateDir)
       compare(answer.NOTE_NOTE_PASTE_DIR, Platform.pasteDir)

@@ -12,9 +12,9 @@ executable creates a normal Qt window on Wayland or X11.
 | `ui/`, `services/`, `providers/`, `lib/` | Editor, document conversion, request queues and backend behavior, shared by both hosts |
 | `design/` | Shared color facade, dimensions and reusable controls |
 | `hosts/standalone/theme/` | Standalone desktop detection, palette resolution, portal preferences and live theme updates — C++ the standalone executable links, kept inside its host so the shared runtime tree holds only what both hosts load |
-| `services/platform/Platform.qml` | Host services, XDG paths, process creation, clipboard, external URLs and text inspector selection |
+| `services/platform/Platform.qml` | Host services: XDG paths composed from the backend's own directory names, process creation, the clipboard, external URLs and the backend's text inspector |
 | `services/processes/` | Process lifecycle, stdin payloads, JSON parsing, streaming lines, timeouts, output limits and exactly-once completion |
-| `hosts/omarchy/` | `Notes.qml` shell entry point, overlay and detached windows, Quickshell process transport and theme adapter |
+| `hosts/omarchy/` | `Notes.qml` shell entry point, overlay and detached windows, Quickshell process transport, the wl-paste clipboard reader and theme adapter |
 | `hosts/standalone/` | Qt window, QProcess transport, QClipboard, activation socket and directly linked text inspector |
 
 Shared code does not import `Quickshell`, `qs.Commons` or `qs.Ui`. Keep new

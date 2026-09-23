@@ -1,8 +1,13 @@
 import QtQuick
 import "../platform"
 
-// Both backends supply stream transport. Framing, bounds and settlement
-// belong here so every provider has the same guarantees in either host.
+// Both backends supply stream transport: start(command, environment,
+// options), write, closeInput, stop, and the signals started, output,
+// exited and failed. Framing, bounds and settlement belong here so every
+// provider has the same guarantees in either host; the options tell a
+// transport that can only deliver whole lines or whole replies (Quickshell)
+// what to frame and where to stop, and a transport that hands stdout over
+// as it arrives (QProcess) needs nothing from them.
 Item {
   id: task
   property var command: []

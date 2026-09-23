@@ -37,6 +37,9 @@ ProcessBackend::~ProcessBackend()
     }
 }
 
+// `options` (streaming, maxOutputBytes) are for a transport that must frame
+// lines or bound output on its own side, as the Quickshell one does; this
+// one hands stdout over as it arrives, and ProcessTask frames and bounds.
 void ProcessBackend::start(const QStringList &command, const QVariantMap &environment, const QVariantMap &options)
 {
     Q_UNUSED(options)
