@@ -613,14 +613,18 @@ Window {
     load({ source: "Before [Example link](" + destination + ") after\n" })
     test.openedLinks = []
     var body = keys.findChild(editor, "noteBody")
-    var preview = keys.findChild(viewBar, "linkPreview")
+    var message = keys.findChild(viewBar, "statusMessage")
+    var count = keys.findChild(viewBar, "wordCount")
+    var saved = keys.findChild(viewBar, "saveStatus")
     var start = body.positionToRectangle(9)
     var x = start.x + 2, y = start.y + start.height / 2
     var original = editor.documentHtml()
     keys.mouseMove(body, x, y)
     keys.wait(50)
     require(editor.hoveredLink === destination, "hover did not find the link: " + editor.hoveredLink)
-    require(preview.visible && preview.text === destination, "the view bar did not show the hovered URL")
+    require(message.text === destination, "the view bar did not show the hovered URL")
+    require(count.visible && saved.visible && saved.text === "Saved",
+            "hovering a link changed the right side of the view bar")
     require(test.openedLinks.length === 0, "hovering opened the link")
     keys.mouseClick(body, x, y)
     require(test.openedLinks.length === 1 && test.openedLinks[0] === destination, "a click did not request the exact URL once")
@@ -629,7 +633,7 @@ Window {
     keys.mouseMove(viewBar, 5, 5)
     keys.wait(50)
     require(editor.hoveredLink === "", "leaving the link kept the hovered URL")
-    require(!preview.visible, "the view bar did not restore its note details after leaving the link")
+    require(message.text === viewBar.statusText, "the view bar did not restore its message after leaving the link")
     body.deselect()
     var end = body.positionToRectangle(17)
     keys.mouseDrag(body, x, y, end.x - x, 0, Qt.LeftButton)
@@ -644,7 +648,7 @@ Window {
     load({ source: "No links here\n" })
     keys.wait(50)
     require(editor.hoveredLink === "", "changing notes kept the hovered URL: " + editor.hoveredLink)
-    require(!preview.visible, "changing notes left a stale URL in the view bar")
+    require(message.text === viewBar.statusText, "changing notes left a stale URL in the view bar")
   }
 
   function typeText(text) {
@@ -1656,7 +1660,7 @@ Window {
       { id: "quote", expected: "> word\n" },
       { id: "codeblock", expected: "word\n\n```\n\n```\n" },
       { id: "codeblock", source: "```\nword\n```\n", expected: "word\n" },
-      { id: "rule", expected: "word\n\n---\n\n" },
+      { id: "rule", expected: "word\n\n---\n" },
       { id: "table", expected: "word\n\n|  |  |\n|---|---|\n|  |  |\n",
         plainText: "\uFDD0\uFDD0\uFDD0\uFDD0\uFDD1" },
       { id: "addRow", source: table, cursorText: "one", expected: table + "|  |  |\n" },

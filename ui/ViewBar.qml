@@ -2,7 +2,7 @@ import QtQuick
 import "../design"
 import "statusbar" as Status
 
-// Provider badge, breadcrumb, word count, save state and the sidebar toggle.
+// Sidebar toggle, provider badge, status message, word count and save state.
 Item {
   id: root
 
@@ -28,7 +28,10 @@ Item {
   property bool readOnly: false
   property string statusText: ""
   property string hoveredLink: ""
-  readonly property bool previewingLink: hoveredLink.length > 0
+  // What there is to say for the moment: the link under the pointer, else
+  // the workspace's passing status. It takes over the status message's text
+  // and changes nothing else on the bar.
+  readonly property string notice: root.hoveredLink || root.statusText
   property int wordCount: 0
   property bool countVisible: false
   // The sidebar is folded away: the toggle then points the way back.
@@ -99,35 +102,26 @@ Item {
           base: root.sourceBase
         }
       },
+      // Where the note lives, until there is a notice to show in its place.
       Status.StatusItem {
         fillWidth: true
-        visible: !root.previewingLink
         Status.StatusLabel {
-          objectName: "statusContext"
+          objectName: "statusMessage"
           style: statusStyle
-          text: root.statusText || [root.shownCrumb, root.storage].filter(function(part) {
+          text: root.notice || [root.shownCrumb, root.storage].filter(function(part) {
             return !!part
           }).join(" › ")
-          color: root.statusText ? Qt.tint(root.foreground, Util.alpha(root.accent, 0.55))
+          color: root.notice ? Qt.tint(root.foreground, Util.alpha(root.accent, 0.55))
             : Util.alpha(root.foreground, 0.55)
-        }
-      },
-      Status.StatusItem {
-        fillWidth: true
-        visible: root.previewingLink
-        Status.StatusLabel {
-          objectName: "linkPreview"
-          style: statusStyle
-          text: root.hoveredLink
-          color: Qt.tint(root.foreground, Util.alpha(root.accent, 0.55))
-          elide: Text.ElideMiddle
+          // A URL says the most at its two ends; a breadcrumb reads from its start.
+          elide: root.hoveredLink ? Text.ElideMiddle : Text.ElideRight
         }
       }
     ]
 
     rightItems: [
       Status.StatusItem {
-        visible: root.countVisible && !root.previewingLink && !root.loading
+        visible: root.countVisible && !root.loading
         Status.StatusLabel {
           objectName: "wordCount"
           style: statusStyle
@@ -136,15 +130,14 @@ Item {
         }
       },
       Status.StatusItem {
-        visible: root.loading || root.previewingLink || root.countVisible
+        visible: root.loading || root.countVisible
         Status.StatusLabel {
           objectName: "saveStatus"
           style: statusStyle
-          iconText: root.countVisible && !root.previewingLink && !root.loading
-            ? (root.unsaved ? "●" : "󰄬") : ""
+          iconText: root.loading ? "" : root.unsaved ? "●" : "󰄬"
           iconColor: Qt.tint(root.foreground, Util.alpha(root.accent, 0.6))
-          text: root.loading ? "Loading…" : root.previewingLink ? "Click to open"
-            : root.unsaved ? "Unsaved" : root.readOnly ? "Read-only" : "Saved"
+          text: root.loading ? "Loading…" : root.unsaved ? "Unsaved"
+            : root.readOnly ? "Read-only" : "Saved"
           color: Util.alpha(root.foreground, 0.5)
         }
       }

@@ -52,6 +52,20 @@ ShellRoot {
     }
   }
 
+  // Whether each item shows, where it sits and how wide it is: everything a
+  // change elsewhere on the bar could disturb.
+  function placements(host, items) {
+    return items.map(function(item) {
+      return [item.visible, Math.round(left(item, host)), Math.round(item.width)].join(" ")
+    }).join(", ")
+  }
+
+  function captions(items) {
+    return items.map(function(item) {
+      return [item.text, item.iconText].join(" ")
+    }).join(", ")
+  }
+
   Window {
     id: window
     visible: true
@@ -285,18 +299,38 @@ ShellRoot {
     appBar.loading = false
   }
 
+  // A hovered link may change what the status message says, and nothing more.
+  function linkCases(link, message, slots) {
+    var others = slots.filter(function(slot) {
+      return slot !== message
+    })
+    settle()
+    var resting = { message: message.text, captions: captions(others), placements: placements(appBar, slots) }
+    appBar.hoveredLink = link
+    settle()
+    check("a hovered link replaces the status message's text", message.text === link)
+    check("a hovered link leaves every other caption alone", captions(others) === resting.captions)
+    check("a hovered link neither shows, hides, moves nor resizes a slot",
+      placements(appBar, slots) === resting.placements)
+    fits(appBar, slots)
+    appBar.hoveredLink = ""
+    settle()
+    check("leaving the link restores the status message", message.text === resting.message
+      && placements(appBar, slots) === resting.placements)
+  }
+
   function appCases() {
     var toggle = driver.findChild(appBar, "sidebarToggle")
     var badge = driver.findChild(appBar, "providerBadge")
     var provider = driver.findChild(appBar, "providerLabel")
-    var context = driver.findChild(appBar, "statusContext")
-    var preview = driver.findChild(appBar, "linkPreview")
+    var message = driver.findChild(appBar, "statusMessage")
     var count = driver.findChild(appBar, "wordCount")
     var status = driver.findChild(appBar, "saveStatus")
     var icon = driver.findChild(status, "statusLabelIcon")
+    var slots = [toggle, badge, message, count, status]
     settle()
-    fits(appBar, [toggle, badge, context, count, status])
-    check("provider prefix appears only in the badge", context.text === "Notebook › Notes.md")
+    fits(appBar, slots)
+    check("provider prefix appears only in the badge", message.text === "Notebook › Notes.md")
     check("word count and initial save state are retained", count.text === "42 words" && status.text === "Saved")
     driver.mouseClick(toggle)
     check("generic button forwards the sidebar action", appBar.toggles === 1)
@@ -312,20 +346,17 @@ ShellRoot {
     settle()
     check("loading hides the count and save glyph", status.text === "Loading…" && !count.visible && !icon.visible)
     appBar.loading = false
-    appBar.hoveredLink = "https://example.com/a/long/link"
-    settle()
-    check("link preview replaces context and right-side details", preview.visible && preview.text === appBar.hoveredLink
-      && !context.visible && !count.visible && !icon.visible && status.text === "Click to open")
-    fits(appBar, [toggle, badge, preview, status])
-    appBar.hoveredLink = ""
+    linkCases("https://example.com/a/long/link", message, slots)
     appBar.sourceName = ""
     settle()
-    check("hiding the provider closes its slot", !badge.visible && near(left(context, appBar), left(toggle, appBar) + toggle.width + 2))
+    check("hiding the provider closes its slot", !badge.visible && near(left(message, appBar), left(toggle, appBar) + toggle.width + 2))
     appBar.sourceName = "An extremely long provider name that should stay bounded on a narrow status bar"
     appBar.width = 420
     settle()
     check("the app-owned badge caps its natural label width", provider.width < 200)
-    fits(appBar, [toggle, badge, context, count, status])
+    fits(appBar, slots)
+    // A URL far wider than the room left for it elides inside its slot.
+    linkCases("https://example.com/" + "a/very/long/path/".repeat(12) + "page.html", message, slots)
     appBar.countVisible = false
     settle()
     check("no active note removes every right-side slot", !count.visible && !icon.visible && !status.visible)

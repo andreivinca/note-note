@@ -115,6 +115,22 @@ and text, shared with `StatusButton`. This avoids adding a standalone label's
 padding to the gap between two registrations. `maximumTextWidth` can cap the
 caption's natural text width inside a custom control such as the provider badge.
 
+## The app's bar
+
+`ui/ViewBar.qml` registers a fixed set of items and never adds or removes one
+at runtime: the sidebar toggle, the provider badge and the status message on
+the left, the word count and the save state on the right. What shows follows
+the note's own state: the badge hides while there is no provider, the right
+side hides while no note is open, and a loading note shows `Loading…` in
+place of the count and save state.
+
+The status message is one flexible `StatusLabel` (`statusMessage`). It says
+where the note lives, its breadcrumb and storage, unless there is a notice:
+the URL of the link under the pointer, or else the workspace's passing status
+text. A notice replaces the message's text, in the accent tint, and nothing
+else. Hovering a link does not show, hide, move, resize or re-caption any
+other item, on either side. A URL elides in the middle of its slot.
+
 ## Verification
 
 ```bash
@@ -124,6 +140,7 @@ python3 tests/statusbar_selftest.py
 The isolated offscreen suite checks left/right order, flexible widths on either
 side, narrow layouts, hidden and empty groups, larger fonts, runtime additions
 and removals, icon spacing independent of outer padding, a custom control's styling and clicks, a working external
-dropdown, and the app's save, loading and link-preview states. It is included
+dropdown, the app's save and loading states, and that a hovered link changes
+the status message's text and nothing else, at full and narrow widths. It is included
 in `tests/selftest.py`. Set `NOTE_NOTE_STATUSBAR_CAPTURE` to a PNG path to capture
 the test window after the checks.
