@@ -20,4 +20,10 @@ struct Launch {
 // executable copied elsewhere). Empty when no candidate holds Workspace.qml.
 QString resolveDataDir(const QString &requested);
 
+// The application's name, publisher and version, said before anything asks:
+// the command-line parser answers --version from them and exits there, and
+// the storage directories are named after the application. Both executables
+// call it first, before their parser runs.
+void describeApplication();
+
 int runNoteNote(QGuiApplication &app, const Launch &launch);

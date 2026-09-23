@@ -9,6 +9,7 @@
 
 int main(int argc, char *argv[])
 {
+    describeApplication();
     QGuiApplication app(argc, argv);
     QCommandLineParser parser;
     parser.setApplicationDescription(QStringLiteral("Note Note test harness: runs a QML harness over the application."));

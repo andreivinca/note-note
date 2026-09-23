@@ -104,6 +104,18 @@ def main():
     # single-instance checks below are the only ones that run it.
     runner = (args.harness or binary.parent / "note-note-harness").resolve()
     resources = args.resources.resolve()
+    # The version is answered before anything else runs, and the packager
+    # (packaging/package.py) trusts that answer against the manifest.
+    version = json.loads((resources / "manifest.json").read_text())["version"]
+    try:
+        asked = subprocess.run([str(binary), "--version"], env=dict(os.environ, QT_QPA_PLATFORM="offscreen"),
+                               capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError) as error:
+        print("FAIL: --version:", error)
+        return 1
+    if asked.returncode != 0 or asked.stdout.strip() != "note-note " + version:
+        print("FAIL: the executable does not answer --version with the manifest version:", repr(asked.stdout))
+        return 1
     with tempfile.TemporaryDirectory(prefix="note-note-standalone-") as directory:
         work = Path(directory)
         runtime = work / "runtime"

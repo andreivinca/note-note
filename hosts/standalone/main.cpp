@@ -5,6 +5,7 @@
 
 int main(int argc, char *argv[])
 {
+    describeApplication();
     QGuiApplication app(argc, argv);
     QCommandLineParser parser;
     parser.setApplicationDescription(QStringLiteral("Local Markdown, OneNote, Sticky Notes and Notion in one workspace."));

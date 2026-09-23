@@ -30,11 +30,15 @@ QString resolveDataDir(const QString &requested)
     return QFileInfo::exists(dataDir + QStringLiteral("/Workspace.qml")) ? dataDir : QString();
 }
 
-int runNoteNote(QGuiApplication &app, const Launch &launch)
+void describeApplication()
 {
     QCoreApplication::setApplicationName(QStringLiteral("note-note"));
     QCoreApplication::setOrganizationDomain(QStringLiteral("andreivinca.github.io"));
     QCoreApplication::setApplicationVersion(QStringLiteral(NOTE_NOTE_VERSION));
+}
+
+int runNoteNote(QGuiApplication &app, const Launch &launch)
+{
     QGuiApplication::setDesktopFileName(QStringLiteral("io.github.andreivinca.note-note"));
     QGuiApplication::setQuitOnLastWindowClosed(false);
     QImageReader::setAllocationLimit(128);
