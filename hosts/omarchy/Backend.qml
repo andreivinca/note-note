@@ -28,11 +28,17 @@ Item {
       }
     })
   }
+  // The largest answer clipboard.py gives: an image of MAX_CLIPBOARD bytes
+  // as base64 in its JSON envelope — more than a process may print by
+  // default. The number is the staging policy's (services/clipboard/
+  // clipboard.py, MAX_IMAGE_ANSWER), pinned there by tests/test_regressions.py.
+  readonly property int clipboardAnswerBytes: 56 * 1024 * 1024
   // The system clipboard, one flavour at a time — "types", "text", "html"
   // or "image" — answered the way the native host answers it, so the
   // clipboard service (services/clipboard) has one caller's view of both.
   function readClipboard(format, callback) {
-    processes.run({ command: ["python3", backend.dir + "/clipboard.py", format], timeoutMs: 60000 }, callback)
+    processes.run({ command: ["python3", backend.dir + "/clipboard.py", format], timeoutMs: 60000,
+                    maxOutputBytes: backend.clipboardAnswerBytes }, callback)
   }
   ProcessRunner {
     id: processes

@@ -382,6 +382,12 @@ class Content(unittest.TestCase):
         self.assertEqual(types, list(clipboard.MIME_SUFFIX))
         shell = (ROOT / "hosts/omarchy/clipboard.py").read_text()
         self.assertIn("from clipboard import MIME_SUFFIX, MAX_CLIPBOARD, MAX_TEXT", shell)
+        # The Omarchy reader answers through a process, whose output is capped:
+        # the cap must hold the largest image the policy accepts, as base64.
+        self.assertGreaterEqual(clipboard.MAX_IMAGE_ANSWER, -(-clipboard.MAX_CLIPBOARD // 3) * 4 + 4096)
+        backend = (ROOT / "hosts/omarchy/Backend.qml").read_text()
+        self.assertEqual(eval(re.search(r"clipboardAnswerBytes: ([^\n]+)", backend)[1]), clipboard.MAX_IMAGE_ANSWER)
+        self.assertIn("maxOutputBytes: backend.clipboardAnswerBytes", backend)
 
     def test_document_dialect_agrees_across_adapters(self):
         js = (ROOT / "ui/Dialect.js").read_text()

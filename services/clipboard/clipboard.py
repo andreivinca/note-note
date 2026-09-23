@@ -23,6 +23,7 @@ import tempfile
 MIME_SUFFIX = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif",
                "image/bmp": ".bmp", "image/tiff": ".tiff"}
 MAX_CLIPBOARD = 40 * 1024 * 1024     # what we will read at all
+MAX_IMAGE_ANSWER = 56 * 1024 * 1024  # MAX_CLIPBOARD as base64 (x4/3) in its JSON envelope: a reader's largest answer
 MAX_TEXT = 4 * 1024 * 1024           # a paste of text past this is not a note
 MAX_STAGED = 40                      # pasted files kept before the oldest go
 MAX_STAGED_AGE = 7 * 24 * 3600       # a paste that never reached a backend
@@ -101,10 +102,8 @@ def stage_image(directory, mime, data):
 
 
 def image_from_stdin(directory):
-    # Base64 expands by 4/3, plus a small JSON envelope. Read the bound once.
-    limit = ((MAX_CLIPBOARD + 2) // 3) * 4 + 4096
-    raw = sys.stdin.buffer.read(limit + 1)
-    if len(raw) > limit:
+    raw = sys.stdin.buffer.read(MAX_IMAGE_ANSWER + 1)
+    if len(raw) > MAX_IMAGE_ANSWER:
         return {"error": "the clipboard image is too large"}
     try:
         payload = json.loads(raw)
