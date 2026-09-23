@@ -1026,6 +1026,11 @@ ShellRoot {
     var record = function(name) { return "N\tWork\t/notes/Work/" + name + ".md\t" + name + "\t\t1\t1" }
     folders.loadList(["D\tWork", record("one"), record("two"), "E\tcomplete"].join("\n") + "\n")
     check("a whole listing is trusted", folders.listingComplete && folders.notes.length === 2 && folders.orderWritable("Work"))
+    // A name travels escaped and arrives as the file system has it: the
+    // path is the note's identity, and the saved order names it the same way.
+    folders.loadList(["D\tWork", "O\tWork\ttab\\there.md", record("one"), "N\tWork\t/notes/Work/tab\\there.md\ttab\\there\t\t1\t1", "E\tcomplete"].join("\n") + "\n")
+    check("a listed name arrives exact, tab and all, and its saved order finds it",
+          folders.notes.length === 2 && folders.notes[0].path === "local:/notes/Work/tab\there.md" && folders.notes[0].title === "tab\there")
     folders.loadList(["D\tWork", record("one"), "E\tpartial\tthe listing is larger than 10 bytes"].join("\n") + "\n")
     check("a partial listing keeps the notes already known", !folders.listingComplete && folders.notes.length === 2)
     folders.persistOrder("Work")

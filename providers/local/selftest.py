@@ -38,6 +38,7 @@ no cheaper place to assert it from.
 import argparse
 import ctypes
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -303,6 +304,41 @@ def stream(root, budget):
 FIELDS = {"B": 2, "D": 2, "O": 3, "N": 7, "X": 3}
 
 
+def unescaped(field):
+    """A field as list.py wrote it, read back the way Provider.qml does."""
+    return re.sub(r"\\(.)", lambda m: {"t": "\t", "n": "\n"}.get(m.group(1), m.group(1)), field)
+
+
+def test_exact_names(directory, verbose):
+    """A name is listed exactly as the file system has it. The listing once
+    collapsed the spaces in every field, so two notes could share one
+    listed path — and the wrong one opened or went; a tab in a name would
+    have broken the record it sat in."""
+    root = os.path.join(directory, "names")
+    book = os.path.join(root, "two  spaces")
+    os.makedirs(book)
+    names = ["two  spaces.md", "two spaces.md", "tab\there.md", "back\\slash.md"]
+    for name in names:
+        note(book, name, 8)
+    with open(os.path.join(book, "two  spaces.md"), "w") as handle:
+        handle.write("---\ntitle: two  spaces\n---\nbody\n")
+    with open(os.path.join(book, ".order"), "w") as handle:
+        handle.write("tab\there.md\n")
+    failures = 0
+    lines = stream(root, 1000000)
+    failures += check("every record is whole", all(len(line.split("\t")) == FIELDS[line[0]] for line in lines[:-1]), repr(lines))
+    records = [[unescaped(field) for field in line.split("\t")] for line in lines]
+    listed = sorted(os.path.basename(r[2]) for r in records if r[0] == "N")
+    failures += check("every name is listed exactly as the file system has it", listed == sorted(names), repr(listed))
+    failures += check("a notebook key is exact", [r[1] for r in records if r[0] == "D"] == ["", "two  spaces"], repr(records))
+    failures += check("a saved order entry is exact", [r[2] for r in records if r[0] == "O"] == ["tab\there.md"], repr(records))
+    titles = [r[3] for r in records if r[0] == "N" and r[2].endswith("/two  spaces.md")]
+    failures += check("a title keeps its spacing", titles == ["two  spaces"], repr(titles))
+    print("exact names")
+    print("  %d checks failed" % failures if failures else "  all green")
+    return failures
+
+
 def test_listing_end_record(directory, verbose):
     """The last line says whether the listing can be trusted. Cut by its
     budget, a listing used to look exactly like a complete one, and the
@@ -383,6 +419,7 @@ def main():
         total += test_fallback(directory, args.verbose)
         total += test_image_escape(directory, args.verbose)
         total += test_listing_end_record(directory, args.verbose)
+        total += test_exact_names(directory, args.verbose)
 
     if FAILURES:
         print("\n%d failure(s):" % len(FAILURES))

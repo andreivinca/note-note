@@ -16,6 +16,11 @@ A notebook that could not be read is reported the same way, per notebook,
 rather than listed as empty. A stream with no last line is a listing that
 died, and is not a list at all.
 
+A field holds no tab or newline of its own: a backslash, a tab and a
+newline in a name or a title travel as `\\`, `\t` and `\n`, and Provider.qml
+reads them back (loadList), so a name is listed exactly as the file system
+has it — the path is the note's identity.
+
 The birth time comes from statx(2), not from os.stat(): a stat_result only
 carries st_birthtime where the platform's own struct stat does, which on Linux
 it does not, so asking os.stat() for one answers whatever default the caller
@@ -143,6 +148,13 @@ def head_of(path, deadline):
     return title, notefile.preview(body)
 
 
+def escaped(field):
+    """A field as the stream carries it: the delimiters' own characters and
+    the backslash stand as `\\t`, `\\n` and `\\\\`, so a name holding any of
+    them arrives whole and exact."""
+    return field.replace("\\", "\\\\").replace("\t", "\\t").replace("\n", "\\n")
+
+
 class Cut(Exception):
     """The listing stopped short — the byte budget or the deadline — and
     says so in its last line."""
@@ -157,10 +169,9 @@ def main():
     left = budget - END_BYTES
     def emit(*fields):
         # The output cap cuts between lines, never through one: the parser
-        # must not see half an N record. A field never holds a tab or a
-        # newline of its own.
+        # must not see half an N record.
         nonlocal left
-        line = ("\t".join(" ".join(field.split()) for field in fields) + "\n").encode()
+        line = ("\t".join(escaped(field) for field in fields) + "\n").encode()
         if len(line) > left:
             raise Cut("the listing is larger than %d bytes" % budget)
         left -= len(line)

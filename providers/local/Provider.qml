@@ -298,12 +298,26 @@ Item {
     root.statusRequested(root.name + ": the notes could not all be listed, so the order was not saved")
   }
 
+  // A listing field as list.py wrote it: `\t`, `\n` and `\\` stand for the
+  // tab, the newline and the backslash the stream's own delimiters keep out.
+  function unescaped(field) {
+    return field.replace(/\\(.)/g, function(match, letter) {
+      if (letter === "t") {
+        return "\t"
+      }
+      if (letter === "n") {
+        return "\n"
+      }
+      return letter
+    })
+  }
+
   // Parses the listing script's output.
   function loadList(raw) {
     var lines = raw.split("\n"), dirs = [], orders = {}, bookOrder = [], entries = []
     var end = null, unreadable = {}
     for (var i = 0; i < lines.length; i++) {
-      var p = lines[i].split("\t")
+      var p = lines[i].split("\t").map(root.unescaped)
       if (p[0] === "D") {
         dirs.push(p[1] || "")
       } else if (p[0] === "O") {
