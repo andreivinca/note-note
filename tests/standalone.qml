@@ -178,7 +178,7 @@ Window {
       } catch (error) {
         console.error("FAIL!", error.message, error.stack)
         console.error("Workspace:", workspace.debugState(), workspace.configPath, JSON.stringify(workspace.config))
-        console.error("Provider startup:", workspace.providersLoaded, workspace.pendingExternalDirs, workspace.configReady)
+        console.error("Provider startup:", workspace.providersLoaded, workspace.catalog.ready, workspace.configReady)
         Qt.exit(1)
       }
     }

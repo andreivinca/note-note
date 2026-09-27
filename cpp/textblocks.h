@@ -59,7 +59,8 @@ class TextBlocks : public QObject
     // invokable's name, arguments or answer; the editor refuses a module
     // of another version at load.
     Q_PROPERTY(int version READ version CONSTANT)
-    static constexpr int Version = 1;
+    Q_PROPERTY(int contentRevision READ contentRevision NOTIFY contentChanged)
+    static constexpr int Version = 2;
 
 public:
     Q_INVOKABLE int insertFormattedText(int from, int to, const QString &text, const QVariantMap &styles);
@@ -73,6 +74,7 @@ public:
 
     int linkRevision() const { return m_linkRevision; }
     int version() const { return Version; }
+    int contentRevision() const { return m_contentRevision; }
 
     QQuickTextDocument *document() const { return m_document; }
     void setDocument(QQuickTextDocument *document);
@@ -150,7 +152,10 @@ public:
 
     Q_INVOKABLE void configureLinks(const QColor &colour, bool plainText,
                                    const QColor &quoteInk = QColor("#9399b2"),
-                                   const QColor &highlightInk = QColor("#1e1e2e"));
+                                   const QColor &highlightInk = QColor("#1e1e2e"),
+                                   const QColor &highlightBackground = {},
+                                   const QColor &codeBackground = {},
+                                   const QColor &codeForeground = {});
 
     Q_INVOKABLE QString linkAt(qreal x, qreal y) const;
 
@@ -193,6 +198,7 @@ public:
     Q_INVOKABLE int fillEmptyBlocksBeforeTables();
 
 signals:
+    void contentChanged();
     void documentChanged();
     void linksChanged();
 
@@ -201,5 +207,7 @@ private:
     int m_linkRevision = 0;
 
     QQuickTextDocument *m_document = nullptr;
+    QMetaObject::Connection m_contentConnection;
+    int m_contentRevision = 0;
     int m_editDepth = 0;
 };

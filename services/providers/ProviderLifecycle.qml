@@ -1,6 +1,6 @@
 import QtQuick
 import "settings.js" as Settings
-import "../../ui/editing/ToolbarSettings.js" as ToolbarSettings
+import "../settings/settings.js" as Config
 
 // Settings changes have three phases: validate, drain, commit. Providers stay
 // alive until their accepted writes settle; a failed save keeps the old setup.
@@ -9,7 +9,7 @@ Item {
   property var host: null
   property var session: null
   property var editor: null
-  property var files: null
+  property var settings: null
   property bool busy: false
   property var pending: null
   property bool committing: false
@@ -21,11 +21,11 @@ Item {
   // notification has completed: committing starts the config write and
   // retires providers, which are inputs of that very state, and a reaction
   // that writes its own inputs mid-update is a binding loop.
-  readonly property bool drained: lifecycle.pending !== null && host.writesSettled
+  readonly property bool drained: lifecycle.pending !== null && (!lifecycle.pending.drain || (host.writesSettled
     && !lifecycle.pending.changes.some(function(change) {
       var provider = change.replace ? host.providerById(change.id) : null
       return !!provider && provider.busy === true
-    })
+    })))
   function commitWhenDrained() {
     Qt.callLater(lifecycle.tryCommit)
   }
@@ -36,8 +36,8 @@ Item {
     }
   }
 
-  function apply(text, callback) {
-    if (lifecycle.busy || session.locked || session.loadingNote) {
+  function apply(text, callback, expectedRevision) {
+    if (lifecycle.busy || settings.busy) {
       callback({ error: "A note or settings operation is still finishing" })
       return
     }
@@ -52,11 +52,21 @@ Item {
       callback({ error: "The settings must be a JSON object" })
       return
     }
-    var toolbarError = ToolbarSettings.validateConfig(parsed)
-    if (toolbarError) {
-      callback({ error: toolbarError })
+    var validationError = Config.validate(parsed)
+    if (validationError) {
+      callback({ error: validationError })
       return
     }
+    settings.prepare(text, function(result) {
+      if (result.error) {
+        callback(result)
+        return
+      }
+      lifecycle.applyPrepared(result.config, text, callback, expectedRevision)
+    })
+  }
+
+  function applyPrepared(parsed, text, callback, expectedRevision) {
     var merged = host.mergeConfigDefaults(parsed)
     var changes = Settings.plan(host.config, merged, Object.keys(host.providerUrls), function(id) {
       var provider = host.providerById(id)
@@ -71,11 +81,18 @@ Item {
         }
       }
     }
+    var drain = changes.length > 0
+    if (drain && (session.locked || session.loadingNote)) {
+      callback({ error: "A note operation is still finishing" })
+      return
+    }
     var readOnly = editor.readOnly
     lifecycle.busy = true
-    session.flushSave()
-    session.locked = true
-    editor.readOnly = true
+    if (drain) {
+      session.flushSave()
+      session.locked = true
+      editor.readOnly = true
+    }
     var watched = []
     for (var j = 0; j < changes.length; j++) {
       var provider = host.providerById(changes[j].id)
@@ -91,8 +108,9 @@ Item {
     }
     // Last, with the flush under way: the commit follows the drain, which
     // may be settled already.
-    lifecycle.pending = { parsed: parsed, merged: merged, changes: changes,
-                          callback: callback, readOnly: readOnly, watched: watched }
+    lifecycle.pending = { text: text, merged: merged, changes: changes,
+                          callback: callback, readOnly: readOnly, watched: watched, drain: drain,
+                          revision: expectedRevision === undefined ? settings.revision : expectedRevision }
     lifecycle.tryCommit()
   }
 
@@ -101,12 +119,12 @@ Item {
       return
     }
     lifecycle.committing = true
-    var error = session.failureFor(Object.keys(host.providerUrls))
+    var error = lifecycle.pending.drain ? session.failureFor(Object.keys(host.providerUrls)) : ""
     if (error) {
       lifecycle.finish({ error: error })
       return
     }
-    files.write(host.configPath, JSON.stringify(lifecycle.pending.parsed, null, 2) + "\n", function(result) {
+    settings.replace(lifecycle.pending.text, lifecycle.pending.revision, function(result) {
       if (result.error) {
         lifecycle.finish(result)
         return
@@ -117,8 +135,12 @@ Item {
 
   function commit() {
     var pending = lifecycle.pending
-    host.providerState = host.providerSnapshot()
     host.config = pending.merged
+    if (!pending.drain) {
+      lifecycle.finish({ ok: true })
+      return
+    }
+    host.providerState = host.providerSnapshot()
     for (var i = 0; i < pending.changes.length; i++) {
       var change = pending.changes[i]
       var provider = host.providerById(change.id)
@@ -154,9 +176,11 @@ Item {
     for (var w = 0; w < pending.watched.length; w++) {
       pending.watched[w].busyChanged.disconnect(lifecycle.commitWhenDrained)
     }
-    session.locked = false
-    if (session.currentPath) {
-      editor.readOnly = pending.readOnly
+    if (pending.drain) {
+      session.locked = false
+      if (session.currentPath) {
+        editor.readOnly = pending.readOnly
+      }
     }
     lifecycle.busy = false
     if (host.opened) {

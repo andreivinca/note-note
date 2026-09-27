@@ -151,11 +151,15 @@ TextLinks::TextLinks(QObject *parent) : QSyntaxHighlighter(parent)
     connect(&m_notifyLinks, &QTimer::timeout, this, &TextLinks::linksChanged);
 }
 
-void TextLinks::configure(const QColor &colour, bool plainText, const QColor &quoteInk, const QColor &highlightInk)
+void TextLinks::configure(const QColor &colour, bool plainText, const QColor &quoteInk, const QColor &highlightInk,
+                          const QColor &highlightBackground, const QColor &codeBackground, const QColor &codeForeground)
 {
     m_colour = colour;
     m_quoteInk = quoteInk;
     m_highlightInk = highlightInk;
+    m_highlightBackground = highlightBackground;
+    m_codeBackground = codeBackground;
+    m_codeForeground = codeForeground;
     m_plainText = plainText;
     // Also completes the highlighter's initial delayed pass while the editor
     // is loading, so display setup cannot be mistaken for a later text edit.
@@ -172,10 +176,26 @@ void TextLinks::highlightBlock(const QString &)
         const QTextCharFormat author = fragment.charFormat();
         const bool colored = !m_plainText && author.foreground().style() != Qt::NoBrush;
         QTextCharFormat appearance;
+        const bool code = isCode(block, author);
+        if (!m_plainText) {
+            if (code) {
+                if (m_codeBackground.isValid() && !NoteNoteDialect::isCodeBlock(block.blockFormat())) {
+                    appearance.setBackground(m_codeBackground);
+                }
+                if (!colored && m_codeForeground.isValid()) {
+                    appearance.setForeground(m_codeForeground);
+                }
+            } else if (author.background().style() != Qt::NoBrush && m_highlightBackground.isValid()) {
+                // The Markdown dialect interprets any non-code run background
+                // as ==highlight==. Its stored brush is a semantic marker;
+                // display colors never participate in that interpretation.
+                appearance.setBackground(m_highlightBackground);
+            }
+        }
         if (!m_plainText && !colored) {
-            if (author.background().style() != Qt::NoBrush && !isCode(block, author)) {
+            if (author.background().style() != Qt::NoBrush && !code) {
                 appearance.setForeground(m_highlightInk);
-            } else if (quote) {
+            } else if (quote && !code) {
                 appearance.setForeground(m_quoteInk);
             }
         }

@@ -7,9 +7,9 @@ QtObject {
   property color background: Color.menu.background
   property color foreground: Color.menu.text
   readonly property color surface: Style.chromeSurface(background, foreground)
-  readonly property color fill: Qt.tint(surface, Util.alpha(foreground, 0.08))
-  readonly property color borderColor: Qt.tint(surface, Util.alpha(foreground, 0.18))
-  readonly property color focusBorderColor: Qt.tint(surface, Util.alpha(foreground, 0.35))
+  readonly property color fill: Color.token("input.background", Qt.tint(surface, Util.alpha(foreground, 0.08)))
+  readonly property color borderColor: Color.token("input.border", Qt.tint(surface, Util.alpha(foreground, 0.18)))
+  readonly property color focusBorderColor: Color.token("border.focus", Qt.tint(surface, Util.alpha(foreground, 0.35)))
   readonly property real borderWidth: 1
   readonly property real radius: Math.min(Style.cornerRadius, Style.space(6))
   readonly property real height: Style.space(26)

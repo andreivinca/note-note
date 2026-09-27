@@ -14,7 +14,7 @@ from xml.etree import ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / path) for path in (
-    "lib", "services/markdown", "providers/local", "providers/notion")]
+    "lib", "services/markdown", "plugins/org.note-note.local", "plugins/org.note-note.notion")]
 import fileio  # noqa: E402 — plugin modules are imported from the source tree
 import readfile  # noqa: E402 — plugin modules are imported from the source tree
 import operations  # noqa: E402 — plugin modules are imported from the source tree
@@ -179,7 +179,7 @@ class Files(unittest.TestCase):
         first = readfile.read_document(self.note, 100)["version"]
         os.utime(self.note, ns=(1_000_000_002, 1_000_000_002))
         self.assertNotEqual(first, readfile.read_document(self.note, 100)["version"])
-        result = subprocess.run([sys.executable, str(ROOT / "providers/local/list.py"), str(self.root), "10000"],
+        result = subprocess.run([sys.executable, str(ROOT / "plugins/org.note-note.local/list.py"), str(self.root), "10000"],
                                 capture_output=True, text=True, check=True)
         self.assertIn("1000000002", result.stdout)
 

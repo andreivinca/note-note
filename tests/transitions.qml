@@ -7,16 +7,15 @@ import "app/services/notes" as Notes
 import "app/services/providers" as Providers
 import "app/services/processes"
 import "app/services/files"
-import "app/providers/local" as Local
-import "app/providers/onenote" as OneNote
-import "app/providers/sticky" as Sticky
-import "app/providers/notion" as Notion
+import "app/plugins/org.note-note.local" as Local
+import "app/plugins/org.note-note.onenote" as OneNote
+import "app/plugins/org.note-note.sticky" as Sticky
+import "app/plugins/org.note-note.notion" as Notion
 import "app/services/microsoft" as Microsoft
 import "app/services/notes/sidebar.js" as Sidebar
 import "app/services/providers/settings.js" as Settings
 import "app/ui/MarkdownBlocks.js" as Blocks
 import "app/ui/Dialect.js" as Dialect
-import "app/ui/KeyBindings.js" as Keys
 import "app/ui/editing/ToolbarSettings.js" as ToolbarSettings
 import "app/tests" as Tests
 
@@ -372,7 +371,7 @@ ShellRoot {
     id: host
     property bool writesSettled: !session.busy
     property var config: ({ providers: { test: { enabled: true, notebookTabs: false } } })
-    property var providerUrls: ({ test: "app/providers/local/Provider.qml" })
+    property var providerUrls: ({ test: "app/plugins/org.note-note.local/Provider.qml" })
     property string configPath: "unused-in-mock"
     property var providerState: ({})
     property var providers: [configured]
@@ -403,7 +402,12 @@ ShellRoot {
     property var callback: null
     property int writes: 0
     property string lastText: ""
-    function write(path, text, done) {
+    property bool busy: false
+    property string revision: "test"
+    function prepare(text, callback) {
+      callback({ config: JSON.parse(text) })
+    }
+    function replace(text, revision, done) {
       writes++
       lastText = text
       callback = done
@@ -414,7 +418,7 @@ ShellRoot {
     host: host
     session: session
     editor: document
-    files: configFiles
+    settings: configFiles
   }
   function lifecycleCases() {
     var result = null
@@ -439,6 +443,18 @@ ShellRoot {
     configFiles.callback({ ok: true })
     check("presentation change updates the existing provider", result && result.ok && configured.notebookTabs && host.retired === 0)
     check("presentation change keeps the current note", session.currentPath === "test:B" && document.body === "settings draft")
+
+    session.onEdited()
+    var conversions = document.conversions.length
+    var appearanceConfig = { providers: host.config.providers, appearance: { theme: "example.colors/dark" } }
+    lifecycle.apply(JSON.stringify(appearanceConfig), function(r) { result = r })
+    check("appearance-only settings never flush or lock a dirty note",
+          session.dirty && !session.locked && !document.readOnly && document.conversions.length === conversions)
+    configFiles.callback({ ok: true })
+    check("appearance settings preserve dirty document state", result.ok && session.dirty && host.retired === 0)
+    session.flushSave()
+    document.conversions.shift()("settings draft", true)
+    provider.saves.shift().callback({})
 
     lifecycle.apply(JSON.stringify({ providers: { test: { enabled: false } } }), function(r) { result = r })
     configFiles.callback({ error: "permission denied" })
@@ -636,7 +652,7 @@ ShellRoot {
         }
       }
     }
-    check("shortcut dispatch and help use common definitions", Keys.match({ key: Qt.Key_N, modifiers: Qt.ControlModifier | Qt.ShiftModifier }, "workspace") === "newNotebook" && Keys.text().indexOf("ctrl+shift+n") >= 0)
+    check("shortcut dispatch and help use common definitions", editor.keybindings.match({ key: Qt.Key_N, modifiers: Qt.ControlModifier | Qt.ShiftModifier }, "workspace").action === "newNotebook" && editor.keybindings.helpText.indexOf("ctrl+shift+n") >= 0)
 
   }
 

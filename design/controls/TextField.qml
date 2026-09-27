@@ -10,10 +10,10 @@ Controls.TextField {
   property bool hasCursor: false
   property real horizontalPadding: Style.spacing.controlPaddingX
   property real verticalPadding: Style.spacing.sm
-  color: foreground
+  color: Color.token("input.foreground", foreground)
   selectionColor: Util.alpha(accent, 0.35)
-  selectedTextColor: foreground
-  placeholderTextColor: Util.alpha(foreground, 0.5)
+  selectedTextColor: Color.token("editor.selectionForeground", foreground)
+  placeholderTextColor: Color.token("input.placeholder", Util.alpha(foreground, 0.5))
   echoMode: password ? TextInput.Password : TextInput.Normal
   font.family: Style.font.family
   font.pixelSize: Style.font.body
@@ -23,8 +23,9 @@ Controls.TextField {
   bottomPadding: topPadding
   background: Rectangle {
     radius: Style.cornerRadius
-    color: Util.alpha(field.foreground, 0.04)
+    color: Color.token("input.background", Util.alpha(field.foreground, 0.04))
     border.width: 1
-    border.color: field.activeFocus ? field.accent : Util.alpha(field.foreground, 0.3)
+    border.color: field.activeFocus ? Color.token("border.focus", field.accent)
+                                  : Color.token("input.border", Util.alpha(field.foreground, 0.3))
   }
 }

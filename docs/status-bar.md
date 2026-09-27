@@ -144,3 +144,7 @@ dropdown, the app's save and loading states, and that a hovered link changes
 the status message's text and nothing else, at full and narrow widths. It is included
 in `tests/selftest.py`. Set `NOTE_NOTE_STATUSBAR_CAPTURE` to a PNG path to capture
 the test window after the checks.
+
+The status surface and foreground also follow `statusbar.background` and
+`statusbar.foreground` from the effective theme. Provider identity hues remain
+unchanged; selecting a theme never changes provider state.

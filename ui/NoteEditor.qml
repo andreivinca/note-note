@@ -1,4 +1,5 @@
 import QtQuick
+import "../services/shortcuts" as Shortcuts
 import "../services/platform"
 import "../design"
 import "../design/controls"
@@ -66,11 +67,17 @@ Item {
 
   readonly property alias title: titleField.text
   readonly property bool bodyFocused: area.activeFocus
-  onPlainChanged: root.configureLinkDisplay()
-  onLinkColourChanged: root.configureLinkDisplay()
-  onHighlightInkChanged: root.configureLinkDisplay()
+  onPlainChanged: Qt.callLater(root.configureLinkDisplay)
+  onLinkColourChanged: Qt.callLater(root.configureLinkDisplay)
+  onHighlightInkChanged: Qt.callLater(root.configureLinkDisplay)
+  readonly property color displayHighlight: Color.token("editor.highlightBackground", root.highlightColour)
+  readonly property color displayCodeBackground: Color.token("editor.inlineCodeBackground", Qt.darker(root.background, 1.16))
+  readonly property color displayCodeForeground: Color.token("editor.codeForeground", root.foreground)
+  onDisplayHighlightChanged: Qt.callLater(root.configureLinkDisplay)
+  onDisplayCodeBackgroundChanged: Qt.callLater(root.configureLinkDisplay)
+  onDisplayCodeForegroundChanged: Qt.callLater(root.configureLinkDisplay)
   readonly property string quoteInk: root.markdown && root.markdown.quoteInk ? root.markdown.quoteInk : "#9399b2"
-  onQuoteInkChanged: root.configureLinkDisplay()
+  onQuoteInkChanged: Qt.callLater(root.configureLinkDisplay)
   readonly property string hoveredLink: root.hasNote && !root.showingNotice && root.visible && linkHover.hovered
     ? root.linkAt(linkHover.point.position.x, linkHover.point.position.y) : ""
   signal linkOpenRequested(string url)
@@ -227,6 +234,10 @@ Item {
   // is still being converted must win: only the newest token may assign.
   property int noteToken: 0
   property int documentRevision: 0
+  // TextEdit also emits textChanged for display/selection refreshes. The
+  // native document's contentsChange signal identifies actual content and
+  // format edits, including undo, without serializing every keystroke.
+  property int lastContentRevision: -1
   onEdited: {
     root.documentRevision++
     root.scheduleInTable()
@@ -613,7 +624,7 @@ Item {
     var at = area.cursorPosition
     // On its own line: a picture is a block of its own in every backend, and
     // the save can only leave it untouched if the text is not wrapped around
-    // it (providers/onenote/onenote_md.py).
+    // it (plugins/org.note-note.onenote/onenote_md.py).
     atomic(function() {
       area.insert(at, '<p><img src="file://' + encodeURI(path).replace(/"/g, "%22") + '" alt="" /></p>')
       guardImageAt(at)
@@ -943,8 +954,8 @@ Item {
   // eye sees. The marker itself stays in the document — it carries the
   // state, and a click on it is Qt's own toggle.
   property var checkBoxes: []
-  readonly property color quoteBarColour: Util.alpha(root.accent, 0.6)
-  readonly property color codeSlabColour: Qt.darker(root.background, 1.16)
+  readonly property color quoteBarColour: Color.token("editor.quoteBorder", Util.alpha(root.accent, 0.6))
+  readonly property color codeSlabColour: Color.token("editor.codeBackground", Qt.darker(root.background, 1.16))
   Timer { id: decorTimer; interval: 120; onTriggered: root.updateDecorations() }
   // With the native inspector the pass is cheap — real block formats, no
   // serialisation — so it runs synchronously and the bars and slabs move in
@@ -987,7 +998,8 @@ Item {
     root.normalizing = true
     try {
       nativeBlocks.item.configureLinks(root.linkColour, root.plain,
-                                       root.quoteInk, root.highlightInk)
+                                       root.quoteInk, root.highlightInk, root.displayHighlight,
+                                       root.displayCodeBackground, root.displayCodeForeground)
     } finally {
       root.normalizing = wasNormalizing
     }
@@ -1613,6 +1625,13 @@ Item {
     return t ? t.split(/\s+/).length : 0
   }
 
+  property var keybindings: localBindings
+  Shortcuts.KeybindingRegistry {
+    id: localBindings
+    active: root.keybindings === localBindings
+    tools: active ? toolRegistry.actions : []
+  }
+
   readonly property alias tools: toolRegistry
   property alias toolDirectory: toolRegistry.directory
   property alias toolbarLayout: toolRegistry.layout
@@ -1629,6 +1648,7 @@ Item {
   Editing.ToolRegistry {
     id: toolRegistry
     editor: editing
+    keybindings: root.keybindings
   }
 
   function tool(id) {
@@ -1643,9 +1663,15 @@ Item {
     id: toolStrip
     width: parent.width
     registry: toolRegistry
-    background: root.background
+    background: Color.token("toolbar.background", root.background)
     // Keep this row aligned with the sidebar header when tools are unavailable.
     toolsVisible: root.toolsVisible
+  }
+
+  Rectangle {
+    anchors.fill: parent
+    color: root.background
+    z: -1
   }
 
   // ---- the note's sheet: title and body on one surface. No frame around it
@@ -1844,7 +1870,11 @@ Item {
           readOnly: true
           color: root.foreground
           selectionColor: Style.selectionFill
-          selectedTextColor: root.foreground
+          selectedTextColor: Color.token("editor.selectionForeground", root.foreground)
+          cursorDelegate: TextCursor {
+            textInput: area
+            color: Color.token("editor.caret", root.foreground)
+          }
           // Rich text in, rich text out. Markdown cannot hold a highlight,
           // an empty paragraph or an indent, so the document keeps HTML and
           // services/markdown converts at both ends.
@@ -1948,7 +1978,13 @@ Item {
             if (root.normalizing) {
               return
             }
+            if (nativeBlocks.item && root.lastContentRevision === nativeBlocks.item.contentRevision) {
+              return
+            }
             root.normalizeNow()
+            if (nativeBlocks.item) {
+              root.lastContentRevision = nativeBlocks.item.contentRevision
+            }
             root.scheduleDecorations()
             if (root.settingText) {
               return

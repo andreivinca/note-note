@@ -2,7 +2,7 @@ import QtQuick
 import "../processes"
 
 // What every built-in provider that talks to a backend script through a
-// request lane shares (providers/PROVIDERS.md): the host's hooks and the
+// request lane shares (docs/providers.md): the host's hooks and the
 // contract's signals, the save schedule, the lane and the sign-in its
 // requests are made with, and one process per script run. A provider
 // extends this with its identity, its model, its rows and its calls.

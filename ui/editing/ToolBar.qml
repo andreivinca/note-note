@@ -38,7 +38,7 @@ Item {
 
   Rectangle {
     anchors.fill: parent
-    color: Style.chromeSurface(bar.background, bar.editor.foreground)
+    color: Color.token("toolbar.background", Style.chromeSurface(bar.background, bar.editor.foreground))
   }
 
   Column {
@@ -153,6 +153,7 @@ Item {
         Item {
           objectName: "editingPopupHolder-" + modelData.toolId
           QQC.Popup {
+            palette: ControlPalette {}
             id: popup
             readonly property var tool: modelData
             parent: bar

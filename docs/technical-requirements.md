@@ -45,11 +45,11 @@ cpp/                        the native text inspector: QTextDocument block forma
                             for QML (textblocks.h, sources.cmake, build.sh, its own
                             selftest.py); each host imports it through its own
                             TextInspector.qml
-providers/PROVIDERS.md      the provider contract — the file to read first
-providers/local/            Markdown folders in ~/Notes
-providers/sticky/           Microsoft Sticky Notes  (sticky.py)
-providers/onenote/          OneNote                 (onenote.py, onenote_md.py)
-providers/notion/           Notion                  (notion.py, notion_md.py)
+docs/providers.md      the provider contract — the file to read first
+plugins/org.note-note.local/            Markdown folders in ~/Notes
+plugins/org.note-note.sticky/           Microsoft Sticky Notes  (sticky.py)
+plugins/org.note-note.onenote/          OneNote                 (onenote.py, onenote_md.py)
+plugins/org.note-note.notion/           Notion                  (notion.py, notion_md.py)
 services/clipboard/         the clipboard's image    (Clipboard.qml, clipboard.py)
 services/microsoft/         shared Graph sign-in    (Account.qml, msgraph.py)
 services/requests/          the per-provider request queue: ordering, coalescing,
@@ -61,8 +61,9 @@ examples/hello/             minimal external provider, incl. its own setup scree
 docs/                       these documents
 ```
 
-External providers are loaded from the selected host's provider directory at
-startup. See [the host architecture and storage map](standalone.md).
+External providers are loaded from validated application packages at startup.
+The legacy host-specific directories are handled by a compatibility adapter.
+See [packages](plugins.md) and [the storage map](standalone.md).
 
 ## Responsibilities
 
@@ -76,9 +77,10 @@ rendering the device-code sign-in screen for accounts a provider created. The
 bars are presentation components (`ui/TitleBar.qml`, `ui/TabStrip.qml`,
 `ui/ViewBar.qml`, `ui/TextPage.qml`): fed by bindings, answering with
 signals, holding no state of their own. `ui/TextPage.qml` serves both pages —
-settings edits and saves, key bindings only shows — and the shortcuts it
-lists live as data in `ui/KeyBindings.js`, beside a note in `handleShortcut`
-saying the two are edited together.
+settings edits and saves, key bindings only shows. Application defaults live
+in `ui/KeyBindings.js`. `services/shortcuts/KeybindingRegistry.qml` resolves them
+with editing-tool defaults, plugin manifest bindings, and user overrides.
+Dispatch, command labels, tooltips, and keyboard help read the same result.
 
 **The host must not** know any backend, path format, credential or API. Every
 branch of the form `if (provider.id === "…")` is a design failure, and none
@@ -95,7 +97,7 @@ they emit `updated()`, `statusRequested()`, `noticeRequested()`,
 `viewRequested()`, `persistRequested()`, `noteChanged()`.
 
 The full contract, including every property, function and signal, lives in
-[`../providers/PROVIDERS.md`](../providers/PROVIDERS.md). It is the API other
+[`../docs/providers.md`](../docs/providers.md). It is the API other
 people write against: change it additively, never silently.
 
 ## Data model
@@ -194,3 +196,12 @@ shared temp directory (see [security.md](security.md)).
   marketplace treats ids as immutable.
 - Manifest `version` is bumped on every release and is what the marketplace
   displays.
+
+## Application extensions and appearance
+
+The workspace wires the settings store, declarative plugin catalog, command
+registry and theme services. Built-in provider implementations are packages
+under `plugins/`; shared provider lifecycle infrastructure stays under
+`services/providers/`. Full provider changes retain drain/commit semantics;
+appearance-only transactions do not lock or flush notes. See the public
+[theme](themes.md), [command](commands.md) and [package](plugins.md) contracts.

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "org.note-note.sticky",
+  "name": "Sticky Notes",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "contributes": {
+    "providers": [
+      {
+        "id": "sticky",
+        "path": "Provider.qml"
+      }
+    ]
+  }
+}

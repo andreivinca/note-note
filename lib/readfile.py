@@ -12,7 +12,7 @@ and preserves errors; best-effort listing/search prefixes use read_capped.
     python3 readfile.py --json <path> <capBytes>  # complete document or error
     python3 readfile.py <path> <capBytes>         # best-effort raw prefix
 
-Also imported by providers/local/list.py for every file the listing touches.
+Also imported by plugins/org.note-note.local/list.py for every file the listing touches.
 """
 import contextlib
 import json

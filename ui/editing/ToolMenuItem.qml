@@ -45,7 +45,7 @@ QQC.MenuItem {
       text: row.text
       textFormat: Text.PlainText
       font: row.font
-      color: row.highlighted ? Style.hoverStateColor(row.popupStyle.foreground, row.editor.accent) : row.popupStyle.foreground
+      color: row.highlighted ? Style.hoverStateColor(row.popupStyle.text, row.editor.accent) : row.popupStyle.text
       verticalAlignment: Text.AlignVCenter
       elide: Text.ElideRight
     }

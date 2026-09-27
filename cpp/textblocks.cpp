@@ -277,7 +277,19 @@ void TextBlocks::setDocument(QQuickTextDocument *document)
     if (document == m_document) {
         return;
     }
+    disconnect(m_contentConnection);
     m_document = document;
+    if (document) {
+        m_contentConnection = connect(document->textDocument(), &QTextDocument::contentsChange,
+                                     this, [this](int, int removed, int added) {
+            if (removed || added) {
+                ++m_contentRevision;
+                emit contentChanged();
+            }
+        });
+    }
+    ++m_contentRevision;
+    emit contentChanged();
     m_links->setDocument(document ? document->textDocument() : nullptr);
     // A depth carried across documents would end blocks the new
     // document never began.
@@ -472,9 +484,10 @@ void TextBlocks::normalizeLinks()
     TextLinks::normalizeAnchors(m_document ? m_document->textDocument() : nullptr);
 }
 
-void TextBlocks::configureLinks(const QColor &colour, bool plainText, const QColor &quoteInk, const QColor &highlightInk)
+void TextBlocks::configureLinks(const QColor &colour, bool plainText, const QColor &quoteInk, const QColor &highlightInk,
+                                const QColor &highlightBackground, const QColor &codeBackground, const QColor &codeForeground)
 {
-    m_links->configure(colour, plainText, quoteInk, highlightInk);
+    m_links->configure(colour, plainText, quoteInk, highlightInk, highlightBackground, codeBackground, codeForeground);
 }
 
 QString TextBlocks::linkAt(qreal x, qreal y) const

@@ -12,6 +12,11 @@ Item {
   readonly property string storageName: "omarchy"
   readonly property string configName: "omarchy/note-note"
   readonly property string accountConfig: "omarchy/note-note.json"
+  property bool extensionsReady: false
+  Loader {
+    source: "NativeExtensions.qml"
+    onLoaded: backend.extensionsReady = item.install(Qt.resolvedUrl("../../extensions"))
+  }
   // The native text inspector, when the user has built it (cpp/build.sh).
   readonly property url textInspectorUrl: Qt.resolvedUrl("TextInspector.qml")
   readonly property Component processComponent: Component {

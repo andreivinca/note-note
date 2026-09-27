@@ -191,7 +191,7 @@ applicable, provider support so its content survives saving and reloading.
 | `capability` | Provider capability required; defaults to `toolId`. All four table alteration tools require `table`. |
 | `checked` | Reactive pressed state for formatting buttons; false by default. |
 | `available` | Reactive context condition, such as `editor.inTable`. Controls both presentation and execution. |
-| `shortcutKey`, `shortcutModifiers` | Optional key (a letter or digit) and modifiers. Used for dispatch; the label the tooltip and help show (`shortcutLabel`, read-only) follows from them. |
+| `shortcutKey`, `shortcutModifiers` | Optional default key and modifiers. The central registry resolves conflicts and user overrides; `shortcutLabel` (read-only), tooltips, and help show its effective binding. |
 | `isMenu` | This entry opens a menu; automatically true when `options` are provided. |
 | `options` | Fixed executable `Tool` choices owned by this file, as in `Heading.qml`. They retain individual action IDs and capabilities but move together in the toolbar. Bind their `editor` and availability to the owning tool. |
 | `previewScale`, `previewBold` | Optional menu-label styling relative to the chrome text size, used by headings. |
@@ -214,13 +214,15 @@ editing and restores focus. Opening another action closes the previous panel.
 All form fields, validation and content generation stay in the tool file;
 adding another input tool requires no toolbar or main-app changes.
 
-The registry rejects duplicate IDs, conflicting shortcuts, invalid tool
+The tool registry rejects duplicate IDs and invalid tool
 definitions, exposing diagnostics through `editor.tools.errors`
-and the application log. Existing app shortcuts have priority over tool
+and the application log. Shortcut conflicts disable the binding while preserving
+the tool; the Key bindings page reports these conflicts. Existing app shortcuts have priority over tool
 definitions; undo, redo, cut, copy and select-all are also reserved. All
 built-in formatting shortcuts use the registry, so a
 provider restriction also prevents Qt's native formatting shortcut from
 executing. Navigation and clipboard shortcuts remain editor/app behavior.
+User overrides use `tool/<toolId>` in [Settings keybindings](commands.md#changing-bindings).
 
 ## Shared editor API
 
@@ -283,3 +285,8 @@ Lint changes with:
 ```bash
 qmllint -I /usr/share/omarchy/shell ui/editing/*.qml ui/tools/*.qml ui/NoteEditor.qml Workspace.qml hosts/omarchy/Notes.qml
 ```
+
+`Ctrl+Shift+P` is reserved for the global command palette and cannot be claimed
+by a tool. Global commands have their own lazy execution contract; see
+[commands](commands.md). Tool actions and their restricted editor API retain
+their existing owners.

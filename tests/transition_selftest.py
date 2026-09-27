@@ -20,7 +20,7 @@ def main():
         shutil.copytree(ROOT / "ui/tools", tool_ui / "tools")
         (tool_ui / "editing").symlink_to(ROOT / "ui/editing", target_is_directory=True)
         (tool_ui / "Dialect.js").symlink_to(ROOT / "ui/Dialect.js")
-        # Tool.qml (ui/editing) reads the shared key bindings beside its directory.
+        (work / "services").symlink_to(ROOT / "services", target_is_directory=True)
         (tool_ui / "KeyBindings.js").symlink_to(ROOT / "ui/KeyBindings.js")
         greeting = (ROOT / "tests/InsertGreeting.qml").read_text().replace('"../ui/editing"', '"../editing"')
         (tool_ui / "tools/InsertGreeting.qml").write_text(greeting)
@@ -31,11 +31,11 @@ def main():
             "DuplicateOne": 'toolId: "duplicate"; label: "First"',
             "DuplicateTwo": 'toolId: "duplicate"; label: "Second"',
             "ReservedShortcut": 'toolId: "reserved"; label: "Reserved"; shortcutKey: Qt.Key_N; '
-                                'shortcutModifiers: Qt.ControlModifier; shortcutLabel: "ctrl+n"',
+                                'shortcutModifiers: Qt.ControlModifier',
             "ReservedUndo": 'toolId: "undo"; label: "Undo"; shortcutKey: Qt.Key_Z; '
-                            'shortcutModifiers: Qt.ControlModifier; shortcutLabel: "ctrl+z"',
+                            'shortcutModifiers: Qt.ControlModifier',
             "MenuShortcut": 'toolId: "menuShortcut"; label: "Menu"; isMenu: true; '
-                            'shortcutKey: Qt.Key_G; shortcutLabel: "g"',
+                            'shortcutKey: Qt.Key_G',
             "Incomplete": 'label: "Incomplete"',
         }
         for name, properties in definitions.items():

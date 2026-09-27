@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "id": "org.note-note.appearance",
+  "name": "Appearance",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "contributes": {
+    "themes": [
+      {
+        "id": "system",
+        "name": "System",
+        "path": "themes/system.json"
+      },
+      {
+        "id": "paper",
+        "name": "Paper",
+        "path": "themes/paper.json"
+      },
+      {
+        "id": "newsprint",
+        "name": "Newsprint",
+        "path": "themes/newsprint.json"
+      },
+      {
+        "id": "nightfall",
+        "name": "Nightfall",
+        "path": "themes/nightfall.json"
+      }
+    ],
+    "commands": [
+      {
+        "id": "select-theme",
+        "title": "Color Theme",
+        "category": "Preferences",
+        "keywords": [
+          "theme",
+          "color",
+          "colour",
+          "appearance"
+        ],
+        "requires": [
+          "settingsClean"
+        ],
+        "handler": "commands/SelectTheme.qml"
+      }
+    ]
+  }
+}

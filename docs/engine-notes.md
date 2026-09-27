@@ -73,6 +73,14 @@ deadline (see [security.md](security.md)).
 
 ## `TextEdit` with `textFormat: RichText`
 
+**Display notifications are not edits.** `TextEdit.textChanged` can fire when
+selecting text or refreshing display formats without changing serialized HTML.
+`QTextDocument.revision()` also changes during a highlighter pass. The native
+helper's `contentRevision` instead follows `contentsChange` with a nonempty
+removed/added range, including format edits and undo. The editor uses that
+signal boundary to avoid scheduling saves for theme previews; the highlighter
+test and extension workflow also verify that subsequent real edits still save.
+
 The editor's document is HTML, converted at both ends by
 `services/markdown/qthtml/` (see [decisions.md](decisions.md) for why). What
 follows is Qt's actual behaviour, measured on 6.11 — the converter is written

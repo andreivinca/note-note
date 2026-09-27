@@ -3,7 +3,7 @@ import QtQuick.Controls
 
 // The smallest useful provider: one section, notes kept in memory, and a
 // setup screen of its own (a name) that it stores in its state. Copy it to
-// the active host's providers/hello/ directory to see it in the sidebar.
+// the shared user plugins/hello/ directory and enable org.example.hello.
 Item {
   id: root
 

@@ -7,6 +7,7 @@ import ".." as AppUi
 
 QQC.Menu {
   id: toolMenu
+  palette: ControlPalette {}
   required property var registry
   required property var tool
   required property Component submenuComponent

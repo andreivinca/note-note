@@ -10,6 +10,9 @@ are, and the mistakes that are expensive to repeat.
 | [Technical requirements](technical-requirements.md) | changing the architecture, adding a provider, touching the host |
 | [Standalone app and shared hosts](standalone.md) | building, installing or extending either launcher and its platform adapter |
 | [Flatpak](flatpak.md) | building or installing the standalone Linux bundle and configuring its sandbox |
+| [Themes](themes.md) | selecting colors, authoring JSON themes, and understanding System values |
+| [Commands](commands.md) | writing commands and using the generic picker |
+| [Application plugins](plugins.md) | installing packages, trust, provider migration, and removal |
 | [Editing tools](editing-tools.md) | adding a toolbar action, shortcut, menu or tool panel |
 | [Status bar](status-bar.md) | registering a status control or creating a custom one |
 | [Security rules](security.md) | writing any code that reads a file, spawns a process, or talks to a network — **and before every release** |
@@ -17,9 +20,10 @@ are, and the mistakes that are expensive to repeat.
 | [Testing](testing.md) | verifying a change without a keyboard and without touching real notes |
 | [Release process](release-process.md) | cutting a release or answering the marketplace |
 | [Decisions](decisions.md) | wondering "why wasn't this done the obvious way?" |
+| [Future: themes, commands, and plugins](future/themes-commands-plugins.md) | reviewing the roadmap and remaining release validation |
 
 The user-facing documentation is [`../README.md`](../README.md); the provider
-contract is [`../providers/PROVIDERS.md`](../providers/PROVIDERS.md).
+contract is [`../docs/providers.md`](../docs/providers.md).
 
 ## The short version
 

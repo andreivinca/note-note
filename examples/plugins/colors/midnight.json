@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "midnight",
+  "name": "Midnight",
+  "appearance": "dark",
+  "colors": {
+    "surface.background": "#181A20",
+    "text.primary": "#E6EAF0",
+    "accent.primary": "#89B4FA",
+    "selection.background": "#384866",
+    "selection.foreground": "#FFFFFF",
+    "tab.activeBackground": "#384866",
+    "tab.activeForeground": "#FFFFFF",
+    "editor.highlightBackground": "#635526",
+    "editor.highlightForeground": "#FFF2BB"
+  }
+}

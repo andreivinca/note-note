@@ -53,7 +53,7 @@ GRAPH = "https://graph.microsoft.com/v1.0"
 
 class GraphError(Exception):
     """A request or a sign-in that could not be answered. `kind` is what the
-    host's queue reads (providers/PROVIDERS.md): "transient" re-runs the job
+    host's queue reads (docs/providers.md): "transient" re-runs the job
     on its own, none shows the message as it stands. A throttle is not one
     of these — it is `ratelimit.Throttled`, and parks the lane."""
 
@@ -67,7 +67,7 @@ class Settings:
     """What the script that imports this says about itself (`configure`).
 
     The pacing: sticky.py and onenote.py each name their own key, so a
-    throttle on one never parks the other (providers/PROVIDERS.md, the
+    throttle on one never parks the other (docs/providers.md, the
     rate-key table); left unset, nothing is paced at all, which is what an
     unaware caller gets. The scopes: each provider asks for its own, the
     required ones on every refresh and the optional ones only once granted.

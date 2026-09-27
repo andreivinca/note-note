@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "org.example.greeting",
+  "name": "Greeting example",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "contributes": {
+    "commands": [{
+      "id": "greet",
+      "title": "Choose a greeting",
+      "category": "Example",
+      "keywords": ["hello"],
+      "handler": "Greeting.qml"
+    }],
+    "keybindings": [{ "command": "greet", "key": "Ctrl+Alt+G", "context": "notes" }]
+  }
+}

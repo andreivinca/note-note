@@ -51,13 +51,13 @@ install(FILES Workspace.qml LICENSE NOTICE.md DESTINATION ${CMAKE_INSTALL_DATADI
 # vendored. A source file, a test or a build product in these trees is not
 # a runtime file and stays out by that alone; the two directory excludes are
 # for generated trees whose contents would otherwise match.
-install(DIRECTORY assets design ui providers services lib
+install(DIRECTORY assets design ui plugins extensions services lib
     DESTINATION ${CMAKE_INSTALL_DATADIR}/note-note
     FILES_MATCHING
     PATTERN "__pycache__" EXCLUDE
     PATTERN "graphify-out" EXCLUDE
     PATTERN "*selftest*" EXCLUDE
-    PATTERN "*.qml" PATTERN "*.js" PATTERN "*.py" PATTERN "qmldir"
+    PATTERN "*.qml" PATTERN "*.js" PATTERN "*.py" PATTERN "*.json" PATTERN "qmldir"
     PATTERN "*.svg" PATTERN "*.ttf" PATTERN "*.otf"
     PATTERN "*.md" PATTERN "LICENSE*" PATTERN "COPYING*")
 install(FILES hosts/standalone/Main.qml hosts/standalone/Backend.qml hosts/standalone/TextInspector.qml
@@ -70,6 +70,12 @@ if(BUILD_TESTING)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     find_package(Qt6 6.8 REQUIRED COMPONENTS Test)
     find_program(DBUS_RUN_SESSION dbus-run-session REQUIRED)
+    add_executable(document-theme-test tests/document_theme_test.cpp cpp/textlinks.cpp cpp/textlinks.h)
+    target_link_libraries(document-theme-test PRIVATE Qt6::Test Qt6::Gui)
+    add_test(NAME document-theme COMMAND document-theme-test)
+    set_tests_properties(document-theme PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QPA_PLATFORMTHEME=generic")
+    add_test(NAME settings COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/services/settings/selftest.py)
+    add_test(NAME extensions COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/services/extensions/selftest.py)
     add_executable(theme-test tests/theme_test.cpp)
     target_link_libraries(theme-test PRIVATE Qt6::Test note-note-theme)
     add_test(NAME theme COMMAND ${DBUS_RUN_SESSION} -- $<TARGET_FILE:theme-test>)
@@ -88,6 +94,10 @@ if(BUILD_TESTING)
         --harness $<TARGET_FILE:note-note-harness>)
     add_test(NAME native-transitions COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/transition_selftest.py --standalone)
+    add_test(NAME native-extensions COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/extensions_selftest.py)
+    set_tests_properties(native-extensions PROPERTIES
+        ENVIRONMENT "NOTE_NOTE_HARNESS=$<TARGET_FILE:note-note-harness>" TIMEOUT 120)
     set_tests_properties(native-transitions PROPERTIES
         ENVIRONMENT "NOTE_NOTE_HARNESS=$<TARGET_FILE:note-note-harness>" TIMEOUT 240)
 endif()

@@ -162,5 +162,5 @@ phone's save. Recovery snapshots contain the local and observed remote inputs;
 they cannot recover a remote edit that the API never returned to this client.
 
 Run `python3 lib/notemerge/selftest.py` and
-`python3 providers/onenote/merge_selftest.py` for synthetic merge, recovery,
+`python3 plugins/org.note-note.onenote/merge_selftest.py` for synthetic merge, recovery,
 concurrency and provider integration checks.

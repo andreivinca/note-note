@@ -1007,9 +1007,31 @@ Window {
     selectText("word")
     keys.keyClick(Qt.Key_G, Qt.ControlModifier | Qt.ShiftModifier)
     require(read() === "Hello\n", "new file did not get its shortcut")
-    require(editor.tools.shortcutActions.some(function(action) {
-      return action.label === "ctrl+shift+g" && action.description === "Insert greeting"
-    }), "new shortcut was missing from help")
+    require(editor.keybindings.helpText.indexOf("ctrl+shift+g   Insert greeting") >= 0,
+            "new shortcut was missing from help")
+  }
+
+  function toolRebinding() {
+    load({ source: "word\n" })
+    selectText("word")
+    editor.keybindings.overrides = [{ command: "tool/bold", keys: ["Ctrl+Alt+B"] }]
+    try {
+      require(editor.tools.find("bold").shortcutLabel === "ctrl+alt+b", "tooltip did not follow override")
+      keys.keyClick(Qt.Key_B, Qt.ControlModifier)
+      require(read() === "word\n", "old binding still formatted text")
+      keys.keyClick(Qt.Key_B, Qt.ControlModifier | Qt.AltModifier)
+      require(read() === "**word**\n", "new tool binding did not execute")
+      editor.undo()
+      editor.keybindings.overrides = [{ command: "tool/bold", keys: [] }]
+      selectText("word")
+      keys.keyClick(Qt.Key_B, Qt.ControlModifier)
+      require(read() === "word\n", "unbound key still formatted text")
+      require(editor.tools.find("bold").shortcutLabel === "", "unbound tooltip still displayed a shortcut")
+      require(editor.tool("bold"), "unbinding must leave the toolbar action available")
+      require(read() === "**word**\n", "unbound action did not execute from toolbar")
+    } finally {
+      editor.keybindings.overrides = []
+    }
   }
 
   function toolLinkPanel() {
@@ -1049,12 +1071,13 @@ Window {
     try {
       editor.toolDirectory = Platform.env("NOTE_NOTE_TEST_INVALID_TOOLS")
       keys.tryVerify(function() { return editor.tools.find("okay") !== null }, 3000)
-      require(editor.tools.ready && editor.tools.tools.length === 1,
+      require(editor.tools.ready && editor.tools.tools.length === 3,
               "invalid definitions prevented a valid tool from loading")
-      require(editor.tools.errors.length === 6, "invalid tool diagnostics were incomplete: " + editor.tools.errors)
+      require(editor.tools.errors.length === 4, "invalid tool diagnostics were incomplete: " + editor.tools.errors)
       require(editor.tools.find("duplicate") === null, "a duplicate id won by discovery order")
-      require(editor.tools.find("reserved") === null, "a tool took an app shortcut")
-      require(editor.tools.find("undo") === null, "a tool took the editor's undo shortcut")
+      require(editor.tools.find("reserved").shortcutLabel === "", "a tool took an app shortcut")
+      require(editor.tools.find("undo").shortcutLabel === "", "a tool took the editor's undo shortcut")
+      require(editor.keybindings.diagnostics.length === 2, "shortcut conflicts were not reported")
       require(editor.tools.find("menuShortcut") === null, "a dropdown took an executable shortcut")
     } finally {
       editor.toolDirectory = original
@@ -1682,6 +1705,7 @@ Window {
       { name: "text color palette applies, resets, saves, undoes and rejects stale contexts", run: textColorTool },
       { name: "tools enforce provider and document permissions on every entry point", run: toolPermissions },
       { name: "one added file supplies its action, toolbar button, shortcut and help", run: toolDiscovery },
+      { name: "tool rebinding updates keys and labels and unbinding preserves toolbar actions", run: toolRebinding },
       { name: "tool-owned link panel preserves context and undo", run: toolLinkPanel },
       { name: "invalid tools are isolated and cannot take app shortcuts", run: toolRegistryValidation },
       { name: "one heading dropdown previews and applies all four styles and respects provider and list restrictions", run: toolMenuAndTyping },

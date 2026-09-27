@@ -6,6 +6,7 @@ import "../../design" as Design
 // The desktop executable as the workspace's host: QProcess, storage under
 // the application's own directories, and the clipboard through QClipboard.
 Item {
+  readonly property bool extensionsReady: true
   id: backend
   readonly property string storageName: "notenote"
   readonly property string configName: "notenote"

@@ -1,0 +1,4 @@
+[
+  { "id": "hello", "label": "Hello!", "detail": "English" },
+  { "id": "salut", "label": "Salut!", "detail": "Romanian" }
+]

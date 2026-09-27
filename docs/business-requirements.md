@@ -83,6 +83,6 @@ community marketplace at <https://omarchyplugins.com>.
 - A note edited elsewhere (phone, file manager, another app) shows up while
   the window is open, without a manual refresh.
 - A new provider can be written against
-  [`PROVIDERS.md`](../providers/PROVIDERS.md) without reading the host's code.
+  [`PROVIDERS.md`](../docs/providers.md) without reading the host's code.
 - The marketplace listing stays approved: every review finding is fixed *and*
   written down in [security.md](security.md) so it does not come back.

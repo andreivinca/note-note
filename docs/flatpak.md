@@ -142,3 +142,10 @@ Flatpak launches. It does not use your notebooks or account tokens.
 See Flatpak's official documentation for [Qt runtimes](https://docs.flatpak.org/en/latest/qt.html),
 [single-file bundles](https://docs.flatpak.org/en/latest/single-file-bundles.html)
 and [sandbox permissions](https://docs.flatpak.org/en/latest/sandbox-permissions.html).
+
+## Application themes and plugins
+
+The CMake install includes theme JSON, plugin manifests and the public extension
+module. User themes/packages use Flatpak's app-scoped XDG config directory; no
+additional filesystem permissions are granted. Executable plugins share the
+app sandbox and must be explicitly enabled before restart.

@@ -6,6 +6,7 @@ import "statusbar" as Status
 Item {
   id: root
 
+  property var keybindings: null
   property string sourceName: ""
   property url sourceLogo: ""
   property color sourceInk: Color.menu.text
@@ -86,7 +87,8 @@ Item {
           objectName: "sidebarToggle"
           style: statusStyle
           iconText: root.listCollapsed ? "󰅂" : "󰅁"
-          tooltipText: root.listCollapsed ? "Show sidebar (ctrl+e)" : "Hide sidebar (ctrl+e)"
+          tooltipText: (root.listCollapsed ? "Show sidebar" : "Hide sidebar")
+            + (root.keybindings ? root.keybindings.hint("app/toggleList") : "")
           Accessible.name: root.listCollapsed ? "Show sidebar" : "Hide sidebar"
           onClicked: root.listToggled()
         }

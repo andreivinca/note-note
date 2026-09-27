@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "org.note-note.local",
+  "name": "Local notes",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "contributes": {
+    "providers": [
+      {
+        "id": "local",
+        "path": "Provider.qml"
+      }
+    ]
+  }
+}

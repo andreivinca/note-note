@@ -7,23 +7,41 @@ QtObject {
   // chooses desktop sources before falling back to application colors.
   property var source: null
   property var systemTheme: null
+  property var theme: null
   readonly property var resolved: systemTheme ? systemTheme.colors : null
   property SystemPalette system: SystemPalette {
     colorGroup: SystemPalette.Active
   }
-  readonly property color background: source ? source.menu.background : resolved ? resolved.background : system.window
-  readonly property color foreground: source ? source.menu.text : resolved ? resolved.foreground : system.windowText
-  readonly property color accent: source ? source.accent : resolved ? resolved.accent : system.highlight
-  readonly property color urgent: source ? source.urgent : resolved ? resolved.urgent : "#d34747"
+  readonly property var raw: {
+    if (source) {
+      return { background: source.menu.background, foreground: source.menu.text,
+        accent: source.accent, urgent: source.urgent, border: source.menu.border,
+        scrim: source.menu.scrim, selectedBackground: source.menu.selectedBackground,
+        selectedText: source.menu.selectedText, popupText: source.popups.text }
+    }
+    if (resolved) {
+      return resolved
+    }
+    return { background: system.window, foreground: system.windowText, accent: system.highlight,
+      urgent: "#d34747", border: Util.alpha(system.windowText, 0.25), scrim: "#99000000",
+      selectedBackground: Util.alpha(system.highlight, 0.2), selectedText: system.highlight }
+  }
+  function token(name, fallback) {
+    return theme && theme.colors[name] !== undefined ? theme.colors[name] : fallback
+  }
+  readonly property color background: token("surface.background", raw.background)
+  readonly property color foreground: token("text.primary", raw.foreground)
+  readonly property color accent: token("accent.primary", raw.accent)
+  readonly property color urgent: token("status.error", raw.urgent)
   readonly property QtObject menu: QtObject {
     readonly property color background: colors.background
     readonly property color text: colors.foreground
-    readonly property color border: colors.source ? colors.source.menu.border : colors.resolved ? colors.resolved.border : Util.alpha(text, 0.25)
-    readonly property color scrim: colors.source ? colors.source.menu.scrim : colors.resolved ? colors.resolved.scrim : "#99000000"
-    readonly property color selectedBackground: colors.source ? colors.source.menu.selectedBackground : colors.resolved ? colors.resolved.selectedBackground : Util.alpha(colors.accent, 0.2)
-    readonly property color selectedText: colors.source ? colors.source.menu.selectedText : colors.resolved ? colors.resolved.selectedText : colors.accent
+    readonly property color border: colors.token("border.default", colors.raw.border)
+    readonly property color scrim: colors.token("overlay.scrim", colors.raw.scrim)
+    readonly property color selectedBackground: colors.token("selection.background", colors.raw.selectedBackground)
+    readonly property color selectedText: colors.token("selection.foreground", colors.raw.selectedText)
   }
   readonly property QtObject popups: QtObject {
-    readonly property color text: colors.source ? colors.source.popups.text : colors.resolved ? colors.resolved.popupText : colors.foreground
+    readonly property color text: colors.token("popup.foreground", colors.raw.popupText || colors.foreground)
   }
 }

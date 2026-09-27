@@ -11,7 +11,7 @@ import tempfile
 from xml.etree import ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
-PLUGIN_ROOTS = {"assets", "cpp", "design", "lib", "providers", "services", "ui"}
+PLUGIN_ROOTS = {"assets", "cpp", "design", "extensions", "lib", "plugins", "services", "ui"}
 PLUGIN_FILES = {"manifest.json", "Workspace.qml", "LICENSE", "NOTICE.md"}
 
 
@@ -23,8 +23,9 @@ def output(command):
     return run(command, capture_output=True, text=True).stdout.strip()
 
 
-def tracked_files():
-    return [Path(name) for name in output(["git", "ls-files", "-z"]).split("\0") if name]
+def source_files():
+    names = output(["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"]).split("\0")
+    return sorted({Path(name) for name in names if name and (ROOT / name).is_file()})
 
 
 def plugin_file(path):
@@ -79,7 +80,7 @@ def main():
     plugin_name = f"note-note-{version}-omarchy"
     metadata.update({
         "commit": commit,
-        "working_tree_modified": bool(output(["git", "diff", "HEAD", "--name-only"])),
+        "working_tree_modified": bool(output(["git", "status", "--porcelain"])),
     })
     with tempfile.TemporaryDirectory(prefix="package-", dir=destination) as temporary:
         stage = Path(temporary)
@@ -102,7 +103,7 @@ def main():
              "--resources", str(native / "share/note-note"), "--harness", str(build / "note-note-harness")],
             env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
         plugin = stage / plugin_name
-        for path in tracked_files():
+        for path in source_files():
             if plugin_file(path):
                 target = plugin / path
                 target.parent.mkdir(parents=True, exist_ok=True)
@@ -114,10 +115,10 @@ def main():
             f"Place this directory at `~/.config/omarchy/plugins/{manifest['id']}`\n"
             f"and enable it with `omarchy plugin enable {manifest['id']}`.\n\n"
             "The archive contains the shared application and Omarchy host, without\n"
-            "a standalone executable. To enable the optional native text inspector,\n"
+            "a standalone executable. Commands and custom themes need the native helper.\n"
             "run `sh cpp/build.sh` inside the plugin directory using your system Qt\n"
             "development packages, then restart the shell. The editor has a script\n"
-            "fallback when the module is not built.\n\n"
+            "fallback with System colors when the module is not built.\n\n"
             "For managed updates, install from the Git repository instead of this archive.\n")
         run(["omarchy", "plugin", "validate", str(plugin)])
         artifacts = []

@@ -1,0 +1,553 @@
+# Note Note providers
+
+A provider is a QML `Item` (file `Provider.qml`) that supplies one or more
+sidebar sections and the notes in them. Built-ins live in self-contained
+`plugins/org.note-note.<id>/` packages; new external providers use
+`~/.config/notenote/plugins/<package>/` and a `plugin.json` manifest.
+See [plugin installation, enable policy and legacy migration](plugins.md).
+The legacy host-specific provider directories remain supported for the 1.x
+compatibility window. All paths respect `XDG_CONFIG_HOME`.
+The workspace instantiates each with `host` and `services` set, and
+right after creation assigns any settings from the provider's entry in the
+host's config (see "Settings from the host's config").
+
+## Portable host services
+
+The provider contract works in both hosts. For portable setup views, import
+standard `QtQuick` and `QtQuick.Controls`, as `examples/hello/Provider.qml`
+does. A provider that imports `Quickshell` or `qs.*` directly requires Omarchy.
+
+The following injected services are available in addition to requests and
+Microsoft accounts:
+
+| Service | Contract |
+|---|---|
+| `services.platform` | `env(name)`, `copyText(text)`, `openUrl(url)`, `localPath(url)`, `fileUrl(path)`; `configDir`, `stateDir`, `cacheDir`, `pasteDir`, `providersDir` and `environment` |
+| `services.style`, `services.colors` | Shared theme dimensions and colors, using the active host's palette |
+| `services.processes.create(owner)` | Creates an owned process runner; `run(options, callback)` returns an idempotent `cancel()` handle |
+
+Process options include `command` (argv), `environment`, optional stdin
+`payload`, `timeoutMs` (default 30 seconds), `maxOutputBytes` (default 32 MiB)
+and `raw` (return `{text}` instead of decoding a JSON object). The callback
+settles once on success, failure, timeout or cancellation. Use the request
+queue for remote jobs as before. Every runner supplies the active host's
+storage environment to its scripts. Resolve paths from those services;
+do not hardcode an Omarchy cache directory in a portable provider.
+
+The existing paths shown later in this document are plugin defaults. See
+[the complete storage map](standalone.md#storage) for native paths
+and manual script environment overrides.
+
+## Properties the host reads
+
+| property            | type   | meaning |
+|---------------------|--------|---------|
+| `id`                | string | unique, lowercase; every note path starts with `id + ":"` |
+| `name`              | string | the provider's display name: the header titles it (with `logo`) while one of its tabs is open, and status messages start with it |
+| `markdown`          | bool   | bodies are Markdown (rendered); false = plain text |
+| `hasTitle`          | bool   | notes have a separate editable title; false also uses normal text weight for the first-line label in the list and search results |
+| `canCreate`         | bool   | `create()` is supported |
+| `canDelete`         | bool   | `remove()` is supported |
+| `canReorder`        | bool   | rows may be dragged within a section; `setOrder()` persists |
+| `canCreateSection`  | bool   | `createSection()` is supported; the provider supplies its creation action in `footerActions` |
+| `canImages`         | bool   | a pasted picture can be stored: the editor writes it into the note as `![](file:///…)` and `save()` must carry it to the backend. False (the default) makes ctrl+v say so rather than swallow the paste. An image may carry a display width the author set with the editor's corner handle, written as `![alt](src){width=N}` — a provider stores it with the image if the backend can, and must at least round-trip the marker |
+| `tools`             | list   | optional: formatting-toolbar tool ids the backend can store — every `toolId` under `ui/tools/` (`bold italic underline strikeout highlight textColor code h1 h2 h3 p ul ol todo indent outdent quote codeblock rule link currentMonth nextMonth customMonth`), plus `table` for the table tools; omitted = all (when `markdown`), `[]` = no toolbar. State it: a construct the backend flattens must not be offered, and a save holding one must fail rather than lose it |
+| `microsoftScopes`   | list   | Graph scopes the provider asks for when it creates its own Microsoft account |
+| `microsoftClientId` | string | the provider's own Microsoft app registration — the application (client) id of an Entra public client that allows personal and work accounts — that its Microsoft account signs in through. Every provider brings its own; none is shared |
+| `logo`              | url    | optional: a mark shown at the head of every one of this provider's tabs, and beside the header title while one of them is open |
+| `sections`          | list   | `[{ key, name, rows, color?, count?, notes?, footerActions? }]` — one binder tab each; `count` overrides the tab's note count. `notes` (`[{ path, title, preview }]`) is every note the section holds, for search: give it when `rows` can hide notes (a folded tree); left out, the note rows are taken to be all of them |
+| `footerActions`     | list   | optional actions available before any tabs exist, such as creating the first notebook; otherwise each section supplies its own footer |
+
+`name` labels a horizontal notebook tab and is elided when long. The tab uses
+`logo` when supplied; tabs without a logo show text alone. Chrome and
+selection fills follow Omarchy’s theme. `color` remains accepted as provider
+metadata for existing integrations.
+
+The editor discovers its tools from `ui/tools/`; see the
+[editing-tool contract](editing-tools.md) to add one. The `tools`
+capabilities govern toolbar buttons, menu entries, shortcuts and IPC actions.
+Table row/column actions and `currentMonth` share the `table` capability;
+providers that support tables automatically support calendar insertion.
+Nested tables use semantic HTML table blocks within the Markdown body, with
+block content in their cells. The common Markdown parser exposes these as
+table tokens whose cells have `attrs.block: true`; their children are block
+tokens rather than inline runs. OneNote renders and reads those cells
+recursively; the local provider stores the Markdown unchanged.
+
+`logo` is an image the provider ships beside its own `Provider.qml` —
+`Qt.resolvedUrl("logo.svg")`. SVG and raster both load; it is drawn at icon size
+and shown exactly as given, so a provider that has a mark has already decided
+what it looks like (which means it should read on a dark theme and a light one).
+Leave it out and the tab simply has no mark, which is what the local notebooks
+do — a folder is not a brand.
+
+`collapsedByDefault` is ignored since 2.8: the sidebar shows one section at a
+time and which one is open is the user's, kept between runs. Passing it is
+harmless.
+
+A row is `{ kind, path, title, preview, icon, level, expanded, fixed, version, modified }` with
+`kind` one of `note`, `new` (path = create target), `action` (path = action
+id), `tree` (path = tree id, `expanded`).
+
+Action and tree ids are plain strings and several providers use the same ones
+(`login`, `logout`, `refresh`): the host resolves a click against the open
+tab first, so a shared name never reaches another provider's row.
+
+`footerActions` supplies **every** button pinned to the bottom of the sidebar,
+in display order. Each descriptor is `{ path, title, icon?, inputPlaceholder?, shortcut? }`.
+The app renders all of them with one shared, full-width row component, stacked
+vertically with identical height, padding, hover fill, radius and icon styling.
+It does not add creation buttons based on provider identity or capabilities.
+Keep footer actions out of `rows`: they do not scroll, contribute to note
+counts, or become search matches. They remain available during search.
+
+A click calls the owning provider's `action(path, value, sectionKey)`, where
+`value` is normally `""` and `sectionKey` is the provider's own section key.
+When `inputPlaceholder` is supplied, the same row collects text first: Enter
+submits a nonempty trimmed value, and Escape cancels. No special notebook
+input exists in the host. Action ids need only be unique within the section;
+the host carries ownership explicitly, so another provider's identical id
+cannot receive the click. Existing `action(path)` handlers can ignore the
+additional arguments.
+
+The optional `shortcut` names a shared keyboard action, currently `newNote`
+or `newNotebook`, connecting Ctrl+N or Ctrl+Shift+N to that same footer row.
+Creation handlers can call `host.newNote(id, target)` or
+`host.newNotebook(value, id)` to use the common save, creation and selection
+flow. Providers choose their own target and when to offer each action.
+For example:
+
+```qml
+footerActions: [
+  { path: "add", title: "New Note", icon: "󰐕", shortcut: "newNote" },
+  { path: "collection", title: "New notebook", icon: "󰉗",
+    inputPlaceholder: "Notebook name", shortcut: "newNotebook" }
+]
+```
+
+Local supplies New Note and New notebook. OneNote supplies New section and
+account actions; its New Note rows appear only inside sections. In a combined
+OneNote tab, each notebook's New section action names its destination.
+Sticky Notes supplies New Note and account actions. An external provider uses
+the same contract.
+
+`version` (optional) is an opaque change marker for a note — a file mtime,
+a `lastModifiedDateTime`, an etag. The host compares it with the `version`
+returned by `load()`: when a listing shows a newer version for the note that
+is open (and it has no unsaved edits), the host reloads it.
+
+`modified` (optional) is an ISO 8601 timestamp with timezone or milliseconds
+since the Unix epoch. It supplies the note preview’s date and the editor’s
+modification caption. Lists keep the provider’s note order, and tree rows
+retain their original hierarchy. Supply `modified` in `notes` as well as `rows`
+when publishing a separate search inventory. It is display metadata, independent
+of the opaque `version` used for change detection.
+
+## Settings from the host's config
+
+The host keeps one entry per provider in its own config file
+(`~/.config/notenote/config.json`, described in the README). A provider
+declares its settings in `settings`, a list of property names; each
+property's initial value is the default. Right after creating a provider
+the host records those defaults and writes any the entry lacks into it, so
+the file shows every setting that applies with the value it has, and then
+assigns every declared setting the entry holds — verbatim, the provider
+interprets its own values. `enabled` is never assigned (whether the
+instance exists is what it means), and a key the provider does not declare
+is not its business. External providers get the same: declare the setting,
+and its default appears in the user's config. When an entry changes, the
+provider is destroyed and recreated with the new values, so a live one
+never watches for them — except for the settings it names in
+`liveSettings`, a presentation it can change in place: those are assigned
+to the running instance and `rebuild()` is called.
+
+| key | type | meaning |
+|---|---|---|
+| `notebookTabs` | bool | true: build `sections` with one entry per notebook, a binder tab each, the way the local folders show; false: fold them into a single section as `tree` rows. Declare it only when your notes have notebooks to spread — Sticky Notes and Notion do not. The local provider defaults it true, OneNote false |
+| `notesDir` | string | the local provider's root directory; `~` is the provider's to expand |
+
+## Functions
+
+- `refresh()` — (re)load; emit `changed` when `sections` are ready.
+- `load(path, cb)` → `cb({ title, body, editable, reason, error, base, view, recovered, conflict })`
+  `reason` says, in the user's words, why `editable` is false — a note cut at
+  a size limit, a page holding what the backend cannot write back. The host
+  shows it once when the note opens. A read-only note without one opens in
+  silence, so give one.
+  `view` (optional) is an opaque editing baseline. The host accepts it with
+  the displayed document and passes it back in `save` options. A provider
+  must not infer the active editor's baseline from its body cache or from a
+  load callback that the host may have discarded.
+  `recovered: true` means this is an unsaved recovery draft. The host keeps
+  it marked unsaved and shows the common conflict view if `conflict` exists.
+  May return a handle `{ cancel() }` — `services.requests`' `enqueue()` hands
+  you one. The host cancels the load of a note the user has already stepped
+  past (Ctrl+↑/↓ through a slow provider), so the note they stopped on is not
+  stuck queueing behind every note they crossed. Cancelling withdraws only a
+  read that has not started; one in flight is delivered normally. Answer the
+  withdrawn `cb` too (the queue's cancelled answer counts): every load is
+  answered exactly once. Return nothing when the answer is immediate.
+  `base` (optional) is the note's own directory, for a provider whose notes
+  name their images by a relative path (the local provider's `.assets/`):
+  the editor resolves the links against it and the converter measures the
+  files through it. Leave it out when every image is an absolute file:// URL.
+- `save(path, title, body, cb, options)` → `cb({ error, warning, conflict })`
+  `options` is optional; `view` identifies the captured document's baseline,
+  and `resolution` carries explicit choices from the conflict view.
+  A merge-aware provider returns `{error, conflict}` when a
+  save needs review and must validate the choices against a fresh remote read.
+  The shared [Python merge library](../lib/notemerge/README.md) implements the
+  algorithm, conflict protocol, editing baselines and private recovery storage.
+  Providers own format conversion, account identity and conditional writes.
+  The OneNote provider is the first integration. Existing providers can ignore
+  `options` and retain their four-argument function.
+  Call `cb` exactly once, always. A save superseded by a newer one answers
+  `{}`: the newer save contains this one's intent and answers for it. A save
+  you could not send at all — your lane emptied by a sign-out, your provider
+  being turned off — answers `{ error }`: nobody else will write that text,
+  and the host marks the note unsaved and says so rather than showing it as
+  saved (see `unsentSave` in `services/providers/LaneProvider.qml`, the base
+  the built-in request-lane providers extend). The host
+  counts saves in flight per note, and a save that is never answered is one
+  that looks unfinished for ever.
+  Change your own model when the backend has changed, not before: the host
+  keeps the draft of a save in flight and shows it if the note is reopened
+  meanwhile, so nothing waits on your model — while a model that moves
+  first serves a failed save's text as the stored note and shows a failed
+  delete as done. The local provider commits after the file is written;
+  Sticky Notes and Notion after Graph or Notion has answered.
+  A `body` from a provider with `canImages` may contain `![alt](file:///…)`
+  pointing either at a file the provider itself cached on `load()` (the same
+  picture, already on the backend) or at a freshly pasted file staged in
+  `~/.cache/omarchy/note-note-paste/` (a picture to upload). Telling the two
+  apart is the provider's job — see `plugins/org.note-note.onenote/onenote.py`, which
+  keeps an index of what it cached and hands unchanged pictures back to the
+  backend by reference rather than uploading them again, and
+  `plugins/org.note-note.local/images.py`, which copies staged pastes into `.assets/`
+  beside the note and makes the links relative.
+- `noteEdited(path)` (optional) — the open note has just been changed, and
+  the change is not written yet. **When it gets written is yours to decide.**
+  The host says only that it happened; keep whatever schedule your backend
+  wants — a short pause for a local file, a longer one for a note that costs a
+  request, a longer one still while your lane is cooling, or nothing at all
+  until something you are waiting for arrives — and emit `saveRequested(path)`
+  when you want the write. It is called on every edit, so debouncing is the
+  usual shape and the one every built-in provider takes: see the
+  `saveRequested` signal, `noteEdited` and the `Timer` beside them in
+  `services/providers/LaneProvider.qml` (the local provider has its own,
+  with a shorter pause, near the top of its `Provider.qml`).
+  Implement neither this nor `saveRequested` and your notes are written on the
+  host's own default pause (1500 ms), so a provider that does not care about
+  the question still autosaves.
+- `noteOpened(path)` (optional) — the user chose that note; it is now the one
+  on screen. The host keeps its own record of the note last chosen in each
+  tab and needs nothing from you for it; take this only when the tab is not
+  the unit you want to answer by. OneNote does, because its `notebookTabs`
+  setting turns one tab holding every notebook into a tab each and back, so
+  it remembers per notebook instead, keeps that in its `saveState()` and
+  emits `persistRequested()` when it moves. Notes the app put on screen
+  without the user choosing them — a search landing on its first hit — are
+  not reported here.
+- `defaultNote(key)` (optional) → the path a tab should open with, or `""`
+  for none. `key` is the section's own key, the one you gave it in
+  `sections` — the same shape `setOrder` receives, never the host's composite
+  tab key. Asked when that tab becomes the open one — on a switch and at
+  startup — and asked again on every rebuild until it can be answered, so a
+  note whose row has not listed yet is opened when it arrives rather than
+  lost. Answer `""` and the tab opens empty; the host never falls back to
+  picking a note of its own. Implement neither this nor `noteOpened` and your
+  tabs open on the note last chosen in them, which is what the host remembers
+  for everyone (a provider that implements `defaultNote` is not remembered by
+  the host as well: the entry would never be read).
+- `create(target, cb)` → `cb({ path, error })`
+- `remove(path, cb)` → `cb({ error })`. A delete the lane never sent — cancelled
+  by a sign-out or the provider going — answers `{ error }` like an unsent
+  save: nothing removed the note, and `{}` would show it as gone.
+- `createSection(name, cb)` → `cb({ key, target, error })`. `key` is the new
+  section's key; the host opens it as the active tab. `target` is optional — the
+  create target for a first note in it (the same string your `new` row carries),
+  and the host makes that note when you give one. Have the section listed before
+  you call back, or the tab it opens will be empty.
+- `action(id, value, sectionKey)` — footer actions include input and section
+  context; inline actions supply only the id. Extra arguments can be ignored.
+- `toggleTree(id)`
+- `revealPath(path)` (optional) — unfold whatever tree state hides this
+  note's row, and rebuild, so the row exists on screen. The host calls it
+  when a search ends on a note, then scrolls to the row; a provider whose
+  rows never fold simply leaves it out.
+- `search(query, cb)` (optional) — content search: call back with
+  `{ paths: [...] }`, the paths of notes whose *body* contains `query`,
+  case-insensitively. The host matches titles and previews itself on every
+  keystroke; once the typing pauses it asks this for what only the backend
+  can see, and folds the answer into the same result set (rows, tab hit
+  counts). Whether bodies are searched at all is the host's decision, made
+  by asking or not asking — a provider is never called just to say no.
+  Call `cb` exactly once per call, an empty list included: the host shows
+  a "searching…" state until every asked provider has answered. Best-effort
+  by design: answer with what the backend can — an empty list when it
+  cannot — and the host says nothing either way, since title matching has
+  already answered something. Paths not in the current `sections` are
+  ignored, and a reply to text no longer in the field is discarded, so a
+  slow answer is always safe. Leave it out and the provider's notes are
+  searched by title and preview alone (Notion does: its public API searches
+  titles only, and fetching every page's blocks per keystroke is not a
+  search).
+- `searchChanged()` (optional signal) — searchable content or its coverage
+  changed. The host updates the coverage and, if a query is open, coalesces
+  another `search()` call to this provider. Each call still gets exactly one
+  callback. An older answer to the same query cannot replace the newer one.
+- `searchStatus(sectionKey)` (optional) — a short coverage/status string for
+  the current provider section, or `""` when no notice is needed. The host
+  displays it below the result count. Incomplete coverage keeps an empty
+  result from appearing to be a complete content search. OneNote reports
+  initial indexing, refreshes, unavailable pages and pauses here.
+- `setOrder(sectionKey, paths)`
+- `crumb(path)` → string for the editor's description line
+- `storageLabel(path)` (optional) → status-bar storage location, such as a
+  local filename; omitted means no storage label. Save state is shown separately.
+- `createTargetFor(path)` → target for Ctrl+N while `path` is open, or ""
+- `restoreState(obj)`, `saveState()` → obj (kept in the host's state file)
+- `watch(on)` (optional) — the app became visible / hidden; start or stop
+  whatever event source is cheap (the local provider runs one `inotifywait`).
+- `poll(currentPath)` (optional) — called every 20 s while the app is
+  visible with the path of the open note; do the cheapest check for external
+  changes (one small request), or nothing. A provider whose backend has no
+  trustworthy change marker (OneNote) may re-read the open note and emit
+  `noteChanged(path)`; the host reloads it if it has no unsaved edits.
+
+## Signals
+
+- `updated()` — sections/rows changed; the host rebuilds the list.
+- `statusRequested(string text)` — a transient message in the header.
+- `noticeRequested(string title, string text, string code, var actions)` /
+  `noticeCleared()` — full-pane message (actions: `[{ label, icon, action }]`).
+- `viewRequested(string title, var component, var props)` / `viewCleared()` —
+  show a provider-supplied QML `Component` in the note pane, with `props`
+  assigned to it once loaded. This is how a provider does its own **setup**
+  and **settings**: it builds the form (the shell's `qs.Ui` controls are
+  available: `TextField`, `Button`, `Toggle`, …), validates, stores its
+  values and secrets itself (e.g. an owner-only file under
+  `~/.local/state/omarchy/`), then emits `viewCleared()` and `updated()`.
+  A provider that is not configured should show a `Set up…` action row in its
+  section and open the view from `action(id)`; a `Settings…` row can reopen it.
+- `persistRequested()` — ask the host to persist `saveState()`.
+- `saveRequested(string path)` (optional) — write that note now: the host
+  takes the editor's text and calls your `save()` with it. Emit it whenever
+  your schedule says so, having been told by `noteEdited(path)`.
+  It is answered only for the note that is open, because the text being
+  written is the editor's, and it is free to arrive late or never: a note the
+  user has moved away from or closed the window on has already been written
+  by then, one they deleted has had its edits dropped with it, and a request
+  to write a note with nothing pending does nothing. So you never have to
+  cancel a schedule — let it fire.
+
+## Setup and settings
+
+Setup is the provider's business end to end — the host never sees
+credentials or settings. Typical shape:
+
+```qml
+readonly property bool configured: settings.url !== ""
+function rebuild() {
+  var rows = configured ? noteRows() : [{ kind: "action", path: "setup", title: "Set up…", icon: "󰒓" }]
+  ...
+}
+function action(id) { if (id === "setup" || id === "settings") viewRequested("Nextcloud Notes", setupView, { current: settings }) }
+Component { id: setupView; Column { property var current; TextField { … } Button { onClicked: { save(); root.viewCleared(); root.refresh() } } } }
+```
+
+## Example
+
+`examples/hello/` is a complete minimal provider package: one section,
+notes kept in its own state, and a setup screen of its own. Copy the entire
+folder to `~/.config/notenote/plugins/hello/`, enable `org.example.hello` in
+Settings, and restart. Package roots/resources cannot be symlinks. Put
+`focus: true` on the field that should receive the keyboard when a view
+opens; the host focuses the view once it is in the scene.
+
+## Limits
+
+Everything a provider reads is the provider's responsibility to bound — file
+sizes, HTTP response bodies, list lengths, cached downloads — before it
+reaches the host. The host never reads provider data from disk or network
+itself; it only retains what `sections` and `load()` hand it, so an unbounded
+provider means unbounded shell memory. Each built-in declares its limits at
+the top of its files (`maxNoteBytes` in `plugins/org.note-note.local/Provider.qml`,
+`MAX_*` in `sticky.py` / `onenote.py`); a note that is too large should be
+listed but fail `load()` with an explanatory error, or return an explanatory
+body with `editable: false`. It must never become an editable partial note. Read a file once with a hard ceiling and use those bytes — a
+size check followed by a separate open is not a bound, because the file can
+change in between. For local files use `lib/readfile.py` (one descriptor,
+no symlink following, regular files only, capped, with a deadline), as the
+local provider and the host's own state file do.
+
+## Services
+
+### `services.requests` — the request queue
+
+Everything a provider asks of a network backend goes through a **lane**: a
+queue that orders the requests, coalesces the ones that make each other
+pointless, runs a few at a time, and parks the whole lane when the backend
+says it has had enough. One lane per *rate key*; the host owns them, so a lane
+outlives the provider that asked for it (a provider is destroyed and rebuilt
+when its settings change, and a backend's cooldown must survive that).
+
+```qml
+property var rq: null
+Component.onCompleted: { if (services && services.requests) root.rq = services.requests.queueFor("my-api", root) }
+Component.onDestruction: { if (services && services.requests) services.requests.cancelOwner(root) }
+```
+
+- `services.requests.queueFor(key, provider)` → the lane for `key`, made on
+  first ask. `provider` is optional and only used to name it in a status
+  message ("OneNote is rate-limited — retrying in 40s").
+- `services.requests.cancelOwner(owner)` → drop everything queued for that
+  owner across every lane. Call it on destruction and on sign-out.
+
+A lane exposes `depth`, `cooling`, `cooldownRemaining`, `paused` (the host
+sets it while the window is hidden) and the signal `updated()`, plus:
+
+```qml
+var handle = rq.enqueue(opts, start, settled)   // handle.cancel()
+rq.cancelOwner(owner)
+```
+
+| `opts` | meaning |
+|---|---|
+| `key` | what may not overlap itself. Jobs sharing a key run strictly in order, oldest first, whatever their priority — a page's save and its delete share one, so a delete can never overtake the save it supersedes |
+| `mode` | what a newcomer does to a **queued** job of the same key. `append` (default) nothing; `replace` supersedes it, because the newer job contains its intent (a newer save of one page); `dedupe` joins it, so three asks for one listing are one request |
+| `priority` | `0` interactive, `1` background. 0 dispatches first, and a background job never takes the lane's last slot, so a keystroke never waits behind a poll |
+| `owner` | your provider, for `cancelOwner` and for the round-robin that stops one provider starving another |
+| `flush` | this is a **write**. Writes keep draining while the window is hidden; ordinary reads do not |
+| `runWhenPaused` | explicit background work such as content indexing may run while the window is hidden. It remains cancellable read work and still obeys priority and service cooldowns |
+| `label` | a word for warnings |
+
+`start(ctx)` begins the work and calls `ctx.done(result)` **exactly once** — a
+second call is ignored, so a script that answers twice cannot double-deliver.
+`ctx` also carries `key`, `label` and `attempts`.
+
+`settled(result, info)` is the answer, with
+`info = { superseded, cancelled, attempts }`. **Every enqueue is answered
+exactly once** — delivered, superseded, or cancelled. `result` is `null` when
+the job never ran (superseded or cancelled); handle that case, because a
+provider that never hears back is a note that silently did not save.
+
+**The result decides what happens next.** `ctx.done()` is given whatever the
+script printed, and the lane reads one field of it:
+
+| `kind` | what the lane does |
+|---|---|
+| `"throttled"` | park **the whole lane** until `retryAfter` seconds have passed (10s → 20s → 40s → 60s when the field is absent), then re-run this job at the head of the queue. Retried for as long as the app is open |
+| `"transient"` | re-run **this job only**, after 2.5s, 5s, 10s; the third answer is delivered whatever it says |
+| anything else | delivered as it stands — including a plain `{ "error": … }`, which is what every script answered before this existed |
+
+### Microsoft retry policies
+
+A script names its own budget and scopes once with `msgraph.configure()`.
+What the library cannot answer it raises as `msgraph.GraphError`, carrying
+the `kind` above; the script's entry point (`run()`) turns it into the JSON
+error line, and nothing in the library writes to stdout on a script's behalf.
+Microsoft adapters pass a `msgraph.RetryPolicy` through `graph()`, `http()`,
+or `request()`: `REPLAY` permits repeating a safe read, `RESTART` returns a
+retry signal so the job fetches and merges again, and `NEVER` returns an
+uncertain response without retrying. Reads default to `REPLAY`, other methods
+to `RESTART`; creates, uploads, and partial-write handlers explicitly use
+`NEVER`. A 503 records the account cooldown under every policy. A 429 is an
+explicit rejection and can be retried under any policy. Do not turn an
+uncertain mutation into a `throttled` or `transient` job result unless a new
+run can reconcile its outcome before writing again.
+
+### Rate keys
+
+Each provider paces against its own key, and shares none: a OneNote throttle
+parks OneNote while Sticky Notes keeps listing. Pick your own key; these are
+the built-ins'.
+
+| key | used by | windows |
+|---|---|---|
+| `graph-onenote` | `onenote.py`, images included | (60s, 100) and (3600s, 350) — Microsoft allows 120/min and 400/hr per app+user |
+| `graph-onenote-section-order` | optional OneDrive metadata | (60s, 30) and (3600s, 180); throttles fall back to alphabetical sections without parking the normal note lane |
+| `graph-mail` | `sticky.py` | (60s, 240) — politeness; mailbox limits are far higher |
+| `notion` | `notion.py` | (1s, 3) — Notion's published average |
+| *(none)* | `login.microsoftonline.com` | unpaced: signing in must never wait behind a Graph cooldown |
+
+### `lib/ratelimit.py` — the other half
+
+The lane orders *jobs*; one job is one script run, which can be forty HTTP
+requests the lane cannot see. `lib/ratelimit.py` paces those, across every
+process at once (`flock`'d sliding-window counters under
+`~/.cache/omarchy/note-note-rate/`), and an external provider may import it:
+
+```python
+import ratelimit
+with ratelimit.slot("my-api", [(60, 100)]):
+    ...one request...
+```
+
+It admits by rolling **count**, not by a fixed gap, so a burst under budget
+runs at full speed; it caps concurrent requests per key at 4 across all
+processes; and it sleeps only **short** waits (up to `PACE_TIMEOUT`, 20s).
+Anything longer is not slept out in a script the user cannot cancel — it
+raises `Throttled`, which your `main()` reports as the JSON above and the lane
+waits out instead. Two layers, one wait, never both.
+
+```python
+except ratelimit.Throttled as t:
+    fail("rate limited", kind="throttled", retry_after=t.retry_after)
+```
+
+### `services.microsoft`
+
+`services.microsoft.create(providerId, scopes, clientId)` returns an account
+of the provider's own (see `services/microsoft/Account.qml`): it signs in
+through the provider's own app registration (`clientId`, your
+`microsoftClientId`) into its own token file
+(`~/.local/state/omarchy/note-note-ms-<providerId>.json`), for only the
+scopes it asked for — so nothing about one provider's account touches
+another's. It exposes `configured`, `signedIn`, `account`, `hasScope(s)`,
+`login()`, `relogin()`, `logout()`, `refresh()`, `env` (environment for
+processes that run `msgraph.py`-based scripts), `scriptDir`, and the signals
+`updated()`, `signedOut()` and `statusFailed(error)`. `updated()` fires for
+every answer; `signedOut()` is the transition — a status answer of signed
+out, or a sign-out — and is the one signal on which to throw the account's
+caches and queued work away. A probe that could not answer leaves the
+sign-in as it was and fires `statusFailed` instead: say it on the status
+line, and do not read it as signed out. The host renders the device-code
+screen for any account it created. What providers share is only the code. A user who prefers a
+registration of their own gives it to your provider alone, in
+`~/.config/omarchy/note-note.json` as
+`{"microsoft": {"<providerId>": {"clientId": "…", "tenant": "…"}}}`.
+
+An account may declare `optionalScopes` (space-separated). `login()` requests
+required scopes only; `loginOptional()` requests incremental consent without
+signing out the existing account. Only already-granted optional scopes are
+renewed, and a rejected optional refresh is retried with required scopes.
+The account's `env` includes `NOTE_NOTE_MS_OPTIONAL_SCOPES`; providers must not
+gate ordinary functionality on optional consent. OneNote uses this for its
+high-risk section-order workaround and falls back to alphabetical sections.
+
+
+### Retirement and process ownership
+
+A provider may expose `busy` while it owns active operations outside the host's
+request queue. The settings controller drains accepted writes and this busy
+state before destroying an instance; it leaves the instance intact if a note
+cannot be saved. `notebookTabs` is a presentation change and calls `rebuild()`
+on the existing provider. Other setting changes replace the drained instance.
+
+Expose `writeBusy` separately for accepted mutations, including queued writes.
+The standalone window waits for this state and host-queued writes when closing;
+background reads must not keep it open. Providers without `writeBusy` retain
+the conservative `busy` behavior. After saves settle, the native host disposes
+providers while their request lanes are still alive, stopping remaining read
+processes before exiting. Failed saves keep the window and draft open.
+
+Use `services/processes/ProcessRunner.qml` for framed script requests. It sends
+stdin after startup, waits for both output and exit, and settles failure,
+cancellation or timeout exactly once. Streaming device-code sign-in remains a
+separate protocol. An editable file is read through `lib/readfile.read_document`,
+which answers with either the complete UTF-8 text, its byte count and version,
+or an explicit error — never a partial note. The local provider's
+`operations.py read` splits that text the one way its format is split
+(`plugins/org.note-note.local/notefile.py`, which the listing, the search and the save
+share): a front-matter line the app does not own is kept and written back.

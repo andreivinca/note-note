@@ -10,7 +10,7 @@ QtObject {
   readonly property var font: source ? source.font : desktopFont
   readonly property var spacing: source ? source.spacing : desktopSpacing
   readonly property color hoverFill: hoverFillFor(Color.foreground, Color.accent)
-  readonly property color selectionFill: Util.alpha(Color.accent, 0.35)
+  readonly property color selectionFill: Color.token("editor.selectionBackground", Util.alpha(Color.accent, 0.35))
   // Keep the standalone baseline aligned with the shell's default type
   // scale and spacing so packaging does not change the workspace density.
   property QtObject desktopFont: QtObject {
@@ -45,23 +45,23 @@ QtObject {
     return source ? source.space(value) : value
   }
   function hoverFillFor(foreground, accent) {
-    return source ? source.hoverFillFor(foreground, accent) : Util.alpha(foreground, 0.08)
+    return Color.token("interaction.hover", source ? source.hoverFillFor(foreground, accent) : Util.alpha(foreground, 0.08))
   }
   function pressedFillFor(foreground, accent) {
-    return source ? source.pressedFillFor(foreground, accent) : Util.alpha(accent, 0.22)
+    return Color.token("interaction.pressed", source ? source.pressedFillFor(foreground, accent) : Util.alpha(accent, 0.22))
   }
   function selectedFillFor(foreground, accent) {
-    return source ? source.selectedFillFor(foreground, accent) : Util.alpha(accent, 0.18)
+    return Color.token("interaction.selected", source ? source.selectedFillFor(foreground, accent) : Util.alpha(accent, 0.18))
   }
   function hoverStateColor(foreground, accent) {
     return source ? source.hoverStateColor(foreground, accent) : foreground
   }
   function selectedStateColor(foreground, accent) {
-    return source ? source.selectedStateColor(foreground, accent) : Qt.tint(foreground, Util.alpha(accent, 0.6))
+    return Color.token("interaction.selectedForeground", source ? source.selectedStateColor(foreground, accent) : Qt.tint(foreground, Util.alpha(accent, 0.6)))
   }
   // The chrome's raised surface — a bar, a header, a popup's fill, the
   // open tab: one tint of the foreground over the background, everywhere.
   function chromeSurface(background, foreground) {
-    return Qt.tint(background, Util.alpha(foreground, 0.07))
+    return Color.token("surface.raised", Qt.tint(background, Util.alpha(foreground, 0.07)))
   }
 }

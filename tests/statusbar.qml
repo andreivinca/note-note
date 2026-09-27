@@ -149,7 +149,7 @@ ShellRoot {
       y: 110
       width: 900
       sourceName: "Local"
-      sourceLogo: Qt.resolvedUrl("app/providers/onenote/logo.svg")
+      sourceLogo: Qt.resolvedUrl("app/plugins/org.note-note.onenote/logo.svg")
       crumb: "Local › Notebook"
       storage: "Notes.md"
       countVisible: true

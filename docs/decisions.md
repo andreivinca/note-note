@@ -259,7 +259,7 @@ too, shown and editable, and the note's width wins over the index's.
 staging directory. *Rejected:* the staging directory prunes itself — notes
 would quietly lose their pictures. *Chosen:* on save, any image link into
 the staging directory is copied to `.assets/` beside the note and the link
-becomes `![](.assets/name.png)` (`providers/local/images.py`: body over
+becomes `![](.assets/name.png)` (`plugins/org.note-note.local/images.py`: body over
 stdin, staged files read symlink-free and bounded, written with `O_EXCL` —
 the same bytes reuse a name, different bytes take the next — so the
 autosave that runs every few hundred milliseconds is idempotent). A `file://`
@@ -829,3 +829,14 @@ when read back. Outgoing requests are validated before the first mutation;
 unrepresentable documents produce an error instead of losing their tail.
 Markdown escaping and adaptive code delimiters are shared by the serializers,
 and the strict serialization fallback is checked before a save can proceed.
+
+## 2026-09-27: themes and application packages
+
+Theme JSON, commands and providers share a validated package catalog. System
+inputs remain separate from the effective application palette. Configuration
+saves use revision-checked, locked transactions; appearance-only changes bypass
+note/provider draining. Native highlighter formats repaint semantic backgrounds
+without rewriting document formats. QTextDocument.contentsChange distinguishes
+content edits from TextEdit display notifications. Custom themes and commands
+require the native helper in Omarchy; the script editor remains System-only.
+See [themes](themes.md), [commands](commands.md), and [plugins](plugins.md).

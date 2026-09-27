@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "org.example.colors",
+  "name": "Example colors",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "contributes": {
+    "themes": [{ "id": "midnight", "name": "Midnight", "path": "midnight.json" }]
+  }
+}

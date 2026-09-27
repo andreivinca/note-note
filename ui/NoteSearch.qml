@@ -1,7 +1,6 @@
 import QtQuick
 import "../design"
 import "../design/controls"
-import "KeyBindings.js" as KeyBindings
 
 // Search field with keyboard navigation and a shortcut hint.
 Item {
@@ -12,18 +11,11 @@ Item {
   property color accent: Color.accent
   property string fontFamily: Style.font.menuFamily
   property var shortcutHandler: null
+  property var keybindings: null
   readonly property bool searchFocused: searchField.activeFocus
-  implicitHeight: controlStyle.height
+  implicitHeight: searchField.implicitHeight
   signal filterEdited(string text)
   signal clearRequested()
-  signal moveRequested(int delta)
-  signal acceptRequested()
-
-  ChromeControlStyle {
-    id: controlStyle
-    background: root.background
-    foreground: root.foreground
-  }
 
   function focusSearch() {
     searchField.forceActiveFocus()
@@ -33,23 +25,14 @@ Item {
     searchField.text = text
   }
 
-  TextField {
+  ChromeTextField {
     id: searchField
     anchors.fill: parent
     placeholderText: "Search"
+    surfaceBackground: root.background
     foreground: root.foreground
     accent: root.accent
     font.family: root.fontFamily
-    font.pixelSize: Style.font.body
-    placeholderTextColor: Util.alpha(root.foreground, 0.45)
-    background: Rectangle {
-      objectName: "searchSurface"
-      radius: controlStyle.radius
-      color: controlStyle.fill
-      border.width: controlStyle.borderWidth
-      border.color: searchField.activeFocus ? controlStyle.focusBorderColor : controlStyle.borderColor
-    }
-    verticalPadding: Style.spacing.xs
     onTextEdited: root.filterEdited(text)
     rightPadding: root.filterText.length > 0
       ? clearSearchButton.width + Style.spacing.xs
@@ -58,7 +41,7 @@ Item {
 
     Rectangle {
       id: searchKeycap
-      visible: root.filterText.length === 0
+      visible: root.filterText.length === 0 && searchKeycapText.text.length > 0
       anchors.right: parent.right
       // The same air to the right edge as above and below it, so the
       // keycap sits centered in the field's corner.
@@ -75,7 +58,7 @@ Item {
         id: searchKeycapText
         textFormat: Text.PlainText
         anchors.centerIn: parent
-        text: "ctrl+k"
+        text: root.keybindings ? root.keybindings.label("app/search") : ""
         color: Util.alpha(root.foreground, 0.6)
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
@@ -105,7 +88,7 @@ Item {
       anchors.rightMargin: Style.spacing.xxs
       anchors.verticalCenter: parent.verticalCenter
       iconText: "󰅖"
-      tooltipText: "Clear the search (esc)"
+      tooltipText: "Clear the search" + (root.keybindings ? root.keybindings.hint("app/back") : "")
       foreground: root.foreground
       accent: root.accent
       iconSize: Style.font.iconSmall
@@ -116,17 +99,7 @@ Item {
 
     Keys.priority: Keys.BeforeItem
     Keys.onPressed: function(event) {
-      var action = KeyBindings.match(event, "search")
-      if (action === "nextSearch") {
-        root.moveRequested(1)
-        event.accepted = true
-      } else if (action === "previousSearch") {
-        root.moveRequested(-1)
-        event.accepted = true
-      } else if (action === "acceptSearch") {
-        root.acceptRequested()
-        event.accepted = true
-      } else if (root.shortcutHandler && root.shortcutHandler(event)) {
+      if (root.shortcutHandler && root.shortcutHandler(event)) {
         event.accepted = true
       }
     }

@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "id": "org.note-note.workspace",
+  "name": "Workspace",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "contributes": {
+    "commands": [
+      {
+        "id": "new-note",
+        "title": "New Note",
+        "category": "Notes",
+        "keywords": ["create", "add"],
+        "workspaceAction": "newNote",
+        "handler": "commands/NewNote.qml"
+      },
+      {
+        "id": "new-notebook",
+        "title": "New Notebook",
+        "category": "Notes",
+        "keywords": ["create", "folder"],
+        "workspaceAction": "newNotebook",
+        "handler": "commands/NewNotebook.qml"
+      },
+      {
+        "id": "open-settings",
+        "title": "Open Settings",
+        "category": "Preferences",
+        "keywords": ["config", "configuration"],
+        "workspaceAction": "openSettings",
+        "handler": "commands/OpenSettings.qml"
+      },
+      {
+        "id": "toggle-sidebar",
+        "title": "Toggle Sidebar",
+        "category": "View",
+        "keywords": ["list", "show", "hide"],
+        "workspaceAction": "toggleList",
+        "handler": "commands/ToggleSidebar.qml"
+      },
+      {
+        "id": "delete-note",
+        "title": "Delete Note",
+        "category": "Notes",
+        "keywords": ["remove", "trash"],
+        "workspaceAction": "deleteNote",
+        "handler": "commands/DeleteNote.qml"
+      }
+    ]
+  }
+}

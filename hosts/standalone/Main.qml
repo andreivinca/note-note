@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import NoteNote.Native
 import "../.." as App
+import "../../design"
 
 ApplicationWindow {
   id: window
@@ -13,29 +14,7 @@ ApplicationWindow {
   minimumHeight: 480
   visible: true
   color: workspace.background
-  palette.window: SystemTheme.colors.background
-  palette.windowText: SystemTheme.colors.foreground
-  palette.base: SystemTheme.colors.base
-  palette.alternateBase: SystemTheme.colors.alternateBase
-  palette.text: SystemTheme.colors.text
-  palette.button: SystemTheme.colors.button
-  palette.buttonText: SystemTheme.colors.buttonText
-  palette.highlight: SystemTheme.colors.highlight
-  palette.highlightedText: SystemTheme.colors.highlightedText
-  palette.toolTipBase: SystemTheme.colors.toolTipBase
-  palette.toolTipText: SystemTheme.colors.toolTipText
-  palette.link: SystemTheme.colors.link
-  palette.linkVisited: SystemTheme.colors.linkVisited
-  palette.light: SystemTheme.colors.light
-  palette.midlight: SystemTheme.colors.midlight
-  palette.mid: SystemTheme.colors.mid
-  palette.dark: SystemTheme.colors.dark
-  palette.shadow: SystemTheme.colors.shadow
-  palette.accent: SystemTheme.colors.accent
-  palette.placeholderText: SystemTheme.colors.placeholderText
-  palette.disabled.text: SystemTheme.colors.disabledText
-  palette.disabled.buttonText: SystemTheme.colors.disabledButtonText
-  palette.disabled.windowText: SystemTheme.colors.disabledWindowText
+  palette: ControlPalette {}
 
   Backend {
     id: backend

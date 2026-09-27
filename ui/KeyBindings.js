@@ -1,106 +1,30 @@
 .pragma library
 
-// Help and dispatch share these definitions. Aliases have no separate label.
-var CTRL = Qt.ControlModifier
-var SHIFT = Qt.ShiftModifier
-var ALT = Qt.AltModifier
-// These remain native document operations (undo/redo pass through the
-// editor's transaction handler). Tool files must not replace them.
-var EDITOR_KEYS = [
-  { key: Qt.Key_A, modifiers: CTRL },
-  { key: Qt.Key_C, modifiers: CTRL },
-  { key: Qt.Key_X, modifiers: CTRL },
-  { key: Qt.Key_Z, modifiers: CTRL },
-  { key: Qt.Key_Z, modifiers: CTRL | SHIFT },
-  { key: Qt.Key_Y, modifiers: CTRL }
-]
+// Application defaults. Labels and dispatch both use the parsed keys.
 var ACTIONS = [
-  { id: "search", key: Qt.Key_K, modifiers: CTRL, group: "Getting around", label: "ctrl+k", description: "Search your notes" },
-  { id: "search", key: Qt.Key_L, modifiers: CTRL },
-  { id: "nextSearch", key: Qt.Key_Down, context: "search", group: "Getting around", label: "up / down", description: "In the search: walk the list without leaving the field" },
-  { id: "previousSearch", key: Qt.Key_Up, context: "search" },
-  { id: "acceptSearch", key: Qt.Key_Return, context: "search", group: "Getting around", label: "enter", description: "In the search: leave it for the note" },
-  { id: "acceptSearch", key: Qt.Key_Enter, context: "search" },
-  { id: "acceptSearch", key: Qt.Key_Tab, context: "search" },
-  { id: "previousNote", key: Qt.Key_Up, modifiers: CTRL, group: "Getting around", label: "ctrl+up", description: "The note above" },
-  { id: "nextNote", key: Qt.Key_Down, modifiers: CTRL, group: "Getting around", label: "ctrl+down", description: "The note below" },
-  { id: "nextNote", key: Qt.Key_J, modifiers: CTRL },
-  { id: "nextTab", key: Qt.Key_Tab, modifiers: CTRL, group: "Getting around", label: "ctrl+tab", description: "The next notebook" },
-  { id: "previousTab", key: Qt.Key_Tab, modifiers: CTRL | SHIFT, group: "Getting around", label: "ctrl+shift+tab", description: "The notebook before it" },
-  { id: "previousTab", key: Qt.Key_Backtab, modifiers: CTRL | SHIFT },
-  { id: "previousTab", key: Qt.Key_Backtab, modifiers: CTRL },
-  { id: "selectTab", key: Qt.Key_1, modifiers: ALT, group: "Getting around", label: "alt+1…9", description: "Open notebook 1–9, from left to right" },
-  { id: "selectTab", key: Qt.Key_2, modifiers: ALT },
-  { id: "selectTab", key: Qt.Key_3, modifiers: ALT },
-  { id: "selectTab", key: Qt.Key_4, modifiers: ALT },
-  { id: "selectTab", key: Qt.Key_5, modifiers: ALT },
-  { id: "selectTab", key: Qt.Key_6, modifiers: ALT },
-  { id: "selectTab", key: Qt.Key_7, modifiers: ALT },
-  { id: "selectTab", key: Qt.Key_8, modifiers: ALT },
-  { id: "selectTab", key: Qt.Key_9, modifiers: ALT },
-  { id: "openTree", key: Qt.Key_Right, modifiers: CTRL, group: "Getting around", label: "ctrl+right", description: "Open the notebook the cursor rests on" },
-  { id: "closeTree", key: Qt.Key_Left, modifiers: CTRL, group: "Getting around", label: "ctrl+left", description: "Fold it, and climb to the one holding it" },
-  { id: "toggleList", key: Qt.Key_E, modifiers: CTRL, group: "Getting around", label: "ctrl+e", description: "Hide the sidebar, or bring it back" },
-  { id: "back", key: Qt.Key_Escape, group: "Getting around", label: "esc", description: "Clear the search; again to put the window away" },
-  { id: "newNote", key: Qt.Key_N, modifiers: CTRL, group: "Notes", label: "ctrl+n", description: "A new note in the open notebook" },
-  { id: "newNotebook", key: Qt.Key_N, modifiers: CTRL | SHIFT, group: "Notes", label: "ctrl+shift+n", description: "A new notebook" },
-  { id: "deleteNote", key: Qt.Key_D, modifiers: CTRL, group: "Notes", label: "ctrl+d", description: "Delete the note you are reading" },
-  { id: "savePage", key: Qt.Key_S, modifiers: CTRL, context: "page", group: "Notes", label: "ctrl+s", description: "On the settings page: save it" },
-  { id: "paste", key: Qt.Key_V, modifiers: CTRL, context: "editor" },
-  { id: "pastePlain", key: Qt.Key_V, modifiers: CTRL | SHIFT, context: "editor" }
+  { id: "commandPalette", keys: ["Ctrl+Shift+P"], context: "application", group: "Getting around", description: "Open the command palette" },
+  { id: "search", keys: ["Ctrl+K", "Ctrl+L"], context: "notes", group: "Getting around", description: "Search your notes" },
+  { id: "nextSearch", keys: ["Down"], context: "search", repeatable: true, group: "Search", description: "The next search result" },
+  { id: "previousSearch", keys: ["Up"], context: "search", repeatable: true, group: "Search", description: "The previous search result" },
+  { id: "acceptSearch", keys: ["Enter", "NumEnter", "Tab"], context: "search", group: "Search", description: "Open the search result" },
+  { id: "previousNote", keys: ["Ctrl+Up"], context: "notes", repeatable: true, group: "Getting around", description: "The note above" },
+  { id: "nextNote", keys: ["Ctrl+Down", "Ctrl+J"], context: "notes", repeatable: true, group: "Getting around", description: "The note below" },
+  { id: "nextTab", keys: ["Ctrl+Tab"], context: "notes", repeatable: true, group: "Getting around", description: "The next notebook" },
+  { id: "previousTab", keys: ["Ctrl+Shift+Tab"], context: "notes", repeatable: true, group: "Getting around", description: "The notebook before it" },
+  { id: "openTree", keys: ["Ctrl+Right"], context: "notes", repeatable: true, group: "Getting around", description: "Open the notebook under the cursor" },
+  { id: "closeTree", keys: ["Ctrl+Left"], context: "notes", repeatable: true, group: "Getting around", description: "Fold the notebook under the cursor" },
+  { id: "toggleList", workspaceAction: true, keys: ["Ctrl+E"], context: "notes", group: "Getting around", description: "Show or hide the sidebar" },
+  { id: "back", keys: ["Escape"], context: "notes", group: "Getting around", description: "Clear the search or put the window away" },
+  { id: "newNote", workspaceAction: true, keys: ["Ctrl+N"], context: "notes", group: "Notes", description: "A new note in the open notebook" },
+  { id: "newNotebook", workspaceAction: true, keys: ["Ctrl+Shift+N"], context: "notes", group: "Notes", description: "A new notebook" },
+  { id: "deleteNote", workspaceAction: true, keys: ["Ctrl+D"], context: "notes", group: "Notes", description: "Delete the note you are reading" },
+  { id: "openSettings", workspaceAction: true, keys: [], context: "application", group: "Application", description: "Open Settings" },
+  { id: "savePage", keys: ["Ctrl+S"], context: "page", group: "Settings", description: "Save settings" },
+  { id: "paste", keys: ["Ctrl+V"], context: "editor", protected: true, group: "Editing", description: "Paste text or an image" },
+  { id: "pastePlain", keys: ["Ctrl+Shift+V"], context: "editor", protected: true, group: "Editing", description: "Paste plain text" }
 ]
 
-// The label of a key with its modifiers, the way the table above spells
-// them: "ctrl+shift+h". A letter or digit key only; the tools' shortcuts
-// are those (ui/editing/Tool.qml), and the table spells the rest by hand.
-function label(key, modifiers) {
-  var letter = (key >= Qt.Key_A && key <= Qt.Key_Z) || (key >= Qt.Key_0 && key <= Qt.Key_9)
-  if (!letter) {
-    return ""
-  }
-  var parts = []
-  if (modifiers & CTRL) {
-    parts.push("ctrl")
-  }
-  if (modifiers & ALT) {
-    parts.push("alt")
-  }
-  if (modifiers & SHIFT) {
-    parts.push("shift")
-  }
-  parts.push(String.fromCharCode(key).toLowerCase())
-  return parts.join("+")
-}
-
-function match(event, context) {
-  var modifiers = event.modifiers & (Qt.ControlModifier | Qt.ShiftModifier | Qt.AltModifier | Qt.MetaModifier)
-  for (var i = 0; i < ACTIONS.length; i++) {
-    var action = ACTIONS[i]
-    if (action.key === event.key && (action.modifiers || 0) === modifiers
-        && (!action.context || action.context === context)) {
-      return action.id
-    }
-  }
-  return ""
-}
-
-function text(extraActions) {
-  var visible = ACTIONS.concat(extraActions || []).filter(function(action) { return !!action.label })
-  var width = visible.reduce(function(value, action) { return Math.max(value, action.label.length) }, 0)
-  var lines = [], previous = ""
-  visible.forEach(function(action) {
-    if (action.group !== previous) {
-      if (lines.length) {
-        lines.push("")
-      }
-      lines.push(action.group, "")
-      previous = action.group
-    }
-    var label = action.label
-    while (label.length < width) {
-      label += " "
-    }
-    lines.push("  " + label + "   " + action.description)
-  })
-  return lines.join("\n")
+for (var tab = 1; tab <= 9; tab++) {
+  ACTIONS.push({ id: "selectTab" + tab, action: "selectTab", parameters: { tab: tab }, keys: ["Alt+" + tab],
+    context: "notes", group: "Getting around", description: "Open notebook " + tab })
 }

@@ -109,7 +109,7 @@ out the working account first.
 
 Pasting a picture sends bytes to someone else's service, so the same care
 applies in reverse (`services/clipboard/clipboard.py`,
-`providers/onenote/onenote.py`).
+`plugins/org.note-note.onenote/onenote.py`).
 
 - The clipboard is read with a ceiling, into a file opened `O_EXCL` with mode
   `0600` under the user's own cache — never a predictable shared path (rule 2).
@@ -194,7 +194,7 @@ local-file read:
   `time.monotonic()` deadline, so nothing here can hang the caller.
 
 The listing applies the same policy to what it shows at all: a symlinked note
-or notebook is not listed (`providers/local/list.py`).
+or notebook is not listed (`plugins/org.note-note.local/list.py`).
 
 ---
 
@@ -259,3 +259,14 @@ replying to the reviewer.
 - **Blast radius if we get it wrong:** the user's mailbox token, their
   notebooks, and arbitrary file writes as their user. That is the reason for
   the paranoia above.
+
+## Application extension data
+
+`services/extensions/manifest.py` validates package metadata without running
+QML. Resource reads reject symlinks/special files, walk package-relative paths
+with directory descriptors, and enforce limits. `lib/jsondata.py` rejects
+duplicate keys, non-finite constants and excessive nesting. These controls
+protect data handling; enabled executable QML remains trusted process code.
+Configuration writers share `services/settings/config_io.py` for bounded reads,
+a timed advisory lock, revision comparison and atomic replacement. Notes keep
+the generic atomic writer. See [plugins](plugins.md) for trust and removal.

@@ -41,7 +41,7 @@ Column {
           ? Qt.formatTime(date, "HH:mm") : Qt.formatDate(date, "d MMM")
       }
       textFormat: Text.PlainText
-      color: Util.alpha(root.foreground, 0.65)
+      color: Color.token("text.secondary", Util.alpha(root.foreground, 0.65))
       font.family: root.fontFamily
       font.pixelSize: root.fontSize - 1
     }

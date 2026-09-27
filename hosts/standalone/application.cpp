@@ -84,6 +84,7 @@ int runNoteNote(QGuiApplication &app, const Launch &launch)
     qmlRegisterType<TextBlocks>("NoteNote.Native", 1, 0, "TextBlocks");
     qmlRegisterSingletonInstance("NoteNote.Native", 1, 0, "Desktop", &runtime);
     QQmlApplicationEngine engine;
+    engine.addImportPath(launch.dataDir + QStringLiteral("/extensions"));
     QObject::connect(&engine, &QQmlApplicationEngine::exit, &app, &QCoreApplication::exit);
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app, []() {
         QCoreApplication::exit(1);

@@ -1,11 +1,12 @@
 import QtQuick
 import Qt.labs.folderlistmodel
-import "../KeyBindings.js" as KeyBindings
+import "../../services/shortcuts/stroke.js" as Stroke
 import "ToolbarSettings.js" as ToolbarSettings
 
 Item {
   id: registry
   required property var editor
+  required property var keybindings
   property url directory: Qt.resolvedUrl("../tools")
   property var layout: ToolbarSettings.defaults()
   readonly property alias ready: registryState.ready
@@ -33,11 +34,6 @@ Item {
   })
   readonly property var toolbarTools: topLevelTools.filter(function(tool) {
     return registry.isVisible(tool)
-  })
-  readonly property var shortcutActions: actions.filter(function(tool) {
-    return !!tool.shortcutKey
-  }).map(function(tool) {
-    return { group: "Editing", label: tool.shortcutLabel, description: tool.label }
   })
   onLayoutChanged: {
     if (ready) {
@@ -82,29 +78,16 @@ Item {
     return [tool].concat(Array.from(tool.options))
   }
 
-  function definitionError(tool, counts, shortcuts) {
+  function definitionError(tool, counts) {
     if (tool.apiVersion !== 1 || !tool.toolId || !tool.label || typeof tool.execute !== "function") {
       return "expected an editing Tool with an id and label"
     }
     if (counts[tool.toolId] > 1) {
       return "duplicate tool id"
     }
-    if (!tool.shortcutKey) {
-      return ""
+    if (tool.shortcutKey && (tool.isMenu || !Stroke.fromQt(tool.shortcutKey, tool.shortcutModifiers))) {
+      return "a shortcut needs a supported key and an executable tool"
     }
-    if (!tool.shortcutLabel || tool.isMenu) {
-      return "a shortcut needs a letter or digit key and an executable tool"
-    }
-    var shortcut = tool.shortcutKey + ":" + tool.shortcutModifiers
-    // A tool's key is pressed in the editor: it competes with the bindings
-    // that are the editor's or everyone's, not with a page's or the search's.
-    if (shortcuts[shortcut] || KeyBindings.ACTIONS.concat(KeyBindings.EDITOR_KEYS).some(function(action) {
-      return (!action.context || action.context === "editor")
-          && action.key === tool.shortcutKey && (action.modifiers || 0) === tool.shortcutModifiers
-    })) {
-      return "shortcut already assigned"
-    }
-    shortcuts[shortcut] = true
     return ""
   }
 
@@ -150,23 +133,23 @@ Item {
       return a.toolId.localeCompare(b.toolId)
     })
     var accepted = []
-    var shortcuts = Object.create(null)
     for (var j = 0; j < candidates.length; j++) {
       var candidate = candidates[j]
       var reason = ""
-      var candidateShortcuts = Object.assign(Object.create(null), shortcuts)
       var candidateEntries = definitions(candidate)
       for (var c = 0; !reason && c < candidateEntries.length; c++) {
         var definition = candidateEntries[c]
         reason = c > 0 && definition.isMenu ? "tool options must be executable"
-          : definitionError(definition, counts, candidateShortcuts)
+          : definitionError(definition, counts)
       }
       if (reason) {
         diagnostics.push(candidate.toolId + ": " + reason)
         candidate.destroy()
         continue
       }
-      shortcuts = candidateShortcuts
+      candidateEntries.forEach(function(entry) {
+        entry.keybindings = Qt.binding(function() { return registry.keybindings })
+      })
       accepted.push(candidate)
     }
     registryState.errors = diagnostics
@@ -238,17 +221,15 @@ Item {
   }
 
   function handleShortcut(event) {
-    var modifiers = event.modifiers & (Qt.ControlModifier | Qt.ShiftModifier | Qt.AltModifier | Qt.MetaModifier)
-    for (var i = 0; i < actions.length; i++) {
-      var tool = actions[i]
-      if (tool.shortcutKey && tool.shortcutKey === event.key && tool.shortcutModifiers === modifiers) {
-        execute(tool.toolId)
-        // Consume disabled actions too, so TextEdit's native shortcut cannot
-        // bypass the provider's capabilities or the document's read-only state.
-        return true
-      }
+    var binding = keybindings.match(event, "editor")
+    if (!binding || binding.kind !== "tool") {
+      return false
     }
-    return false
+    if (!event.isAutoRepeat) {
+      execute(binding.action)
+    }
+    // Consume disabled actions too, so native formatting cannot bypass capabilities.
+    return true
   }
 
   function closePanels(except) {

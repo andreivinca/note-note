@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "org.note-note.notion",
+  "name": "Notion",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "contributes": {
+    "providers": [
+      {
+        "id": "notion",
+        "path": "Provider.qml"
+      }
+    ]
+  }
+}

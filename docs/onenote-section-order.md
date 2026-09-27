@@ -76,12 +76,12 @@ app-registration permission edit (tenant consent policies still apply).
 
 ## Implementation and limits
 
-- `providers/onenote/toc.py`: standard-library reader for the TOC's
+- `plugins/org.note-note.onenote/toc.py`: standard-library reader for the TOC's
   [packaged file format](https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-onestore/a2f046ea-109a-49c4-912d-dc2888cf0565),
   including the desktop-header envelope seen in live OneDrive downloads.
   Reads the current revision, inherits unchanged older objects and rejects
   malformed, unsupported, cyclic or excessive structures.
-- `providers/onenote/section_order.py`: verifies personal notebook package
+- `plugins/org.note-note.onenote/section_order.py`: verifies personal notebook package
   identity, walks ordered section-group folders, and joins only live IDs.
   Downloads metadata from signed Microsoft URLs without the bearer token,
   redirects or logging credentials. Parsed entries are reused by TOC eTag;

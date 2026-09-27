@@ -33,7 +33,7 @@ runtime, permissions and bundle checksum.
    are written for users: what changed and what it means, not a commit log.
 6. Users update with `omarchy plugin update io.github.andreivinca.note-note`.
 
-Keep the README, `providers/PROVIDERS.md` and `docs/` in the same commit as
+Keep the README, `docs/providers.md` and `docs/` in the same commit as
 the behaviour they describe.
 
 ## Marketplace (omarchyplugins.com)

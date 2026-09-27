@@ -2,8 +2,8 @@
 
 A Linux notes workspace, available as an **Omarchy shell plugin** and a
 **standalone Qt 6 application** from this repository. Both run the same
-editor, notebook tabs, note list, autosave and providers. The plugin follows
-your Omarchy theme; the standalone app uses the desktop palette. Local Markdown notes, your
+editor, notebook tabs, note list, autosave and providers. The default System theme follows the desktop palette; custom JSON themes
+are selected through the command palette. Local Markdown notes, your
 Microsoft Sticky Notes, OneNote and Notion pages all live in the same list.
 
 OneNote saves fetch the current page and merge independent edits made on
@@ -15,6 +15,25 @@ draft kept on this device. See [merge behavior and limits](lib/notemerge/README.
 **[Install plugin](#install)** · **[Standalone app](#standalone-app)** · **[Update](#update)** · **[Shortcut](#shortcut)** ·
 **[Removal](#removal)** · **[Settings](#settings)** ·
 **[Notebooks](#notebooks)** · **[Providers](#providers)** · **[Keys](#keys)**
+
+## Themes and commands
+
+Press **Ctrl+Shift+P** to search commands. New Note, New Notebook, Open Settings,
+Toggle Sidebar, and Delete Note use the same actions as their existing controls.
+Available shortcuts appear on the right; Delete Note still asks for confirmation.
+Shortcut labels follow the central registry. Plugins can declare defaults, and
+Settings `keybindings` can override or unbind them without a plugin update.
+See [changing bindings](docs/commands.md#changing-bindings) for examples.
+
+Press **Ctrl+Shift+P**, then choose **Color Theme**. Arrow keys
+preview; Enter saves; Escape restores the previous theme. Copy JSON themes to
+`~/.config/notenote/themes/` and restart to discover them. See [themes](docs/themes.md),
+[commands](docs/commands.md), and [plugin packages](docs/plugins.md).
+
+The standalone app includes the native display helper. Omarchy commands and
+custom themes require `sh cpp/build.sh` in the plugin folder followed by a
+shell restart. Without it the existing editor remains available with System
+colors. Theme changes preserve notes, undo history and authored colors.
 
 ## Install
 
@@ -192,21 +211,21 @@ Every source of notes is a self-contained *provider* — a folder with a
 `Provider.qml` implementing one small contract: rows for the sidebar,
 `load` / `save` / `create` / `remove`, and a few capability flags.
 
-- `providers/local/` — Markdown notebooks on disk
-- `providers/sticky/` — Microsoft Sticky Notes
-- `providers/onenote/` — OneNote
-- `providers/notion/` — Notion
+- `plugins/org.note-note.local/` — Markdown notebooks on disk
+- `plugins/org.note-note.sticky/` — Microsoft Sticky Notes
+- `plugins/org.note-note.onenote/` — OneNote
+- `plugins/org.note-note.notion/` — Notion
 - `services/microsoft/` — Microsoft sign-in code the two above run; each
   has its own app registration, token and scope, so nothing about one's
   account touches the other's, and signing out of one leaves the other
   signed in.
 
-External providers go in
-`~/.config/omarchy/note-note/providers/<id>/Provider.qml` for the plugin, or
-`~/.config/notenote/providers/<id>/Provider.qml` for the standalone app — a plain
-`git clone` into that directory is an install. The contract is documented
-in [`providers/PROVIDERS.md`](providers/PROVIDERS.md); `examples/hello/` is
-a minimal provider to start from.
+New external providers go in `~/.config/notenote/plugins/<package>/` with a
+`plugin.json` manifest. Review the code, enable the package in Settings, then
+restart. Both hosts use this shared package location. Legacy host-specific
+provider folders remain supported for the 1.x migration window. See the
+[provider contract](docs/providers.md), [package policy](docs/plugins.md), and
+the minimal `examples/hello/` package.
 
 ## What it accesses
 

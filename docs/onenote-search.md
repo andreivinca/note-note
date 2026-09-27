@@ -44,7 +44,7 @@ for normal note use.
 
 ## Storage and lifecycle
 
-`providers/onenote/search_index.py` owns extraction, cache transactions,
+`plugins/org.note-note.onenote/search_index.py` owns extraction, cache transactions,
 coverage and retry/refresh selection. `SearchCache.qml` schedules work through
 the existing request queue and answers searches outside it. Workers claim
 distinct pages under the cache lock; abandoned claims become

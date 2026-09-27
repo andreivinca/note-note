@@ -1,6 +1,6 @@
 # Testing and development
 
-The aggregate runner exercises all fourteen suites without real accounts or note
+The aggregate runner exercises all nineteen suites without real accounts or note
 contents:
 
 ```bash
@@ -62,7 +62,7 @@ omarchy plugin enable io.github.andreivinca.note-note
 - **Python changed** → nothing; the next call picks it up. That includes the
   editor's converters, which run as a process per conversion.
 - Always lint first: `qmllint -I /usr/share/omarchy/shell Workspace.qml design/*.qml design/controls/*.qml hosts/omarchy/*.qml ui/*.qml ui/statusbar/*.qml
-  ui/editing/*.qml ui/tools/*.qml providers/*/Provider.qml providers/onenote/SearchCache.qml services/*/*.qml`, and `python3 -m py_compile` the
+  ui/editing/*.qml ui/tools/*.qml plugins/*/Provider.qml plugins/org.note-note.onenote/SearchCache.qml services/*/*.qml`, and `python3 -m py_compile` the
   scripts. For Python there is also `uvx ruff check .`, configured in
   `pyproject.toml` — it needs nothing installed and it is narrowed to the
   rules that catch defects (a stale import, an unused local) rather than to
@@ -218,7 +218,7 @@ stay unchanged.
 Process cases cover startup failure, stdin delivery, malformed output, nonzero
 exit, cancellation, deadlines and exactly one callback.
 
-`providers/onenote/merge_selftest.py` applies PATCH commands to a simulated
+`plugins/org.note-note.onenote/merge_selftest.py` applies PATCH commands to a simulated
 element tree with generated IDs. A late phone checkbox update must still find
 its original item after an app save. Checks also cover repeated labels,
 mixed checkbox/prose edits, bare blank lines, preserved inline formatting,
@@ -302,42 +302,42 @@ These suites need no shell, a display, an account or the
 network — every request is answered by a stub:
 
 ```bash
-python3 providers/local/selftest.py       # the listing's order, statx(2), and its last line
-python3 providers/notion/selftest.py      # a page is never emptied to save it
-python3 providers/sticky/selftest.py      # a cut note opens read-only, never as a partial note
-python3 providers/onenote/selftest.py     # which writes may be run again
+python3 plugins/org.note-note.local/selftest.py       # the listing's order, statx(2), and its last line
+python3 plugins/org.note-note.notion/selftest.py      # a page is never emptied to save it
+python3 plugins/org.note-note.sticky/selftest.py      # a cut note opens read-only, never as a partial note
+python3 plugins/org.note-note.onenote/selftest.py     # which writes may be run again
 python3 lib/notemerge/selftest.py         # shared merging and recovery storage
-python3 providers/onenote/merge_selftest.py # concurrent edits, conflicts and OneNote saves
-python3 providers/onenote/order_selftest.py # section order: the OneDrive download, its limits and the join
+python3 plugins/org.note-note.onenote/merge_selftest.py # concurrent edits, conflicts and OneNote saves
+python3 plugins/org.note-note.onenote/order_selftest.py # section order: the OneDrive download, its limits and the join
 python3 services/microsoft/selftest.py    # 5xx and 401 classification
 ```
 
 Each pins a bug that shipped, and was found by a review of the Python:
 
-- **`providers/local/selftest.py`** — notes list oldest-first by **birth
+- **`plugins/org.note-note.local/selftest.py`** — notes list oldest-first by **birth
   time**, read through `statx(2)`, because `os.stat()` carries no
   `st_birthtime` on Linux: the old key defaulted to 0 for every note and fell
   through to a tie-break that compared *size as text*, so a note reordered
   itself as it was typed into. It checks the `struct statx` layout as well,
   since an offset wrong by eight bytes still hands back a plausible timestamp.
-- **`providers/local/selftest.py`, the listing's last line** — a listing
+- **`plugins/org.note-note.local/selftest.py`, the listing's last line** — a listing
   that reaches its byte budget or its deadline ends with `E partial` and
   the reason, a notebook it cannot read is an `X` record rather than an
   empty notebook, and a whole listing ends with `E complete`. The provider
   writes no `.order` from anything else: a cut listing used to look exactly
   like a whole one, and the order file was rewritten without every note it
   had not reached.
-- **`providers/sticky/selftest.py`** — a note longer than the provider's
+- **`plugins/org.note-note.sticky/selftest.py`** — a note longer than the provider's
   256 KiB ceiling is cut to it and says so (`truncatedAt`), and the
   provider opens such a note read-only with the reason. It used to open
   editable, so the next save would have written the first part over the
   whole note.
-- **`providers/notion/selftest.py`** — a save PATCHes the new blocks in
+- **`plugins/org.note-note.notion/selftest.py`** — a save PATCHes the new blocks in
   **before** deleting the old ones. Written the other way round it deleted
   first, so a refused insert — a 400 on a block Notion will not take, or the
   app being killed — left the page permanently empty. The test forces the
   insert to fail and asserts nothing was deleted.
-- **`providers/onenote/selftest.py`** — `graph_raw` and `msgraph.http` share
+- **`plugins/org.note-note.onenote/selftest.py`** — `graph_raw` and `msgraph.http` share
   the bounded transport. This suite checks the raw wrapper's 401 refresh
   and its caller's gate for whether a failure may be run again. A
   `kind: "transient"` re-runs the **whole job** three times, which is right
@@ -354,7 +354,7 @@ Each pins a bug that shipped, and was found by a review of the Python:
   forced refresh must not, or a passing blip would sign the user out.
 
 **Add a case for every provider-script bug.** Three of the four finish in
-about a tenth of a second; `providers/local/selftest.py` takes around four,
+about a tenth of a second; `plugins/org.note-note.local/selftest.py` takes around four,
 and is meant to — a birth time cannot be forged, so it really does wait a
 second between creating its notes. They are the only tests that cover what a
 script does when the far end misbehaves.
@@ -362,7 +362,7 @@ script does when the far end misbehaves.
 ## Testing OneNote content search
 
 ```bash
-python3 providers/onenote/search_selftest.py
+python3 plugins/org.note-note.onenote/search_selftest.py
 ```
 
 OneNote search tests use temporary private caches and stubbed Graph replies.
@@ -381,7 +381,7 @@ Pure Python, no shell involved — the best place to add regression cases:
 
 ```bash
 python3 - <<'EOF'
-import sys; sys.path.insert(0, "providers/onenote"); import onenote_md as m
+import sys; sys.path.insert(0, "plugins/org.note-note.onenote"); import onenote_md as m
 md = m.html_to_markdown('<body><p>Test</p><p>--------------</p></body>')["body"]
 html = m.markdown_to_onenote_html(md)
 print(repr(md)); print(html)
@@ -404,7 +404,7 @@ element identities. It is pure: plan against synthetic HTML, with no network:
 ```bash
 python3 - <<'EOF'
 import sys
-sys.path[:0] = ["lib", "providers/onenote"]
+sys.path[:0] = ["lib", "plugins/org.note-note.onenote"]
 from onenote_patch import plan
 page = '<body><div><p id="p:text">Original</p><img id="img:photo" src="resource"/></div></body>'
 desired = '<p>Edited</p><img src="resource"/>'
@@ -431,10 +431,10 @@ The scripts run standalone with the same environment the provider uses:
 
 ```bash
 export NOTE_NOTE_MS_TOKEN=$HOME/.local/state/omarchy/note-note-ms-onenote.json
-python3 providers/onenote/onenote.py list --cached
-python3 providers/onenote/onenote.py page "<id>"
+python3 plugins/org.note-note.onenote/onenote.py list --cached
+python3 plugins/org.note-note.onenote/onenote.py page "<id>"
 # Use the exact "view" returned by page; it identifies the editing baseline.
-echo '{"title":"t","view":"<returned-view>","body":"x"}' | python3 providers/onenote/onenote.py update "<id>" -
+echo '{"title":"t","view":"<returned-view>","body":"x"}' | python3 plugins/org.note-note.onenote/onenote.py update "<id>" -
 ```
 
 Rules when a real account is involved:
@@ -458,7 +458,7 @@ Rules when a real account is involved:
   ```bash
   python3 -c "import sys; sys.path.insert(0,'lib'); import ratelimit; \
               ratelimit.report_throttle('graph-onenote', 120)"
-  python3 providers/onenote/onenote.py page "<id>"   # throttled JSON, well under a second
+  python3 plugins/org.note-note.onenote/onenote.py page "<id>"   # throttled JSON, well under a second
   python3 -c "import sys; sys.path.insert(0,'lib'); import ratelimit; \
               ratelimit.clear_throttle('graph-onenote')"
   ```
@@ -585,3 +585,29 @@ inotifywait -m -e close_write,moved_to --format '%e %f' ~/Notes   # writes are a
    *backend*, not just the screen.
 5. If it touches the editor: run the round-trip test again — the editor is
    the part that silently rewrites text.
+
+## Theme and extension checks
+
+`python3 services/settings/selftest.py` exercises bounded, locked config
+transactions including competing writers. `python3 services/extensions/selftest.py`
+covers catalog ownership, data/code enable defaults, paths, limits and themes.
+Both are in the aggregate runner and CTest.
+
+`python3 tests/extensions_selftest.py` checks shortcut normalization, conflicts,
+scopes, aliases, live overrides/unbinding, provider preservation, and shortcut
+labels. Real keypresses launch plugin commands and restore focus. It also runs
+the real palette, external command,
+resource reader, theme workflow, stale settings handling and note saving through
+the native harness. Add `--shell` for Omarchy, or `--resources <installed-data-dir>`
+for an installed native layout. `--screenshot /tmp/theme-preview.png` captures
+the synthetic preview and a single-result command palette in
+`/tmp/theme-preview-commands.png`, plus the full command list with shortcut hints
+in `/tmp/theme-preview-workspace.png`. The workflow also checks that the result row
+fits above the footer. CTest's `document-theme` checks document formats, dirty
+state, undo/redo and authored ink against repeated highlighter updates.
+
+The extension workflow also exercises the built-in workspace commands: shared
+shortcut hints, sidebar toggling by command and key, Settings focus and dirty
+buffer preservation, context rejection, new-note creation with a dirty prior
+note, delete cancellation and confirmation, and notebook creation through the
+existing name field. All note mutations use isolated temporary fixtures.

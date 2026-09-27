@@ -1,6 +1,6 @@
 import QtQuick
 import "app/hosts/standalone" as Native
-import "app/providers/onenote" as OneNote
+import "app/plugins/org.note-note.onenote" as OneNote
 import "app/services/platform"
 
 // Use the real OneNote queue and process ownership with a slow synthetic

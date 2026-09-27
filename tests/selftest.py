@@ -11,21 +11,24 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 SUITES = [
     "lib/notemerge/selftest.py",
-    "providers/local/selftest.py",
-    "providers/notion/selftest.py",
-    "providers/sticky/selftest.py",
-    "providers/onenote/selftest.py",
-    "providers/onenote/merge_selftest.py",
-    "providers/onenote/search_selftest.py",
-    "providers/onenote/order_selftest.py",
+    "plugins/org.note-note.local/selftest.py",
+    "plugins/org.note-note.notion/selftest.py",
+    "plugins/org.note-note.sticky/selftest.py",
+    "plugins/org.note-note.onenote/selftest.py",
+    "plugins/org.note-note.onenote/merge_selftest.py",
+    "plugins/org.note-note.onenote/search_selftest.py",
+    "plugins/org.note-note.onenote/order_selftest.py",
     "services/microsoft/selftest.py",
     "lib/ratelimit_selftest.py",
     "services/requests/selftest.py",
+    "services/settings/selftest.py",
+    "services/extensions/selftest.py",
     "services/markdown/qthtml/selftest.py",
     "cpp/selftest.py",
     "tests/test_regressions.py",
     "tests/statusbar_selftest.py",
     "tests/transition_selftest.py",
+    "tests/extensions_selftest.py",
 ]
 
 
@@ -34,6 +37,8 @@ def main():
     env = dict(os.environ, QT_QPA_PLATFORMTHEME="generic")
     for suite in SUITES:
         command = [sys.executable, suite]
+        if suite == "tests/extensions_selftest.py":
+            command.append("--shell")
         if suite == "tests/transition_selftest.py" and "--host" in sys.argv:
             command.append("--host")
         try:

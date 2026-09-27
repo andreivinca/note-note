@@ -7,9 +7,14 @@ import "../design/controls"
 Item {
   id: root
 
+  function closeMenu() {
+    menu.close()
+  }
+
   // Search dims tabs with no matches.
   property string filterText: ""
   property var shortcutHandler: null
+  property var keybindings: null
   readonly property bool searchFocused: search.searchFocused
   function focusSearch() { search.focusSearch() }
   function setSearchText(text) { search.setSearchText(text) }
@@ -36,8 +41,6 @@ Item {
   signal sectionActivated(string key)
   signal filterEdited(string text)
   signal clearRequested()
-  signal moveRequested(int delta)
-  signal acceptRequested()
   signal settingsRequested()
   signal keysRequested()
   signal detachToggled()
@@ -46,7 +49,7 @@ Item {
 
   // Match the mockup's darker tab strip while retaining the theme's hue.
   // The background and overflow fades share this fill.
-  readonly property color fill: Qt.darker(root.background, 1.12)
+  readonly property color fill: Color.token("titlebar.background", Qt.darker(root.background, 1.12))
 
   ChromePopupStyle {
     id: popupStyle
@@ -89,7 +92,6 @@ Item {
       activeKey: root.activeKey
       filtering: root.filterText.length > 0
       background: root.fill
-      activeBackground: Style.chromeSurface(root.background, root.foreground)
       foreground: root.foreground
       fontFamily: root.fontFamily
       fontSize: root.tabFontSize
@@ -112,10 +114,9 @@ Item {
       accent: root.accent
       fontFamily: root.fontFamily
       shortcutHandler: root.shortcutHandler
+      keybindings: root.keybindings
       onFilterEdited: function(text) { root.filterEdited(text) }
       onClearRequested: root.clearRequested()
-      onMoveRequested: function(delta) { root.moveRequested(delta) }
-      onAcceptRequested: root.acceptRequested()
     }
 
     // Everything you do to note-note rather than to the note in front of you
@@ -188,6 +189,7 @@ Item {
       }
 
       QQC.Popup {
+            palette: ControlPalette {}
         id: menu
         // Hung from the button's right edge: the bar's own edge is a few
         // pixels further right, and a menu growing that way would run off it.
@@ -236,7 +238,7 @@ Item {
               // carries it a shade lighter — it labels the row, the word is
               // the row.
               readonly property color ink: rowMouse.containsMouse
-                ? Style.hoverStateColor(root.foreground, root.accent) : root.foreground
+                ? Style.hoverStateColor(popupStyle.text, root.accent) : popupStyle.text
 
               Text {
                 id: rowIcon

@@ -1,5 +1,4 @@
 import QtQuick
-import "KeyBindings.js" as Keys
 import "../design"
 import "../design/controls"
 
@@ -21,12 +20,30 @@ import "../design/controls"
 Item {
   id: root
 
+  property var shortcutHandler: null
   property bool opened: false
   property string title: ""
   // Under the heading: what the text below is — the file it came from, or a
   // word about where it applies. Empty leaves the line out entirely.
   property string subtitle: ""
   property string bodyText: ""
+  property string savedText: ""
+  readonly property bool dirty: opened && bodyArea.text !== savedText
+
+  function focusBody() {
+    bodyArea.forceActiveFocus()
+  }
+
+  function markSaved(text) {
+    root.savedText = text
+  }
+
+  function refreshIfClean() {
+    if (!root.dirty) {
+      bodyArea.text = root.bodyText
+      root.savedText = root.bodyText
+    }
+  }
   // A page that only has something to show locks its text. The caret still
   // walks it and the mouse still selects from it — reading and copying are
   // not editing — but nothing typed lands.
@@ -66,14 +83,15 @@ Item {
       root.closeRequested()
       return true
     }
-    // The save key is the action's (KeyBindings.js, savePage), so a page
-    // without an action has no use for it — and swallowing it there would
-    // take the key from whatever else might want it.
-    if (root.actionText.length > 0 && Keys.match(event, "page") === "savePage") {
-      root.actionRequested(bodyArea.text)
-      return true
-    }
     return false
+  }
+
+  function runAction() {
+    if (!root.opened || !root.actionText) {
+      return false
+    }
+    root.actionRequested(bodyArea.text)
+    return true
   }
 
   // Loaded once per open, not live-bound: an action that rewrites the host's
@@ -81,6 +99,7 @@ Item {
   // has kept typing since.
   onOpenedChanged: if (root.opened) {
     root.noticeText = ""
+    root.savedText = root.bodyText
     bodyArea.text = root.bodyText
     bodyArea.forceActiveFocus()
   }
@@ -178,6 +197,12 @@ Item {
 
       TextEdit {
         id: bodyArea
+        Keys.priority: Keys.BeforeItem
+        Keys.onPressed: function(event) {
+          if (root.shortcutHandler && root.shortcutHandler(event)) {
+            event.accepted = true
+          }
+        }
         width: bodyScroll.width
         height: Math.max(implicitHeight, bodyScroll.height)
         textFormat: TextEdit.PlainText

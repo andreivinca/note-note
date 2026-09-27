@@ -9,7 +9,7 @@ executable creates a normal Qt window on Wayland or X11.
 | Layer | Owns |
 |---|---|
 | `Workspace.qml` | Application state, provider lifecycle, note selection, autosave, settings, shortcuts and shared UI |
-| `ui/`, `services/`, `providers/`, `lib/` | Editor, document conversion, request queues and backend behavior, shared by both hosts |
+| `ui/`, `services/`, `plugins/`, `lib/`, `extensions/` | Editor, document conversion, request queues, packages and public imports, shared by both hosts |
 | `design/` | Shared color facade, dimensions and reusable controls |
 | `hosts/standalone/theme/` | Standalone desktop detection, palette resolution, portal preferences and live theme updates — C++ the standalone executable links, kept inside its host so the shared runtime tree holds only what both hosts load |
 | `services/platform/Platform.qml` | Host services: XDG paths composed from the backend's own directory names, process creation, the clipboard, external URLs and the backend's text inspector |
@@ -190,7 +190,9 @@ and `XDG_CACHE_HOME` overrides apply to both launchers.
 | Credentials and recovery drafts | `~/.local/state/omarchy/note-note-*` | `~/.local/state/notenote/note-note-*` |
 | Caches, pasted images, rate state | `~/.cache/omarchy/note-note-*` | `~/.cache/notenote/note-note-*` |
 | Microsoft registration overrides | `~/.config/omarchy/note-note.json` | `~/.config/notenote/accounts.json` |
-| External providers | `~/.config/omarchy/note-note/providers/` | `~/.config/notenote/providers/` |
+| Application plugins | `~/.config/notenote/plugins/` | Same |
+| Loose themes | `~/.config/notenote/themes/` | Same |
+| Legacy external providers (1.x compatibility) | `~/.config/omarchy/note-note/providers/` | `~/.config/notenote/providers/` |
 
 The standalone app does not copy credentials or recovery journals from the
 plugin. Each signs in separately; settings and configured local notebooks
@@ -205,7 +207,7 @@ Existing more specific overrides such as `NOTE_NOTE_MS_TOKEN` still apply.
 
 External providers can use standard Qt Quick Controls and the injected
 `services.platform`, `services.style`, `services.colors` and
-`services.processes`. See [the provider contract](../providers/PROVIDERS.md).
+`services.processes`. See [the provider contract](../docs/providers.md).
 Providers importing shell modules themselves remain Omarchy-specific.
 
 ## Verification
@@ -230,3 +232,12 @@ To test an installed layout, supply its binary and resource directory to
 These checks validate local behavior and scripted network responses. They
 do not certify every Linux distribution or replace manual account sign-in
 testing before a public release.
+
+## Theme and command modules
+
+The standalone engine registers `<data-dir>/extensions` as its public QML
+import root. Its window and workspace use the effective application control
+palette; desktop detection retains its separate original inputs. Native
+installation includes plugin manifests, theme JSON, token specifications and
+public QML modules. Built-in providers now live in `plugins/org.note-note.*`;
+provider IDs, account state and note storage paths are unchanged.
