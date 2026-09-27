@@ -1034,17 +1034,25 @@ Window {
     }
   }
 
+  function toolPopup(id) {
+    var holder = keys.findChild(editor, "editingPopupHolder-" + id)
+    require(holder !== null, "missing popup holder for " + id)
+    return Array.from(holder.data).find(function(object) {
+      return object.objectName === "editingPopup-" + id
+    })
+  }
+
   function toolLinkPanel() {
     load({ source: "word\n" })
     selectText("word")
     var link = editor.tools.find("link")
     editor.tool("link")
     keys.wait(20)
-    require(link.panelOpen && keys.findChild(editor, "linkUrl"), "tool-owned panel was not loaded")
+    require(link.panelOpen && keys.findChild(toolPopup("link").contentItem, "linkUrl"), "tool-owned panel was not loaded")
     link.linkUrl = "https://example.com/?a=1&b=2"
     link.linkText = "A&B <word>"
     require(link.editor.current(link.panelContext), "link context changed while opening panel: " + JSON.stringify(link.panelContext) + " -> " + JSON.stringify(editor.editContext()))
-    var insert = keys.findChild(editor, "insertLink")
+    var insert = keys.findChild(toolPopup("link").contentItem, "insertLink")
     keys.mouseMove(insert, insert.width / 2, insert.height / 2)
     keys.waitForRendering(insert)
     keys.mouseClick(insert, insert.width / 2, insert.height / 2)
@@ -1463,8 +1471,8 @@ Window {
     var row = keys.findChild(popup.contentItem, "editingMenu-customMonth")
     require(row && row.visible, "custom month is missing from Insert")
     keys.mouseClick(row, row.width / 2, row.height / 2)
-    var year = keys.findChild(editor, "customMonthYear")
-    var month = keys.findChild(editor, "customMonthMonth")
+    var year = keys.findChild(toolPopup("customMonth").contentItem, "customMonthYear")
+    var month = keys.findChild(toolPopup("customMonth").contentItem, "customMonthMonth")
     keys.tryVerify(function() { return tool.panelOpen && year.activeFocus }, 3000)
     var today = new Date()
     require(tool.yearText === String(today.getFullYear()) && tool.selectedMonth === today.getMonth(),
@@ -1482,7 +1490,7 @@ Window {
     keys.keyClick(Qt.Key_A, Qt.ControlModifier)
     typeText("2024")
     require(tool.yearText === "2024", "typed year did not reach the tool")
-    var insert = keys.findChild(editor, "insertCustomMonth")
+    var insert = keys.findChild(toolPopup("customMonth").contentItem, "insertCustomMonth")
     keys.mouseClick(insert, insert.width / 2, insert.height / 2)
     keys.tryVerify(function() { return !tool.panelOpen }, 3000)
     var expected = "Before\n\n" + Calendar.markdown(2024, 1, Qt.locale()) + "\n\nAfter\n"
@@ -1525,9 +1533,9 @@ Window {
     load({ source: source })
     var tool = editor.tools.find("customMonth")
     editor.tool("customMonth")
-    var year = keys.findChild(editor, "customMonthYear")
-    var month = keys.findChild(editor, "customMonthMonth")
-    var insert = keys.findChild(editor, "insertCustomMonth")
+    var year = keys.findChild(toolPopup("customMonth").contentItem, "customMonthYear")
+    var month = keys.findChild(toolPopup("customMonth").contentItem, "customMonthMonth")
+    var insert = keys.findChild(toolPopup("customMonth").contentItem, "insertCustomMonth")
     keys.tryVerify(function() { return year.activeFocus }, 3000)
     keys.keyClick(Qt.Key_Backspace)
     require(!tool.valid && !insert.enabled && !tool.submit() && tool.panelOpen,
@@ -1539,7 +1547,7 @@ Window {
     keys.keyClick(Qt.Key_Escape)
     require(!tool.panelOpen && savedMarkdown() === source, "Escape did not cancel without editing")
     editor.tool("customMonth")
-    var cancel = keys.findChild(editor, "cancelCustomMonth")
+    var cancel = keys.findChild(toolPopup("customMonth").contentItem, "cancelCustomMonth")
     keys.waitForRendering(cancel)
     keys.mouseClick(cancel, cancel.width / 2, cancel.height / 2)
     require(!tool.panelOpen && savedMarkdown() === source, "Cancel changed the document")

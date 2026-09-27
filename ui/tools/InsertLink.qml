@@ -1,6 +1,6 @@
 import QtQuick
 import "../../design"
-import "../../design/controls"
+import ".." as AppUi
 import "../editing"
 
 Tool {
@@ -8,6 +8,7 @@ Tool {
   toolId: "link"
   label: "Insert link"
   icon: "󰌹"
+  panelPopup: true
   property string linkText: ""
   property string linkUrl: "https://"
 
@@ -43,9 +44,14 @@ Tool {
   }
 
   panel: Component {
-    Flow {
-      id: panelContent
-      spacing: Style.spacing.sm
+    ToolForm {
+      id: form
+      action: tool
+      submitButton.objectName: "insertLink"
+      cancelButton.objectName: "cancelLink"
+      onSubmitted: tool.submit()
+      Keys.onEscapePressed: tool.cancel()
+
       function focusInput() {
         if (tool.panelOpen) {
           var field = tool.linkText ? urlField : textField
@@ -53,62 +59,53 @@ Tool {
           field.cursorPosition = field.text.length
         }
       }
-      TextField {
-        id: textField
-        objectName: "linkText"
-        width: Style.space(200)
-        text: tool.linkText
-        placeholderText: "Text"
-        foreground: tool.editor.foreground
-        accent: tool.editor.accent
-        font.family: tool.editor.fontFamily
-        verticalPadding: Style.spacing.xxs
-        onTextEdited: tool.linkText = text
-        Keys.onReturnPressed: tool.submit()
-        Keys.onEscapePressed: tool.cancel()
+
+      Column {
+        width: parent.width
+        spacing: Style.spacing.sm
+        Text {
+          text: "Text"
+          color: Util.alpha(form.foreground, 0.7)
+          font.family: form.fontFamily
+          font.pixelSize: Style.font.bodySmall
+        }
+        AppUi.ChromeTextField {
+          id: textField
+          objectName: "linkText"
+          width: parent.width
+          text: tool.linkText
+          placeholderText: "Link text"
+          Accessible.name: "Link text"
+          foreground: form.foreground
+          accent: tool.editor.accent
+          font.family: form.fontFamily
+          onTextEdited: tool.linkText = text
+          Keys.onReturnPressed: tool.submit()
+          Keys.onEnterPressed: tool.submit()
+        }
       }
-      TextField {
-        id: urlField
-        objectName: "linkUrl"
-        width: Style.space(340)
-        text: tool.linkUrl
-        placeholderText: "https://…"
-        foreground: tool.editor.foreground
-        accent: tool.editor.accent
-        font.family: tool.editor.fontFamily
-        verticalPadding: Style.spacing.xxs
-        onTextEdited: tool.linkUrl = text
-        Keys.onReturnPressed: tool.submit()
-        Keys.onEscapePressed: tool.cancel()
-      }
-      Button {
-        objectName: "insertLink"
-        text: "Insert"
-        bordered: true
-        foreground: tool.editor.foreground
-        accent: tool.editor.accent
-        verticalPadding: Style.spacing.xxs
-        onClicked: tool.submit()
-      }
-      Button {
-        text: "Cancel"
-        bordered: true
-        foreground: tool.editor.foreground
-        accent: tool.editor.accent
-        verticalPadding: Style.spacing.xxs
-        onClicked: tool.cancel()
-      }
-      // Once the panel is in the scene: a forceActiveFocus() from within
-      // completion runs before the item can take focus.
-      Component.onCompleted: {
-        Qt.callLater(panelContent.focusInput)
-      }
-      Connections {
-        target: tool
-        function onPanelOpenChanged() {
-          if (tool.panelOpen) {
-            Qt.callLater(panelContent.focusInput)
-          }
+      Column {
+        width: parent.width
+        spacing: Style.spacing.sm
+        Text {
+          text: "URL"
+          color: Util.alpha(form.foreground, 0.7)
+          font.family: form.fontFamily
+          font.pixelSize: Style.font.bodySmall
+        }
+        AppUi.ChromeTextField {
+          id: urlField
+          objectName: "linkUrl"
+          width: parent.width
+          text: tool.linkUrl
+          placeholderText: "https://…"
+          Accessible.name: "Link URL"
+          foreground: form.foreground
+          accent: tool.editor.accent
+          font.family: form.fontFamily
+          onTextEdited: tool.linkUrl = text
+          Keys.onReturnPressed: tool.submit()
+          Keys.onEnterPressed: tool.submit()
         }
       }
     }

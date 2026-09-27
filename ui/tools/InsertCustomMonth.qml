@@ -1,6 +1,7 @@
 import QtQuick
+import QtQuick.Layouts
 import "../../design"
-import "../../design/controls"
+import ".." as AppUi
 import "../editing"
 import "../editing/Calendar.js" as Calendar
 
@@ -9,6 +10,7 @@ Tool {
   toolId: "customMonth"
   label: "Insert custom month"
   icon: "󰃭"
+  panelPopup: true
   capability: "table"
   property int selectedMonth: 0
   property string yearText: ""
@@ -41,10 +43,14 @@ Tool {
   }
 
   panel: Component {
-    Column {
-      id: panelContent
+    ToolForm {
+      id: form
       objectName: "customMonthPanel"
-      spacing: Style.spacing.sm
+      action: tool
+      submitButton.objectName: "insertCustomMonth"
+      submitButton.enabled: tool.valid
+      cancelButton.objectName: "cancelCustomMonth"
+      onSubmitted: tool.submit()
       Keys.onEscapePressed: tool.cancelPanel()
 
       function focusInput() {
@@ -54,105 +60,76 @@ Tool {
         }
       }
 
-      Flow {
+      RowLayout {
         width: parent.width
-        spacing: Style.spacing.sm
-        Row {
+        spacing: Style.spacing.lg
+        Column {
+          Layout.fillWidth: true
+          Layout.preferredWidth: Style.space(180)
+          Layout.minimumWidth: 0
           spacing: Style.spacing.sm
           Text {
-            id: monthLabel
             text: "Month"
-            height: monthField.height
-            verticalAlignment: Text.AlignVCenter
-            color: tool.editor.foreground
-            font.family: tool.editor.fontFamily
-            font.pixelSize: Style.font.body
+            color: Util.alpha(form.foreground, 0.7)
+            font.family: form.fontFamily
+            font.pixelSize: Style.font.bodySmall
           }
-          Dropdown {
+          AppUi.ChromeDropdown {
             id: monthField
             objectName: "customMonthMonth"
-            width: Math.min(Style.space(190), panelContent.width - monthLabel.width - parent.spacing)
-            showLabel: false
+            width: parent.width
             label: "Month"
             options: tool.months
             value: String(tool.selectedMonth)
-            foreground: tool.editor.foreground
+            foreground: form.foreground
             accent: tool.editor.accent
-            fontFamily: tool.editor.fontFamily
+            fontFamily: form.fontFamily
             onSelected: function(value) {
               tool.selectedMonth = Number(value)
             }
           }
         }
-        Row {
+        Column {
+          Layout.preferredWidth: Style.space(80)
           spacing: Style.spacing.sm
           Text {
             text: "Year"
-            height: yearField.height
-            verticalAlignment: Text.AlignVCenter
-            color: tool.editor.foreground
-            font.family: tool.editor.fontFamily
-            font.pixelSize: Style.font.body
+            color: Util.alpha(form.foreground, 0.7)
+            font.family: form.fontFamily
+            font.pixelSize: Style.font.bodySmall
           }
-          TextField {
+          AppUi.ChromeTextField {
             id: yearField
             objectName: "customMonthYear"
-            width: Style.space(90)
+            width: parent.width
             text: tool.yearText
             placeholderText: "Year"
+            Accessible.name: "Year"
             validator: IntValidator { bottom: 1; top: 9999 }
             maximumLength: 4
             inputMethodHints: Qt.ImhDigitsOnly
-            foreground: tool.editor.foreground
+            foreground: form.foreground
             accent: tool.editor.accent
-            font.family: tool.editor.fontFamily
+            font.family: form.fontFamily
             onTextEdited: tool.yearText = text
             Keys.onReturnPressed: tool.submit()
             Keys.onEnterPressed: tool.submit()
           }
         }
-        Row {
-          spacing: Style.spacing.sm
-          Button {
-            objectName: "insertCustomMonth"
-            text: "Insert"
-            enabled: tool.valid
-            opacity: enabled ? 1 : 0.45
-            bordered: true
-            focusable: true
-            foreground: tool.editor.foreground
-            accent: tool.editor.accent
-            onClicked: tool.submit()
-          }
-          Button {
-            objectName: "cancelCustomMonth"
-            text: "Cancel"
-            bordered: true
-            focusable: true
-            foreground: tool.editor.foreground
-            accent: tool.editor.accent
-            onClicked: tool.cancelPanel()
-          }
-        }
       }
-
       Text {
         visible: !tool.valid
         text: "Enter a year from 1 to 9999."
         width: parent.width
         wrapMode: Text.Wrap
-        color: tool.editor.foreground
-        font.family: tool.editor.fontFamily
+        color: Color.urgent
+        font.family: form.fontFamily
         font.pixelSize: Style.font.caption
       }
-
-      Component.onCompleted: Qt.callLater(panelContent.focusInput)
       Connections {
         target: tool
         function onPanelOpenChanged() {
-          if (tool.panelOpen) {
-            Qt.callLater(panelContent.focusInput)
-          } else {
+          if (!tool.panelOpen) {
             monthField.close()
           }
         }

@@ -137,8 +137,7 @@ Item {
         }
       }
       if (button) {
-        var buttonX = button.mapToItem(bar, 0, 0).x
-        return Math.max(0, Math.min(buttonX, bar.width - popupWidth))
+        return Math.max(0, Math.min(button.toolbarX, bar.width - popupWidth))
       }
     }
     return strip.leftPadding
@@ -159,12 +158,19 @@ Item {
             parent: bar
             objectName: "editingPopup-" + tool.toolId
             popupType: QQC.Popup.Item
+            width: Math.min(implicitWidth, bar.width)
             x: bar.popupX(tool.toolId, width)
             y: bar.height
             padding: chromePopupStyle.padding + Border.width(chromePopupStyle.borderSpec)
             focus: true
             visible: tool.panelOpen && bar.registry.canExecute(tool)
             closePolicy: QQC.Popup.CloseOnEscape | QQC.Popup.CloseOnPressOutside
+            onOpened: {
+              var panel = contentItem.item
+              if (panel && typeof panel.focusInput === "function") {
+                panel.focusInput()
+              }
+            }
             onClosed: {
               if (tool.panelOpen) {
                 tool.cancelPanel()

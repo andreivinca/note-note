@@ -81,6 +81,8 @@ Rectangle {
           id: actionButton
           readonly property var modelData: buttonSlot.modelData
           readonly property bool labeledMenu: modelData.isMenu && modelData.toolbarLabelVisible
+          // Keep popup positioning reactive while the toolbar wraps or aligns groups.
+          readonly property real toolbarX: group.toolbarFlow.x + group.x + toolsFlow.x + buttonSlot.x + x
           objectName: "editingTool-" + modelData.toolId
           enabled: group.editor.writable && (!modelData.isMenu || menu.rows.length > 0)
           // Dropdowns and icon buttons share the same face geometry.

@@ -2,7 +2,7 @@ import QtQuick
 import "../design"
 import "../design/controls" as Controls
 
-// Shared typography, spacing and surface for the search and command fields.
+// Shared typography, spacing and surface for search, commands and tool forms.
 Controls.TextField {
   id: field
   property color surfaceBackground: Color.menu.background

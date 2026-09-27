@@ -131,10 +131,11 @@ including January of the following year when run in December. It starts on
 day one so dates at the end of a month cannot skip a shorter month.
 
 `InsertCustomMonth.qml` supplies `customMonth`, the last default item in Insert month.
-It opens a panel with a localized month dropdown and a year field (1–9999),
+It opens a popup with a localized month dropdown and a year field (1–9999),
 initially set to the current month and year. Insert or Enter in the year field
-confirms; Cancel or Escape dismisses it without editing. All three tools use
-`ui/editing/Calendar.js`, including Gregorian leap-year rules and years 1–99.
+confirms; Cancel, Escape or clicking outside dismisses it without editing.
+All three tools use `ui/editing/Calendar.js`, including Gregorian leap-year rules
+and years 1–99.
 
 These tools use the existing `table` capability, so they are available automatically
 for providers that support tables. All calendar actions and Insert a table can
@@ -196,16 +197,21 @@ applicable, provider support so its content survives saving and reloading.
 | `options` | Fixed executable `Tool` choices owned by this file, as in `Heading.qml`. They retain individual action IDs and capabilities but move together in the toolbar. Bind their `editor` and availability to the owning tool. |
 | `previewScale`, `previewBold` | Optional menu-label styling relative to the chrome text size, used by headings. |
 | `panelPopup` | Render the tool panel as a dropdown anchored to its toolbar button. |
-| `panel`, `panelOpen` | Optional QML component rendered below the toolbar and whether it is open. |
+| `panel`, `panelOpen` | Optional QML component and whether it is open. Shown in a popup when `panelPopup` is true, otherwise below the toolbar. |
 | `panelContext` | Note, document revision and selection captured by `openPanel()`. Cleared when the panel closes. |
 
 Implement `execute()` with the tool's specific behavior. Simple tools call a
 shared operation; complex tools can keep additional functions, state and a
-panel in the same file. `InsertLink.qml` and `InsertCustomMonth.qml` demonstrate panels, and `Insert.qml`
+panel in the same file. `InsertLink.qml` and `InsertCustomMonth.qml` demonstrate popup forms, and `Insert.qml`
 defines the dropdown container. Any executable tool can become a dropdown item.
 
 Input tools call `openPanel()` from `execute()` after setting their initial
 values. This captures the insertion context and opens their `panel` component.
+Popup panels can provide `focusInput()` to focus and select their initial input
+once the popup is open.
+`ToolForm.qml` supplies the shared form title, spacing and action buttons. Form
+fields use `ChromeTextField` and `ChromeDropdown`, which share the search field's
+theme colors, borders, corner radius and height through `ChromeControlStyle`.
 On confirmation, validate the form and call `submitPanel(function() { ... })`
 with the edit. It rechecks availability, provider support and the captured
 context, closes the panel, then applies the edit and restores editor focus.
