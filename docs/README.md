@@ -17,6 +17,7 @@ are, and the mistakes that are expensive to repeat.
 | [Status bar](status-bar.md) | registering a status control or creating a custom one |
 | [Security rules](security.md) | writing any code that reads a file, spawns a process, or talks to a network — **and before every release** |
 | [Engine notes](engine-notes.md) | fighting Qt, QML, Markdown, Graph or Notion; check here before debugging |
+| [Known bugs](known-bugs.md) | seeing odd behaviour that may already be understood, or checking whether a Qt upgrade fixed one |
 | [Testing](testing.md) | verifying a change without a keyboard and without touching real notes |
 | [Release process](release-process.md) | cutting a release or answering the marketplace |
 | [Decisions](decisions.md) | wondering "why wasn't this done the obvious way?" |
