@@ -185,6 +185,10 @@ this key-event window closed; the default run executes those cases.
 Backspace checks remove single, adjacent and nested tables from the position
 immediately after them, then save/reload and undo/redo. They also check normal
 text deletion, selections, cell boundaries and read-only notes.
+Table history checks follow the note session's read-only loading sequence,
+then type, Backspace and Delete below filled, empty, adjacent and nested tables.
+They verify the exact text and caret through repeated keyboard and API
+Undo/Redo, with no load-time edit signals or extra history entries.
 Right-arrow checks cover empty and multiline code blocks and rules, including
 repeated Right, typing into the empty landing paragraph, and undo/redo.
 Delete checks cover empty headings and blank fillers before ordered, bullet

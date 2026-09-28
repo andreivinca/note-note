@@ -184,6 +184,15 @@ once shown, so a note longer than its pane opened scrolled to the bottom.
 The editor applies the flag itself and puts the caret and the scroll back
 around it (`NoteEditor.applyReadOnly`).
 
+**Normalize loaded documents while undo is disabled.** The note session holds
+the editor read-only during loading, but its initial format setup must still
+run. Qt creates implicit paragraphs around tables without the dialect's line
+height. Deferring their normalization until the first keystroke records a
+separate format undo: Ctrl+Z jumps back to the table and leaves the typed text
+in place. `NoteEditor.normalizeNow()` permits normalization while `settingText`
+is true, so those formats belong to the loaded baseline without creating undo
+history or reporting a user edit. Ordinary read-only edits remain guarded.
+
 **Read the document as a range, not as `text`.** `getFormattedText(0, length)`
 is what the converter is written against: Qt brackets a range with fragment
 markers, and the reader strips them. `TextEdit.text` does answer with the live

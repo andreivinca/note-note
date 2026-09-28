@@ -286,6 +286,60 @@ Window {
     return end
   }
 
+  function tableTypingHistory() {
+    var body = keys.findChild(editor, "noteBody")
+    var table = "| A | B |\n|---|---|\n| one | two |\n"
+    var sources = [
+      table,
+      "Before\n\n" + table,
+      "| A | B |\n|---|---|\n|  |  |\n",
+      table + "\n" + table,
+      "<table><tr><td><table><tr><td>inner</td></tr></table></td><td>cell</td></tr></table>\n"
+    ]
+    for (var source of sources) {
+      for (var api of [false, true]) {
+        for (var key of [Qt.Key_X, Qt.Key_Backspace, Qt.Key_Delete]) {
+          // Notes are held read-only until loading finishes. Any setup
+          // left until the first keystroke becomes part of user history.
+          editor.readOnly = true
+          var editsBefore = test.editSignals
+          load({ source: source + "\nFirst line\n\nSecond line\n\nLast line\n" })
+          editor.readOnly = false
+          require(test.editSignals === editsBefore, "loading a table reported a user edit")
+          require(!body.canUndo && !body.canRedo, "loading a table created an undo step")
+          var original = editor.documentHtml()
+          var position = editor.plainText().indexOf("Second line") + 6
+          // Undoing forward Delete leaves Qt's caret after the restored
+          // character; typing and Backspace return to the original position.
+          var undoCaret = position + (key === Qt.Key_Delete ? 1 : 0)
+          editor.setCursorPosition(position)
+          keys.keyClick(key)
+          var edited = editor.documentHtml(), caret = editor.cursorPosition()
+          require(edited !== original, "keystroke did not edit text below the table")
+          for (var i = 0; i < 2; i++) {
+            if (api) {
+              editor.undo()
+            } else {
+              keys.keyClick(Qt.Key_Z, Qt.ControlModifier)
+            }
+            require(editor.cursorPosition() === undoCaret,
+                    "undo moved the caret from " + undoCaret + " to " + editor.cursorPosition())
+            require(editor.documentHtml() === original, "one undo did not restore the text below the table")
+            require(!body.canUndo, "table setup left an extra undo step")
+            if (api) {
+              editor.redo()
+            } else {
+              keys.keyClick(Qt.Key_Z, Qt.ControlModifier | Qt.ShiftModifier)
+            }
+            require(editor.cursorPosition() === caret, "redo moved the caret away from the edit")
+            require(editor.documentHtml() === edited, "redo did not restore the text below the table")
+            require(!body.canRedo, "redo did not consume the complete edit")
+          }
+        }
+      }
+    }
+  }
+
   function cells() { return editor.plainText().split("\uFDD0").length - 1 }
 
   function addRow(data) {
@@ -639,8 +693,7 @@ Window {
   }
 
   function editNestedList(data) {
-    // NoteSession loads real notes read-only, then enables editing. Keep
-    // that sequence so normalization first runs on the user's keystroke.
+    // Match NoteSession's read-only loading sequence before editing.
     editor.readOnly = true
     load(data)
     editor.readOnly = false
@@ -2309,6 +2362,7 @@ Window {
       { name: "double Enter adds a row to the innermost table and undoes", run: nestedTableEnter },
       { name: "tables and calendars insert into empty cells and reload without extra content", run: nestedTableEmptyCell },
       { name: "Backspace after a table removes it, preserving neighbours and undo", run: tableBackspace },
+      { name: "typing below loaded tables preserves the text and caret through keyboard and API undo", run: tableTypingHistory },
       { name: "table Backspace respects cell boundaries, text selections and read-only notes", run: tableBackspaceBoundaries },
       { name: "Backspace removes table checkboxes without stray markers and restores their state on undo", run: checkboxBackspace }
     ]

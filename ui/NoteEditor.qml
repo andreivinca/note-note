@@ -1057,7 +1057,11 @@ Item {
   // edits of their own.
   property bool normalizing: false
   function normalizeNow() {
-    if (root.normalizing || root.replayingHistory || root.plain || root.readOnly || !nativeBlocks.item) {
+    // Loading replaces the document with undo disabled, even while the note
+    // session holds it read-only. Set up its formats then: deferring a table's
+    // implicit paragraphs until typing creates a separate format undo step.
+    if (root.normalizing || root.replayingHistory || root.plain
+        || (root.readOnly && !root.settingText) || !nativeBlocks.item) {
       return
     }
     root.normalizing = true
