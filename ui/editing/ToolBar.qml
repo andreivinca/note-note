@@ -10,6 +10,7 @@ Item {
   property color background: Color.menu.background
   property bool toolsVisible: true
   readonly property real groupPadding: Style.spacing.xs
+  readonly property real popupMargin: Style.spacing.lg
   // Buttons and dividers share the first row's center. Its height
   // includes both levels of padding and grows with the tallest control.
   readonly property real rowHeight: Math.max(Style.space(44),
@@ -137,10 +138,10 @@ Item {
         }
       }
       if (button) {
-        return Math.max(0, Math.min(button.toolbarX, bar.width - popupWidth))
+        return Math.max(popupMargin, Math.min(button.toolbarX + popupMargin, bar.width - popupWidth - popupMargin))
       }
     }
-    return strip.leftPadding
+    return Math.max(popupMargin, strip.leftPadding)
   }
 
   Repeater {
@@ -158,9 +159,9 @@ Item {
             parent: bar
             objectName: "editingPopup-" + tool.toolId
             popupType: QQC.Popup.Item
-            width: Math.min(implicitWidth, bar.width)
+            width: Math.min(implicitWidth, Math.max(0, bar.width - 2 * bar.popupMargin))
             x: bar.popupX(tool.toolId, width)
-            y: bar.height
+            y: bar.height + bar.popupMargin
             padding: chromePopupStyle.padding + Border.width(chromePopupStyle.borderSpec)
             focus: true
             visible: tool.panelOpen && bar.registry.canExecute(tool)
