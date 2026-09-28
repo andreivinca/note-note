@@ -21,8 +21,8 @@
 // TextLinks colours and locates URLs without changing the document, and
 // clears inherited anchors from empty paragraphs.
 // The edit-block brackets (beginEditBlock/
-// endEditBlock) write nothing at all: they fence the editor's own strokes
-// into one undo step.
+// endEditBlock) fence the editor's own strokes into one undo step, including
+// the first paragraph's character format that Qt does not record itself.
 //
 // The module is OPTIONAL in the shell. It is built locally (`sh cpp/build.sh`)
 // against the system Qt and loaded by a directory import
@@ -223,4 +223,5 @@ private:
     QMetaObject::Connection m_contentConnection;
     int m_contentRevision = 0;
     int m_editDepth = 0;
+    QTextCharFormat m_firstBlockCharFormat;
 };

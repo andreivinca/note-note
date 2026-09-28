@@ -1,6 +1,7 @@
 import QtQuick
 import "../MarkdownBlocks.js" as MarkdownBlocks
 import "../Dialect.js" as Dialect
+import "../QuoteBars.js" as QuoteBars
 
 // The document API shared by tools. The host and TextEdit are implementation
 // details; tool files use the operations below, never the host's QML ids.
@@ -135,8 +136,8 @@ QtObject {
     return writable && !host.refusedAcrossCode()
   }
 
-  function selectionInCode() {
-    return host.selectionInCode()
+  function selectionInCode(includeFinalBreak) {
+    return host.selectionInCode(includeFinalBreak)
   }
 
   function typeInCode(from, to, text) {
@@ -196,17 +197,58 @@ QtObject {
     return Dialect.withoutBackground(html, api.codeChipColour, false)
   }
 
+  function textOfBlocks(first, last) {
+    // Ranged getText can return the whole table when it touches a cell.
+    var text = textArea.getText(0, textArea.length)
+    var spans = QuoteBars.blockSpans(text)
+    return text.substring(spans.starts[first], spans.ends[last])
+  }
+
+  function textLines() {
+    // A soft break can become a paragraph break when text becomes code.
+    // Anchor the caret to its visible line, using the exported block order
+    // to account for Qt's implicit paragraphs around tables.
+    return QuoteBars.blockSpans(textArea.getText(0, textArea.length).replace(/\u2028/g, "\u2029"))
+  }
+
+  // Block tools share selection boundaries, stale-context checks and one
+  // undoable replacement. The edit returns Markdown lines, or nothing when
+  // the selected blocks cannot be changed. asText unfences existing code.
+  function editBlocks(edit, asText) {
+    var caret = textArea.cursorPosition
+    var before = textLines(), caretLine = 0
+    while (caretLine + 1 < before.starts.length && before.starts[caretLine + 1] <= caret) {
+      caretLine++
+    }
+    var caretOffset = caret - before.starts[caretLine]
+    withMarkdown(function(lines, map) {
+      var start = Math.min(textArea.selectionStart, textArea.selectionEnd)
+      var end = Math.max(textArea.selectionStart, textArea.selectionEnd)
+      var from = blockAt(start), to = blockAt(end > start ? end - 1 : end)
+      var first = host.lineOfBlock(map, from), last = host.lineOfBlock(map, to)
+      // Every soft-broken line belongs to the same document paragraph.
+      while (last + 1 < lines.length && map.blocks[last + 1] === map.blocks[last]) {
+        last++
+      }
+      var out = edit(lines, map, { first: first, last: last, from: from, to: to })
+      if (!out) {
+        return
+      }
+      replaceDocument(out.join("\n"), caret, function() {
+        var after = api.textLines()
+        var line = Math.min(caretLine, after.starts.length - 1)
+        textArea.cursorPosition = Math.min(after.starts[line] + caretOffset, after.ends[line])
+      })
+    }, asText)
+  }
+
   function transformBlocks(transform, options) {
     options = options || ({})
     var restyle = function(line) {
       return transform(api.blockParts(line))
     }
-    withMarkdown(function(lines, map) {
-      var first = lineAt(map, Math.min(textArea.selectionStart, textArea.selectionEnd))
-      var last = lineAt(map, Math.max(textArea.selectionStart, textArea.selectionEnd))
-      var caret = textArea.cursorPosition, changed = false
-      var caretBlock = blockAt(caret)
-      var caretOffset = caret - host.blockStart(caretBlock)
+    editBlocks(function(lines, map, range) {
+      var first = range.first, last = range.last, changed = false
       var code = MarkdownBlocks.fences(map)
       var isList = !!options.list
       // Selected paragraphs arrive with Markdown's blank separator lines
@@ -267,11 +309,7 @@ QtObject {
         }
         return
       }
-      // Qt may add an implicit empty paragraph after a table on import.
-      // Keep the caret in its content block instead of at an absolute offset.
-      replaceDocument(out.join("\n"), caret, function() {
-        textArea.cursorPosition = Math.min(host.blockStart(caretBlock) + caretOffset, textArea.length)
-      })
+      return out
     })
   }
 

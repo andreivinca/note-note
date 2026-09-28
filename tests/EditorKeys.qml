@@ -1880,7 +1880,7 @@ Window {
     require(helperlessMarkdown() === table, "the refused list changed the table: " + helperlessMarkdown())
   }
 
-  function clickListTool(id) {
+  function clickEditingTool(id) {
     var button = keys.findChild(editor, "editingTool-" + id)
     require(button && button.visible && button.enabled, id + " button is unavailable")
     // Leaving a list restores the heading menu and can move the list group.
@@ -1899,7 +1899,7 @@ Window {
       }
       var position = editor.cursorPosition()
       var original = editor.documentHtml()
-      clickListTool(id)
+      clickEditingTool(id)
       keys.tryVerify(function() { return editor.blockInfoAt(position).kind === "list" }, 3000)
       require(editor.blockInfoAt(position).kind === "list", "list missed the empty paragraph after " + source)
       require(editor.cursorPosition() === position, "list moved the caret")
@@ -1921,17 +1921,17 @@ Window {
       var body = keys.findChild(editor, "noteBody")
       var end = editor.plainText().indexOf("Third")
       body.select(backwards ? end : 0, backwards ? 0 : end)
-      clickListTool(id)
+      clickEditingTool(id)
       var expected = prefix + "First\n" + (id === "ol" ? "2. " : prefix) + "Second\n\nThird\n"
       require(savedMarkdown() === expected, "selection included the next paragraph or lost numbering: " + savedMarkdown())
       require(body.selectionStart === 0 && body.selectionEnd === end && body.cursorPosition === (backwards ? 0 : end),
               "list changed the selection")
-      clickListTool(id)
+      clickEditingTool(id)
       require(savedMarkdown() === "First\n\nSecond\n\nThird\n", "second click did not remove selected markers")
     }
     load({ source: "- [x] Checked\n- Bullet\n\nPlain\n" })
     selectText(editor.plainText())
-    clickListTool(id)
+    clickEditingTool(id)
     var saved = savedMarkdown()
     var expectedMixed = id === "ol" ? "1. Checked\n2. Bullet\n3. Plain\n"
       : (id === "todo" ? "- [x] Checked\n- [ ] Bullet\n- [ ] Plain\n" : "- Checked\n- Bullet\n- Plain\n")
@@ -1955,7 +1955,7 @@ Window {
       editor.setCursorPosition(target)
       var original = editor.documentHtml()
       var originalCells = cells()
-      clickListTool(id)
+      clickEditingTool(id)
       keys.tryVerify(function() { return editor.blockInfoAt(target).kind === "list" }, 3000)
       require(editor.blockInfoAt(target).kind === "list", "list did not format the table cell")
       require(editor.blockInfoAt(editor.plainText().indexOf("untouched")).kind !== "list", "list changed a neighbouring cell")
@@ -1976,7 +1976,7 @@ Window {
       }
       editor.setCursorPosition(target)
       require(editor.blockInfoAt(target).kind === "list", "reload lost the table list")
-      clickListTool(id)
+      clickEditingTool(id)
       require(editor.blockInfoAt(target).kind !== "list", "second click did not remove the table list")
     }
   }
@@ -1987,7 +1987,7 @@ Window {
       load({ source: source })
       var first = editor.plainText().indexOf("First")
       editor.setCursorPosition(first + 5)
-      clickListTool(id)
+      clickEditingTool(id)
       keys.keyClick(Qt.Key_Return)
       typeText("Second")
       require(editor.blockInfoAt(editor.cursorPosition()).kind === "list", "Enter did not continue the list")
@@ -2021,7 +2021,7 @@ Window {
       for (var offset of [0, 3, 6]) {
         load({ source: source })
         editor.setCursorPosition(editor.plainText().indexOf("Target") + offset)
-        clickListTool(id)
+        clickEditingTool(id)
         require(savedMarkdown() === source.replace("Target", prefix + "Target"),
                 "list missed a paragraph boundary: " + savedMarkdown())
       }
@@ -2029,14 +2029,14 @@ Window {
 
     load({ source: "First\n\n```\ncode\n```\n\nLast\n" })
     selectText(editor.plainText())
-    clickListTool(id)
+    clickEditingTool(id)
     require(savedMarkdown() === prefix + "First\n\n```\ncode\n```\n\n" + prefix + "Last\n",
             "list changed a code block: " + savedMarkdown())
 
     load({ source: "| A | B |\n|---|---|\n| One | Two |\n" })
     var body = keys.findChild(editor, "noteBody")
     body.select(editor.plainText().indexOf("One"), editor.plainText().indexOf("Two") + 3)
-    clickListTool(id)
+    clickEditingTool(id)
     require(editor.blockInfoAt(editor.plainText().indexOf("One")).kind === "list"
             && editor.blockInfoAt(editor.plainText().indexOf("Two")).kind === "list"
             && editor.blockInfoAt(editor.plainText().indexOf("A")).kind !== "list",
@@ -2050,7 +2050,7 @@ Window {
 
     load({ source: "| A | B |\n|---|---|\n| One | Two |\n" })
     body.select(editor.plainText().indexOf("A"), editor.plainText().indexOf("One") + 3)
-    clickListTool(id)
+    clickEditingTool(id)
     require(editor.blockInfoAt(editor.plainText().indexOf("A")).kind === "list"
             && editor.blockInfoAt(editor.plainText().indexOf("One")).kind === "list"
             && editor.blockInfoAt(editor.plainText().indexOf("B")).kind !== "list"
@@ -2074,7 +2074,7 @@ Window {
       var target = fixture.cell === undefined ? editor.plainText().indexOf("Target") : editor.cellStart(fixture.cell)
       editor.setCursorPosition(target)
       var paragraphX = body.positionToRectangle(target).x
-      clickListTool(id)
+      clickEditingTool(id)
       var cell = editor.tableContext()
       var original = editor.documentHtml()
       var text = editor.plainText()
@@ -2102,7 +2102,7 @@ Window {
     }
     load({ source: "Target\n" })
     editor.setCursorPosition(0)
-    clickListTool(id)
+    clickEditingTool(id)
     var listed = editor.documentHtml()
     editor.readOnly = true
     keys.keyClick(Qt.Key_Backspace)
@@ -2117,13 +2117,6 @@ Window {
     require(editor.blockInfoAt(0).kind === "list", "Backspace on selected text removed its marker")
   }
 
-  function clickQuoteTool() {
-    var button = keys.findChild(editor, "editingTool-quote")
-    require(button && button.visible && button.enabled, "Quote button is unavailable")
-    keys.waitForRendering(button)
-    keys.mouseClick(button)
-  }
-
   function quoteToolEmptyParagraphs() {
     var sources = ["", "Above\n", "| Header |\n|---|\n| Cell |\n\nAfter\n"]
     for (var source of sources) {
@@ -2135,7 +2128,7 @@ Window {
       var position = editor.cursorPosition()
       var original = editor.documentHtml()
       var prefix = source + (source ? "\n" : "")
-      clickQuoteTool()
+      clickEditingTool("quote")
       keys.tryVerify(function() { return editor.blockInfoAt(position).kind === "quote" }, 3000)
       require(editor.blockInfoAt(position).kind === "quote", "Quote missed the empty paragraph")
       require(editor.cursorPosition() === position, "Quote moved the caret")
@@ -2151,7 +2144,7 @@ Window {
       load({ source: saved })
       editor.setCursorPosition(position)
       require(editor.blockInfoAt(position).kind === "quote", "reload lost the empty quote")
-      clickQuoteTool()
+      clickEditingTool("quote")
       keys.tryVerify(function() { return editor.blockInfoAt(position).kind !== "quote" }, 3000)
       require(savedMarkdown() === source, "toggling off the empty quote changed surrounding content")
       editor.undo()
@@ -2165,26 +2158,28 @@ Window {
   function quoteToolParagraphs() {
     load({ source: "First\n\nSecond\n" })
     selectText(editor.plainText())
-    clickQuoteTool()
+    clickEditingTool("quote")
     keys.tryVerify(function() { return editor.blockInfoAt(0).kind === "quote" }, 3000)
     require(savedMarkdown() === "> First\n\n> Second\n", "quoting added an empty paragraph")
     selectText(editor.plainText())
-    clickQuoteTool()
+    clickEditingTool("quote")
     keys.tryVerify(function() { return editor.blockInfoAt(0).kind !== "quote" }, 3000)
     require(savedMarkdown() === "First\n\nSecond\n", "removing quotes left an empty quote between paragraphs")
   }
 
-  function quoteToolTargeting() {
+  function blockToolTargeting(id) {
+    var kind = id === "quote" ? "quote" : "code"
+    var formatted = id === "quote" ? "> Target" : "```\nTarget\n```"
     var table = "| Header |\n|---|\n| Cell |\n"
     var sources = ["Above\n\nTarget\n\nBelow\n", table + "\nAbove\n\nTarget\n\nBelow\n"]
     for (var source of sources) {
       load({ source: source })
       var position = editor.plainText().indexOf("Target") + 3
       editor.setCursorPosition(position)
-      clickQuoteTool()
-      keys.tryVerify(function() { return editor.blockInfoAt(editor.cursorPosition()).kind === "quote" }, 3000)
-      require(savedMarkdown() === source.replace("Target", "> Target"), "Quote did not transform the current paragraph")
-      require(editor.cursorPosition() === position, "Quote moved the caret in existing text")
+      clickEditingTool(id)
+      keys.tryVerify(function() { return editor.blockInfoAt(editor.cursorPosition()).kind === kind }, 3000)
+      require(savedMarkdown() === source.replace("Target", formatted), id + " did not transform the current paragraph")
+      require(editor.cursorPosition() === position, id + " moved the caret in existing text")
     }
 
     // Qt's trailing table paragraph is initially omitted from HTML. Typing
@@ -2198,13 +2193,13 @@ Window {
       var position = editor.plainText().indexOf("Target") + offset
       editor.setCursorPosition(position)
       var original = editor.documentHtml()
-      clickQuoteTool()
+      clickEditingTool(id)
       keys.tryVerify(function() { return editor.documentHtml() !== original }, 3000)
-      require(savedMarkdown() === table + "\nAbove\n\n> Target\n",
-              "Quote formatted the paragraph above the caret: " + savedMarkdown())
+      require(savedMarkdown() === table + "\nAbove\n\n" + formatted + "\n",
+              id + " formatted the paragraph above the caret: " + savedMarkdown())
       require(editor.cursorPosition() === editor.plainText().indexOf("Target") + offset,
-              "Quote moved the caret within the transformed paragraph")
-      require(editor.blockInfoAt(editor.cursorPosition()).kind === "quote", "the caret is outside the transformed quote")
+              id + " moved the caret within the transformed paragraph")
+      require(editor.blockInfoAt(editor.cursorPosition()).kind === kind, "the caret is outside the transformed block")
       editor.undo()
       require(editor.documentHtml() === original, "undo did not restore text typed below the table")
     }
@@ -2243,23 +2238,26 @@ Window {
       load({ source: source })
       editor.setCursorPosition(editor.plainText().indexOf("Target"))
       test.statusMessages = []
-      clickQuoteTool()
+      clickEditingTool("quote")
       keys.tryVerify(function() { return test.statusMessages.length > 0 }, 3000)
       require(test.statusMessages.length === 1, "unsupported quote formatting failed silently")
       require(savedMarkdown() === source, "refused quote formatting changed the note")
     }
   }
 
-  function quoteWithoutHelper() {
+  function blockToolWithoutHelper(id) {
+    var kind = id === "quote" ? "quote" : "code"
+    var empty = id === "quote" ? "> \u00a0\n" : "```\n\n```\n"
+    var filled = id === "quote" ? "> Target\n" : "```\nTarget\n```\n"
     helperlessLoad("", "")
-    helperlessEditor.tools.execute("quote")
-    keys.tryVerify(function() { return helperlessEditor.blockInfoAt(0).kind === "quote" }, 3000)
-    require(helperlessMarkdown() === "> \u00a0\n", "the empty quote was lost without the native helper")
+    helperlessEditor.tools.execute(id)
+    keys.tryVerify(function() { return helperlessEditor.blockInfoAt(0).kind === kind }, 3000)
+    require(helperlessMarkdown() === empty, "the empty block was lost without the native helper")
     helperlessEditor.updateDecorations()
-    require(helperlessEditor.quoteBars.length === 1, "the HTML scan missed the empty quote's bar")
-    helperlessEditor.tools.execute("quote")
-    keys.tryVerify(function() { return helperlessEditor.blockInfoAt(0).kind !== "quote" }, 3000)
-    require(helperlessMarkdown() === "", "the empty quote could not be toggled off without the native helper")
+    require((id === "quote" ? helperlessEditor.quoteBars : helperlessEditor.codeSlabs).length === 1, "the HTML scan missed the empty block's decoration")
+    helperlessEditor.tools.execute(id)
+    keys.tryVerify(function() { return helperlessEditor.blockInfoAt(0).kind !== kind }, 3000)
+    require(helperlessMarkdown() === "", "the empty block could not be toggled off without the native helper")
 
     var table = "| Header |\n|---|\n| Cell |\n"
     helperlessLoad(table, "")
@@ -2272,16 +2270,150 @@ Window {
       keys.keyClick(Qt.Key_Return)
       typeText("Target")
       helperlessEditor.setCursorPosition(helperlessEditor.plainText().indexOf("Target"))
-      helperlessEditor.tools.execute("quote")
-      keys.tryVerify(function() { return helperlessEditor.blockInfoAt(helperlessEditor.cursorPosition()).kind === "quote" }, 3000)
-      require(helperlessMarkdown() === table + "\nAbove\n\n> Target\n",
+      helperlessEditor.tools.execute(id)
+      keys.tryVerify(function() { return helperlessEditor.blockInfoAt(helperlessEditor.cursorPosition()).kind === kind }, 3000)
+      require(helperlessMarkdown() === table + "\nAbove\n\n" + filled,
               "the HTML fallback formatted the paragraph above the cursor: " + helperlessMarkdown())
       helperlessEditor.updateDecorations()
-      require(helperlessEditor.quoteBars.length === 1, "the HTML scan lost the quote below a table")
+      require((id === "quote" ? helperlessEditor.quoteBars : helperlessEditor.codeSlabs).length === 1, "the HTML scan lost the block below a table")
     } finally {
       helperlessEditor.visible = false
       editor.visible = true
       editor.focusEditor()
+    }
+  }
+
+  function codeBlockEmptyParagraphs() {
+    for (var source of ["", "Above\n"]) {
+      load({ source: source })
+      editor.setCursorPosition(editor.plainText().length)
+      if (source) {
+        keys.keyClick(Qt.Key_Return)
+      }
+      var position = editor.cursorPosition(), original = editor.documentHtml()
+      var prefix = source + (source ? "\n" : "")
+      clickEditingTool("codeblock")
+      keys.tryVerify(function() { return editor.blockInfoAt(position).kind === "code" }, 3000)
+      require(editor.cursorPosition() === position, "Code block moved the empty paragraph's caret")
+      var saved = savedMarkdown()
+      require(saved === prefix + "```\n\n```\n", "Code block inserted another paragraph: " + saved)
+      editor.undo()
+      require(editor.documentHtml() === original, "Code block did not undo in one step")
+      editor.redo()
+      require(savedMarkdown() === saved, "redo did not restore the empty code block")
+      load({ source: saved })
+      editor.setCursorPosition(position)
+      clickEditingTool("codeblock")
+      keys.tryVerify(function() { return editor.blockInfoAt(position).kind !== "code" }, 3000)
+      require(savedMarkdown() === source, "toggling off an empty code block changed surrounding text")
+      editor.undo()
+      editor.setCursorPosition(position)
+      typeText("Target")
+      require(savedMarkdown() === prefix + "```\nTarget\n```\n", "typing escaped the empty code block")
+    }
+  }
+
+  function blockToolSelections() {
+    var body = keys.findChild(editor, "noteBody")
+    for (var id of ["quote", "codeblock"]) {
+      for (var reversed of [false, true]) {
+        load({ source: "Above\n\nFirst\n\nSecond\n\nBelow\n" })
+        var text = editor.plainText()
+        var from = text.indexOf("First") + 2, to = text.indexOf("Below")
+        body.select(reversed ? to : from, reversed ? from : to)
+        var caret = editor.cursorPosition(), original = editor.documentHtml()
+        clickEditingTool(id)
+        keys.tryVerify(function() { return editor.documentHtml() !== original }, 3000)
+        var formatted = id === "quote" ? "> First\n\n> Second" : "```\nFirst\nSecond\n```"
+        require(savedMarkdown() === "Above\n\n" + formatted + "\n\nBelow\n",
+                id + " did not transform exactly the touched paragraphs: " + savedMarkdown())
+        require(editor.cursorPosition() === caret, id + " moved the selection's caret")
+        editor.undo()
+        require(editor.documentHtml() === original, id + " selection did not undo in one step")
+        editor.redo()
+        require(savedMarkdown() === "Above\n\n" + formatted + "\n\nBelow\n", id + " selection redo changed text")
+      }
+    }
+  }
+
+  function codeBlockContent() {
+    var cases = [
+      { source: "**bold** and [link](https://example.com)\n", expected: "```\nbold and link\n```\n" },
+      { source: "## Heading\n", expected: "```\nHeading\n```\n" },
+      { source: "> Quoted\n", expected: "```\nQuoted\n```\n" },
+      { source: "- First\n- Second\n", expected: "```\nFirst\nSecond\n```\n" },
+      { source: "First\n\n\u00a0\n\nSecond\n", expected: "```\nFirst\n\nSecond\n```\n" },
+      { source: "First\n\n\u00a0\n", expected: "```\nFirst\n\n```\n" },
+      { html: '<p>```</p><p># literal &lt;tag&gt;</p><p style="white-space:pre-wrap;">  indented</p>',
+        expected: "````\n```\n# literal <tag>\n  indented\n````\n" },
+      { source: "Above\n\n```\nFirst\nSecond\n```\n\nBelow\n", select: "ve\u2029First",
+        expected: "```\nAbove\nFirst\nSecond\n```\n\nBelow\n" },
+      { source: "Above\n\n```\nFirst\nSecond\n```\n\nBelow\n", select: "ond\u2029Bel",
+        expected: "Above\n\n```\nFirst\nSecond\nBelow\n```\n" }
+    ]
+    for (var data of cases) {
+      load(data)
+      selectText(data.select || editor.plainText())
+      var original = editor.documentHtml()
+      clickEditingTool("codeblock")
+      keys.tryVerify(function() { return editor.documentHtml() !== original }, 3000)
+      require(savedMarkdown() === data.expected, "Code block changed visible text: " + JSON.stringify(savedMarkdown()))
+      editor.undo()
+      require(editor.documentHtml() === original, "Code block did not restore original formatting on undo: " + JSON.stringify(data))
+      editor.redo()
+      require(savedMarkdown() === data.expected, "Code block redo changed visible text")
+      load({ source: data.expected })
+      require(savedMarkdown() === data.expected, "Code block content changed on reload")
+    }
+
+    for (var id of ["quote", "codeblock"]) {
+      load({ html: "<p>Above</p><p>First<br>Second</p><p>Below</p>" })
+      var position = editor.plainText().indexOf("Second") + 3
+      editor.setCursorPosition(position)
+      var original = editor.documentHtml()
+      clickEditingTool(id)
+      keys.tryVerify(function() { return editor.documentHtml() !== original }, 3000)
+      var formatted = id === "quote" ? "> First  \n> Second" : "```\nFirst\nSecond\n```"
+      require(savedMarkdown() === "Above\n\n" + formatted + "\n\nBelow\n",
+              id + " did not include the entire soft-broken paragraph: " + savedMarkdown())
+      require(editor.cursorPosition() === editor.plainText().indexOf("Second") + 3,
+              id + " moved the caret within a soft-broken paragraph")
+    }
+  }
+
+  function codeBlockUnavailable() {
+    var cases = [
+      { source: "| Header |\n|---|\n| Target |\n" },
+      { source: "Before\n\n---\n\nAfter\n" },
+      { html: '<p>Before <img src="' + Qt.resolvedUrl("../packaging/desktop/io.github.andreivinca.note-note.svg") + '" /> After</p>' }
+    ]
+    for (var data of cases) {
+      load(data)
+      selectText(editor.plainText())
+      var original = editor.documentHtml()
+      test.statusMessages = []
+      clickEditingTool("codeblock")
+      keys.tryVerify(function() { return test.statusMessages.length > 0 }, 3000)
+      require(test.statusMessages.length === 1, "unsupported code block conversion failed silently")
+      require(editor.documentHtml() === original, "Code block conversion destroyed non-text content")
+    }
+  }
+
+  function codeBlockToggleSelection() {
+    var body = keys.findChild(editor, "noteBody")
+    for (var reversed of [false, true]) {
+      load({ source: "```\n# First\n**Second**\n```\n\nBelow\n" })
+      var text = editor.plainText()
+      var from = text.indexOf("First"), to = text.indexOf("Below")
+      body.select(reversed ? to : from, reversed ? from : to)
+      var original = editor.documentHtml(), caret = editor.cursorPosition()
+      clickEditingTool("codeblock")
+      keys.tryVerify(function() { return editor.documentHtml() !== original }, 3000)
+      require(editor.blockInfoAt(0).kind === "", "selected code did not toggle off")
+      require(editor.plainText() === text, "toggling off code interpreted literal formatting characters")
+      require(editor.cursorPosition() === caret, "toggling off selected code moved the caret")
+      editor.undo()
+      require(editor.documentHtml() === original, "undo did not restore the selected code block")
     }
   }
 
@@ -2304,7 +2436,7 @@ Window {
       { id: "indent", expected: "\u00a0\u00a0\u00a0\u00a0word\n" },
       { id: "outdent", source: "\u00a0\u00a0\u00a0\u00a0word\n", expected: "word\n" },
       { id: "quote", expected: "> word\n" },
-      { id: "codeblock", expected: "word\n\n```\n\n```\n" },
+      { id: "codeblock", expected: "```\nword\n```\n" },
       { id: "codeblock", source: "```\nword\n```\n", expected: "word\n" },
       { id: "rule", expected: "word\n\n---\n" },
       { id: "table", expected: "word\n\n|  |  |\n|---|---|\n|  |  |\n",
@@ -2336,10 +2468,17 @@ Window {
     var behavior = [
       { name: "Quote starts on empty paragraphs, saves, reloads, toggles and undoes", run: quoteToolEmptyParagraphs },
       { name: "Quote preserves paragraph boundaries in both toggle directions", run: quoteToolParagraphs },
-      { name: "Quote transforms the current paragraph, including text typed below tables", run: quoteToolTargeting },
+      { name: "Quote transforms the current paragraph, including text typed below tables", run: function() { blockToolTargeting("quote") } },
       { name: "Enter continues a quote and leaves its empty last line with undo", run: quoteEnter },
       { name: "Quote explains unsupported table and code block contexts", run: quoteUnavailable },
-      { name: "Quote works on empty paragraphs and text below tables without the native helper", run: quoteWithoutHelper },
+      { name: "Quote works on empty paragraphs and text below tables without the native helper", run: function() { blockToolWithoutHelper("quote") } },
+      { name: "Code block transforms the current paragraph, including text typed below tables", run: function() { blockToolTargeting("codeblock") } },
+      { name: "Code block transforms empty paragraphs, saves, reloads, toggles and undoes", run: codeBlockEmptyParagraphs },
+      { name: "Quote and Code block transform selected paragraphs with an exclusive selection end", run: blockToolSelections },
+      { name: "Code block preserves visible text, blank lines, literal fences and soft breaks", run: codeBlockContent },
+      { name: "Code block explains unsupported tables, rules and images without losing content", run: codeBlockUnavailable },
+      { name: "Code block toggles selected code off without interpreting literal text or the final paragraph break", run: codeBlockToggleSelection },
+      { name: "Code block transforms and toggles without the native helper", run: function() { blockToolWithoutHelper("codeblock") } },
       { name: "notebook controls and list refreshes remain usable", run: notebookChrome },
       { name: "note wheel and scrollbar dragging preserve editing and respect content bounds", run: noteScrolling },
       { name: "Right after inserting blocks leaves an empty line through typing and undo", run: insertedBlockLanding },

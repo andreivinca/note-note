@@ -605,7 +605,14 @@ It is the trip Enter and typing on a rule already took; the
 rule-only branch became the general one, and `escapeForward` asks the
 caret's block once and dispatches.
 
-The code block tool is a toggle: inside a code block it takes the block off.
+The code block tool is a toggle: it turns the current paragraph or selected
+paragraphs into code in place; inside a code block it takes the block off.
+It shares paragraph targeting, caret restoration and undoable replacement
+with Quote and the other block styles through `EditorApi.editBlocks`.
+Converting to code uses the visible text, preserving line breaks without
+introducing Markdown style markers. Tables, rules and images cannot be
+converted to plain code, so the tool explains the restriction and leaves
+the document intact.
 *Considered:* unfencing the Markdown lines in the editor. *Rejected:* a code
 line put back as a paragraph must be escaped exactly as the reader escapes
 every paragraph it writes, and that escaper lives in Python — a second one

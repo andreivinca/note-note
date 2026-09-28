@@ -11,7 +11,14 @@ say in the commit which Qt or provider version fixed it.
 ## Table text turns darker after editing below the table
 
 **Status:** open, upstream (Qt). Seen on Qt 6.11.2; the code is unchanged on
-the Qt `dev` branch as of 2026-09-28. Not yet reported at bugreports.qt.io.
+the Qt `dev` branch as of 2026-09-28. Matching upstream report:
+[QTBUG-148642 — TextEdit/TextArea with RichText tables renders wrong font-weight after text selection](https://bugreports.qt.io/browse/QTBUG-148642),
+filed 2026-07-29. As of 2026-09-28, its status is **Reported**, priority
+**P2: Important**, with no resolution or fix version.
+
+The ticket describes the same visible behavior, but its proposed cause
+differs from our diagnosis below; the reporter says their suggested patch
+did not work. Qt maintainers have not yet confirmed the root cause.
 
 **What the user sees.** In a note with a table, selecting, deselecting or
 typing in the text *below* the table (a checklist, say) makes the table's
@@ -84,7 +91,7 @@ region. The grab has a transparent background, so compare alpha, not RGB.
 - *Upstream (the proper fix):* in `updatePaintNode`, a child frame's blocks
   before the first dirty position must be skipped the way the root frame's
   are, or the kept nodes for that frame must be removed before it is
-  re-laid. Report it with the repro above.
+  re-laid. The repro and diagnosis above can be added to QTBUG-148642.
 - *In Note Note (a workaround, not done):* force a full node rebuild after
   every edit or selection change in a note that holds a table, for example by
   marking the document dirty from position 0. It costs a full scene-graph

@@ -93,6 +93,8 @@ CASES = {
     "quote then table": "> quoted\n\n| a | b |\n|---|---|\n| 1 | 2 |\n",
     "code block": "```\ncode = 1\ncode = 2\n```\n",
     "code with a blank line": "```\na = 1\n\nb = 2\n```\n",
+    "code ending in a blank line": "```\na = 1\n\n```\n",
+    "code with multiple empty lines": "```\n\n\n```\n",
     "empty code block": "```\n\n```\n",
     "inline code alone": "`x`\n",
     "quote of inline code": "> `x = 1`\n",

@@ -148,7 +148,9 @@ class _Renderer:
         there, deleting a line's text and retyping it left a body-font run,
         and the line stopped being code (`reader.is_code`)."""
         margin = indent * dialect.INDENT_PX + dialect.CODE_PAD_PX
-        lines = token.get("raw", "").rstrip("\n").split("\n")
+        # The parser includes one terminating newline. Earlier newlines are
+        # empty code lines, including a selected empty paragraph at the end.
+        lines = token.get("raw", "").removesuffix("\n").split("\n")
         out = []
         for index, line in enumerate(lines):
             top = dialect.CODE_MARGIN_PX if index == 0 else 0

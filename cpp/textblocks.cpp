@@ -9,6 +9,34 @@
 
 namespace {
 
+// Qt's first block has no preceding paragraph separator to carry its
+// character format in the undo stack. HTML insertion changes that format
+// outside Qt's recorded edits, so include it in the surrounding transaction.
+class FirstBlockFormatEdit : public QAbstractUndoItem
+{
+public:
+    FirstBlockFormatEdit(QTextDocument *document, const QTextCharFormat &before,
+                        const QTextCharFormat &after)
+        : m_document(document), m_before(before), m_after(after)
+    {
+    }
+
+    void undo() override
+    {
+        QTextCursor(m_document).setBlockCharFormat(m_before);
+    }
+
+    void redo() override
+    {
+        QTextCursor(m_document).setBlockCharFormat(m_after);
+    }
+
+private:
+    QTextDocument *m_document;
+    QTextCharFormat m_before;
+    QTextCharFormat m_after;
+};
+
 void copyCellPadding(QTextTableCell cell, const QTextTableCellFormat &source)
 {
     QTextTableCellFormat format = cell.format().toTableCellFormat();
@@ -303,6 +331,9 @@ void TextBlocks::beginEditBlock(bool joinPrevious)
     if (!doc) {
         return;
     }
+    if (m_editDepth == 0) {
+        m_firstBlockCharFormat = doc->begin().charFormat();
+    }
     if (joinPrevious) {
         QTextCursor(doc).joinPreviousEditBlock();
     } else {
@@ -316,6 +347,9 @@ void TextBlocks::endEditBlock()
     QTextDocument *doc = m_document ? m_document->textDocument() : nullptr;
     if (!doc || m_editDepth <= 0) {
         return;
+    }
+    if (m_editDepth == 1 && doc->begin().charFormat() != m_firstBlockCharFormat) {
+        doc->appendUndoItem(new FirstBlockFormatEdit(doc, m_firstBlockCharFormat, doc->begin().charFormat()));
     }
     QTextCursor(doc).endEditBlock();
     --m_editDepth;

@@ -526,9 +526,14 @@ Item {
   }
 
   // One code block holds the whole selection, or the caret.
-  function selectionInCode() {
+  function selectionInCode(includeFinalBreak) {
     var from = Math.min(area.selectionStart, area.selectionEnd)
     var to = Math.max(area.selectionStart, area.selectionEnd)
+    // Block tools count touched paragraphs; a selection ending at the next
+    // paragraph's start still belongs entirely to this code block.
+    if (includeFinalBreak && to > from) {
+      to--
+    }
     return codeRuns().some(function(run) { return run.from <= from && to <= run.to })
   }
 

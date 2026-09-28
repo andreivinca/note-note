@@ -367,6 +367,13 @@ one transaction, one undo step, and the normalize passes that join the edit
 join the same step. QML alone cannot open an edit block, so without the
 built module undo degrades to walking the strokes again.
 
+Qt stores the first paragraph's character format outside its ordinary undo
+records: replacing the document with code and undoing can leave that paragraph
+monospace, including an empty note. The native edit brackets capture that
+format before and after the transaction and append a `QAbstractUndoItem` when
+it changes. Undo and redo then restore both text and the initial paragraph's
+format, without a separate editor history.
+
 **Delete on an empty paragraph must remove the whole block**, including its
 U+00A0 rendering filler. Qt's ordinary Delete at the end of that filler only
 removes the separator; the following list item then joins a non-list block
