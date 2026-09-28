@@ -260,6 +260,13 @@ line, and one character, so the caret map is the same either way
 `<br />` blank leaves the break behind as a trailing hard line break *and* an
 extra blank line, which is the same bug all over again.
 
+An empty quote keeps its two margins and reads back as `> ` followed by
+U+00A0. Rendering it as an ordinary blank made the Quote tool do nothing
+on an empty paragraph. Both conversion directions preserve that block
+format; Enter on the quote's empty last line explicitly removes it.
+Markdown separator lines own no document paragraph and must not become
+empty quotes when formatting a selection.
+
 **Formatting is flattened into sibling runs.** `**bold with ==mark== inside**`
 comes back as three spans that each repeat `font-weight:700`; wrapping each
 span in its own markers multiplies them on every save. Read the text into a
@@ -285,9 +292,14 @@ The reader's caret map and the HTML scan of `ui/QuoteBars.js` both count
 so; the scan once counted a cell as one block whatever it held, and every
 decoration after such a table sat on the wrong block until the native
 inspector was built (cpp/selftest.py now compares the two on those shapes).
-So the block a caret sits in is the number of U+2029 plus U+FDD0 before it —
-which is how the toolbar turns a caret into a Markdown line, via the map
-`qthtml.convert()` returns.
+U+FDD1 also starts the paragraph immediately after a table. Qt omits that
+paragraph from its HTML while it is empty, but exports it once text is typed
+there. Ignoring that boundary made block tools format the paragraph above
+the caret. `QuoteBars.blockSpans` supplies the exported block order for the
+caret map, the inverse block-to-position lookup and the decoration scan,
+skipping only an empty paragraph immediately after a table. Restyling keeps
+the caret's offset within its block: importing the rebuilt HTML can add a
+hidden paragraph separator after a table and shift absolute positions.
 
 Read the full plain text before counting separators up to the caret: a
 `getText(0, caret)` range touching a table can include cells past the caret.

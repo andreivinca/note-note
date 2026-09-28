@@ -205,6 +205,8 @@ QtObject {
       var first = lineAt(map, Math.min(textArea.selectionStart, textArea.selectionEnd))
       var last = lineAt(map, Math.max(textArea.selectionStart, textArea.selectionEnd))
       var caret = textArea.cursorPosition, changed = false
+      var caretBlock = blockAt(caret)
+      var caretOffset = caret - host.blockStart(caretBlock)
       var code = MarkdownBlocks.fences(map)
       var isList = !!options.list
       // Selected paragraphs arrive with Markdown's blank separator lines
@@ -219,8 +221,10 @@ QtObject {
       var itemRx = /^\s*([-*+]|\d+[.)])[ \t]/
       var out = [], prevItem = false, prevFreed = false
       for (var i = 0; i < lines.length; i++) {
-        // Table rows/HTML tables and fenced code are never restyled.
-        if (i < first || i > last || code[i] || MarkdownBlocks.isTable(map, i)) {
+        // Table rows/HTML tables and fenced code are never restyled. A
+        // Markdown separator is not a paragraph; only lists may remove it.
+        if (i < first || i > last || code[i] || MarkdownBlocks.isTable(map, i)
+            || (!isList && (map.kinds || [])[i] === "separator")) {
           out.push(lines[i])
           prevItem = false
           prevFreed = false
@@ -263,7 +267,11 @@ QtObject {
         }
         return
       }
-      replaceDocument(out.join("\n"), caret)
+      // Qt may add an implicit empty paragraph after a table on import.
+      // Keep the caret in its content block instead of at an absolute offset.
+      replaceDocument(out.join("\n"), caret, function() {
+        textArea.cursorPosition = Math.min(host.blockStart(caretBlock) + caretOffset, textArea.length)
+      })
     })
   }
 

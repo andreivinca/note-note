@@ -15,6 +15,7 @@ Window {
   id: test
   property bool runKeys: true
   property var openedLinks: []
+  property var statusMessages: []
   property int editSignals: 0
   signal checked(string name, bool ok, string detail)
   signal finished()
@@ -50,6 +51,7 @@ Window {
     noteFontFamily: noteFont.name
     toolDirectory: Platform.env("NOTE_NOTE_TEST_TOOLS") || Qt.resolvedUrl("../ui/tools")
     onLinkOpenRequested: function(url) { test.openedLinks.push(url) }
+    onStatusRequested: function(text) { test.statusMessages.push(text) }
     onEdited: test.editSignals++
   }
   // The editor as a shell installation without the native helper has it: the
@@ -2062,6 +2064,174 @@ Window {
     require(editor.blockInfoAt(0).kind === "list", "Backspace on selected text removed its marker")
   }
 
+  function clickQuoteTool() {
+    var button = keys.findChild(editor, "editingTool-quote")
+    require(button && button.visible && button.enabled, "Quote button is unavailable")
+    keys.waitForRendering(button)
+    keys.mouseClick(button)
+  }
+
+  function quoteToolEmptyParagraphs() {
+    var sources = ["", "Above\n", "| Header |\n|---|\n| Cell |\n\nAfter\n"]
+    for (var source of sources) {
+      load({ source: source })
+      editor.setCursorPosition(editor.plainText().length)
+      if (source) {
+        keys.keyClick(Qt.Key_Return)
+      }
+      var position = editor.cursorPosition()
+      var original = editor.documentHtml()
+      var prefix = source + (source ? "\n" : "")
+      clickQuoteTool()
+      keys.tryVerify(function() { return editor.blockInfoAt(position).kind === "quote" }, 3000)
+      require(editor.blockInfoAt(position).kind === "quote", "Quote missed the empty paragraph")
+      require(editor.cursorPosition() === position, "Quote moved the caret")
+      editor.updateDecorations()
+      require(editor.quoteBars.length === 1, "the empty quote has no bar")
+      var saved = savedMarkdown()
+      require(saved === prefix + "> \u00a0\n", "saving lost the empty quote: " + saved)
+      editor.undo()
+      require(editor.documentHtml() === original, "one undo did not restore the empty paragraph")
+      editor.redo()
+      require(savedMarkdown() === saved, "redo did not restore the empty quote")
+
+      load({ source: saved })
+      editor.setCursorPosition(position)
+      require(editor.blockInfoAt(position).kind === "quote", "reload lost the empty quote")
+      clickQuoteTool()
+      keys.tryVerify(function() { return editor.blockInfoAt(position).kind !== "quote" }, 3000)
+      require(savedMarkdown() === source, "toggling off the empty quote changed surrounding content")
+      editor.undo()
+      require(editor.blockInfoAt(position).kind === "quote", "undo did not restore the toggled quote")
+      editor.setCursorPosition(position)
+      typeText("Target")
+      require(savedMarkdown() === prefix + "> Target\n", "typing did not stay in the quote: " + savedMarkdown())
+    }
+  }
+
+  function quoteToolParagraphs() {
+    load({ source: "First\n\nSecond\n" })
+    selectText(editor.plainText())
+    clickQuoteTool()
+    keys.tryVerify(function() { return editor.blockInfoAt(0).kind === "quote" }, 3000)
+    require(savedMarkdown() === "> First\n\n> Second\n", "quoting added an empty paragraph")
+    selectText(editor.plainText())
+    clickQuoteTool()
+    keys.tryVerify(function() { return editor.blockInfoAt(0).kind !== "quote" }, 3000)
+    require(savedMarkdown() === "First\n\nSecond\n", "removing quotes left an empty quote between paragraphs")
+  }
+
+  function quoteToolTargeting() {
+    var table = "| Header |\n|---|\n| Cell |\n"
+    var sources = ["Above\n\nTarget\n\nBelow\n", table + "\nAbove\n\nTarget\n\nBelow\n"]
+    for (var source of sources) {
+      load({ source: source })
+      var position = editor.plainText().indexOf("Target") + 3
+      editor.setCursorPosition(position)
+      clickQuoteTool()
+      keys.tryVerify(function() { return editor.blockInfoAt(editor.cursorPosition()).kind === "quote" }, 3000)
+      require(savedMarkdown() === source.replace("Target", "> Target"), "Quote did not transform the current paragraph")
+      require(editor.cursorPosition() === position, "Quote moved the caret in existing text")
+    }
+
+    // Qt's trailing table paragraph is initially omitted from HTML. Typing
+    // into it makes it a real paragraph without adding a U+2029 separator.
+    for (var offset of [0, 3, 6]) {
+      load({ source: table })
+      editor.setCursorPosition(editor.plainText().length)
+      typeText("Above")
+      keys.keyClick(Qt.Key_Return)
+      typeText("Target")
+      var position = editor.plainText().indexOf("Target") + offset
+      editor.setCursorPosition(position)
+      var original = editor.documentHtml()
+      clickQuoteTool()
+      keys.tryVerify(function() { return editor.documentHtml() !== original }, 3000)
+      require(savedMarkdown() === table + "\nAbove\n\n> Target\n",
+              "Quote formatted the paragraph above the caret: " + savedMarkdown())
+      require(editor.cursorPosition() === editor.plainText().indexOf("Target") + offset,
+              "Quote moved the caret within the transformed paragraph")
+      require(editor.blockInfoAt(editor.cursorPosition()).kind === "quote", "the caret is outside the transformed quote")
+      editor.undo()
+      require(editor.documentHtml() === original, "undo did not restore text typed below the table")
+    }
+  }
+
+  function quoteEnter() {
+    load({ source: "> First\n" })
+    editor.setCursorPosition(editor.plainText().length)
+    keys.keyClick(Qt.Key_Return)
+    var position = editor.cursorPosition()
+    require(editor.blockInfoAt(position).kind === "quote", "Enter did not continue the quote")
+    require(savedMarkdown() === "> First\n\n> \u00a0\n", "saving lost the new empty quote line")
+    var continued = editor.documentHtml()
+    keys.keyClick(Qt.Key_Return)
+    keys.tryVerify(function() { return editor.blockInfoAt(position).kind !== "quote" }, 3000)
+    require(editor.cursorPosition() === position, "leaving the quote moved the caret")
+    require(savedMarkdown() === "> First\n", "leaving the quote changed its text")
+    editor.undo()
+    require(editor.documentHtml() === continued, "undo did not restore the empty quote line")
+    editor.redo()
+    typeText("After")
+    require(savedMarkdown() === "> First\n\nAfter\n", "typing after leaving the quote kept quote formatting")
+
+    load({ source: ">\n" })
+    require(editor.blockInfoAt(0).kind === "quote", "a bare Markdown quote did not load")
+    editor.setCursorPosition(0)
+    keys.keyClick(Qt.Key_Return)
+    keys.tryVerify(function() { return editor.blockInfoAt(0).kind !== "quote" }, 3000)
+    typeText("Plain")
+    require(savedMarkdown() === "Plain\n", "Enter did not leave a quote containing only an empty line")
+  }
+
+  function quoteUnavailable() {
+    var sources = ["| Header |\n|---|\n| Target |\n", "```\nTarget\n```\n"]
+    for (var source of sources) {
+      load({ source: source })
+      editor.setCursorPosition(editor.plainText().indexOf("Target"))
+      test.statusMessages = []
+      clickQuoteTool()
+      keys.tryVerify(function() { return test.statusMessages.length > 0 }, 3000)
+      require(test.statusMessages.length === 1, "unsupported quote formatting failed silently")
+      require(savedMarkdown() === source, "refused quote formatting changed the note")
+    }
+  }
+
+  function quoteWithoutHelper() {
+    helperlessLoad("", "")
+    helperlessEditor.tools.execute("quote")
+    keys.tryVerify(function() { return helperlessEditor.blockInfoAt(0).kind === "quote" }, 3000)
+    require(helperlessMarkdown() === "> \u00a0\n", "the empty quote was lost without the native helper")
+    helperlessEditor.updateDecorations()
+    require(helperlessEditor.quoteBars.length === 1, "the HTML scan missed the empty quote's bar")
+    helperlessEditor.tools.execute("quote")
+    keys.tryVerify(function() { return helperlessEditor.blockInfoAt(0).kind !== "quote" }, 3000)
+    require(helperlessMarkdown() === "", "the empty quote could not be toggled off without the native helper")
+
+    var table = "| Header |\n|---|\n| Cell |\n"
+    helperlessLoad(table, "")
+    editor.visible = false
+    helperlessEditor.visible = true
+    try {
+      helperlessEditor.focusEditor()
+      helperlessEditor.setCursorPosition(helperlessEditor.plainText().length)
+      typeText("Above")
+      keys.keyClick(Qt.Key_Return)
+      typeText("Target")
+      helperlessEditor.setCursorPosition(helperlessEditor.plainText().indexOf("Target"))
+      helperlessEditor.tools.execute("quote")
+      keys.tryVerify(function() { return helperlessEditor.blockInfoAt(helperlessEditor.cursorPosition()).kind === "quote" }, 3000)
+      require(helperlessMarkdown() === table + "\nAbove\n\n> Target\n",
+              "the HTML fallback formatted the paragraph above the cursor: " + helperlessMarkdown())
+      helperlessEditor.updateDecorations()
+      require(helperlessEditor.quoteBars.length === 1, "the HTML scan lost the quote below a table")
+    } finally {
+      helperlessEditor.visible = false
+      editor.visible = true
+      editor.focusEditor()
+    }
+  }
+
   function modularToolCases() {
     var table = "| A | B |\n|---|---|\n| one | two |\n"
     var cases = [
@@ -2111,6 +2281,12 @@ Window {
       }
     }
     var behavior = [
+      { name: "Quote starts on empty paragraphs, saves, reloads, toggles and undoes", run: quoteToolEmptyParagraphs },
+      { name: "Quote preserves paragraph boundaries in both toggle directions", run: quoteToolParagraphs },
+      { name: "Quote transforms the current paragraph, including text typed below tables", run: quoteToolTargeting },
+      { name: "Enter continues a quote and leaves its empty last line with undo", run: quoteEnter },
+      { name: "Quote explains unsupported table and code block contexts", run: quoteUnavailable },
+      { name: "Quote works on empty paragraphs and text below tables without the native helper", run: quoteWithoutHelper },
       { name: "notebook controls and list refreshes remain usable", run: notebookChrome },
       { name: "note wheel and scrollbar dragging preserve editing and respect content bounds", run: noteScrolling },
       { name: "Right after inserting blocks leaves an empty line through typing and undo", run: insertedBlockLanding },

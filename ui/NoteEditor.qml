@@ -818,18 +818,17 @@ Item {
     }, root.documentBase, asText)
   }
 
-  // The document block a position sits in. Qt separates blocks with U+2029
-  // and starts every table cell with U+FDD0 (docs/engine-notes.md).
+  // The exported document block a position sits in, using the same order
+  // as the Markdown reader and the fallback decoration scan.
   function blockAt(pos) {
     // A ranged getText touching a table includes cells beyond the caret.
-    var text = area.getText(0, area.length), count = 0
-    for (var i = 0; i < Math.min(pos, text.length); i++) {
-      var code = text.charCodeAt(i)
-      if (code === 0x2029 || code === 0xFDD0) {
-        count++
+    var starts = QuoteBars.blockSpans(area.getText(0, area.length)).starts
+    for (var i = 1; i < starts.length; i++) {
+      if (starts[i] > pos) {
+        return i - 1
       }
     }
-    return count
+    return Math.max(0, starts.length - 1)
   }
 
   // Which Markdown line owns the block. A table row owns several blocks,
@@ -861,10 +860,10 @@ Item {
     return block
   }
 
-  // caret < 0 means "the end of the note". Block styles never change the
-  // document's text — a heading is a font size, not a `#` — so the caret's
-  // position survives the round trip unchanged. The final positioning and
-  // landing edits belong to the same undo step as the replacement.
+  // caret < 0 means "the end of the note". The optional callback can restore
+  // a position within a block when Qt's table wrappers shift absolute
+  // offsets on import. Positioning and landing edits belong to the same
+  // undo step as the replacement.
   function replaceDoc(md, caret, then) {
     var context = root.editContext()
     var pos = caret === undefined ? area.cursorPosition : (caret < 0 ? Number.MAX_VALUE : caret)
@@ -1247,18 +1246,10 @@ Item {
     })
   }
 
-  // Where a document block's content starts: blocks begin after each
-  // paragraph or cell separator (blockAt counts them the same way).
+  // Inverse of blockAt, including a populated paragraph at a table's end.
   function blockStart(block) {
-    var t = area.getText(0, area.length), n = 0, start = 0
-    for (var i = 0; i < t.length && n < block; i++) {
-      var c = t.charCodeAt(i)
-      if (c === 0x2029 || c === 0xFDD0) {
-        n++
-        start = i + 1
-      }
-    }
-    return start
+    var starts = QuoteBars.blockSpans(area.getText(0, area.length)).starts
+    return starts[Math.max(0, Math.min(block, starts.length - 1))] || 0
   }
 
   // Select the (single-character) content of a document block.
@@ -1296,20 +1287,13 @@ Item {
         break
       }
     } else if (area.length <= 200000) {
-      var n = 0
-      start = 0; end = t.length
-      for (var j = 0; j < t.length; j++) {
-        var c = t.charCodeAt(j)
-        if (c !== 0x2029 && c !== 0xFDD0) {
-          continue
-        }
-        if (j < pos) {
-          n++
-          start = j + 1
-        } else {
-          end = j
-          break
-        }
+      var n = root.blockAt(pos)
+      var spans = QuoteBars.blockSpans(t)
+      start = spans.starts[n]
+      end = spans.ends[n]
+      // An empty paragraph immediately after a table has no exported block.
+      if (pos > end) {
+        return { kind: "", empty: true, last: true }
       }
       var ks = QuoteBars.kinds(area.getFormattedText(0, area.length))
       kind = inListItem(pos) ? "list" : (ks[n] || "")
@@ -1460,12 +1444,9 @@ Item {
           out.splice(i, 1)
           out.splice(code.end, 0, "", Dialect.BLANK_PARAGRAPH, "")
         }
-      } else if (kind === "list") {
+      } else if (kind === "list" || kind === "quote") {
         out.splice(i, 1, "", Dialect.BLANK_PARAGRAPH, "")
       }
-      // a quote's empty line already reads back as a blank paragraph
-      // (kept in the map now, stripped only from an unused landing at save
-      // time): re-rendering the markdown is the whole edit
       landOn(out, target, seed)
     })
   }

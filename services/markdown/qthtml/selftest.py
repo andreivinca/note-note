@@ -86,6 +86,10 @@ CASES = {
     "checkboxes": "- [ ] todo\n- [x] done\n",
     "empty checkbox": "- [ ] \n- [x] done\n",
     "quote": "> quoted line\n",
+    "empty quote": "> \u00a0\n",
+    "empty quote after text": "before\n\n> \u00a0\n",
+    "empty line inside quote": "> first\n\n> \u00a0\n\n> last\n",
+    "empty quote before table": "> \u00a0\n\n| a | b |\n|---|---|\n| 1 | 2 |\n",
     "quote then table": "> quoted\n\n| a | b |\n|---|---|\n| 1 | 2 |\n",
     "code block": "```\ncode = 1\ncode = 2\n```\n",
     "code with a blank line": "```\na = 1\n\nb = 2\n```\n",
@@ -304,6 +308,8 @@ def check_typed_filler(verbose):
         ("typed before the filler", "<p>x\u00a0</p>", "x\n"),
         ("a blank line stays blank", "<p>\u00a0</p><p>after</p>", "\u00a0\n\nafter\n"),
         ("an indent is not a filler", '<p style="margin-left:36px">x</p>', "\u00a0" * 4 + "x\n"),
+        ("empty quote without a filler", '<p style="margin-left:40px;margin-right:40px"></p>', "> \u00a0\n"),
+        ("typed before a quote filler", '<p style="margin-left:40px;margin-right:40px">x\u00a0</p>', "> x\n"),
     ]
     for name, html, back in cases:
         actual = to_markdown(html)

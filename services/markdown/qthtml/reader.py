@@ -215,10 +215,12 @@ class _Reader:
         body = self.inline(node.children)
 
         if not body.strip():
+            if dialect.is_quote(style):
+                return [_Chunk("text", ["> " + dialect.BLANK_PARAGRAPH], [at])]
             # An empty block still carrying the code marker is an empty line
             # *inside* a code block — the one typing Enter there makes — not
             # a blank between blocks: read it as code or the fence splits.
-            if dialect.has_block_background(style) and not dialect.is_quote(style):
+            if dialect.has_block_background(style):
                 return [_Chunk("code", [""], [at])]
             return [_Chunk("blank", [dialect.BLANK_PARAGRAPH], [at])]
 

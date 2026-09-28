@@ -98,7 +98,8 @@ class _Renderer:
         if kind in ("paragraph", "block_text"):
             return [self.paragraph(token, indent, quote)]
         if kind == "block_quote":
-            return self.blocks(token.get("children"), indent, quote=True)
+            blocks = self.blocks(token.get("children"), indent, quote=True)
+            return blocks or [self.paragraph({}, indent, True)]
         if kind == "block_code":
             return self.code(token, indent)
         if kind == "thematic_break":
@@ -121,9 +122,10 @@ class _Renderer:
 
     def paragraph(self, token, indent, quote):
         body = self.inline(token.get("children"))
-        # A paragraph holding only the blank-line character *is* a blank line.
+        # The filler keeps an empty paragraph alive in Qt, with its block
+        # format intact: an empty quote is still a place to type a quote.
         if body.strip() in ("", dialect.BLANK_PARAGRAPH):
-            return BLANK
+            body = dialect.BLANK_PARAGRAPH
         return "<p%s>%s</p>" % (self.block_style(indent, quote), body)
 
     def code(self, token, indent):

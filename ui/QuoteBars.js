@@ -157,24 +157,30 @@ function _collect(kindAt, count, fromOf, toOf) {
   return out
 }
 
-// Each block's character span, from the plain text (whose U+2029/U+FDD0
-// separators mark the blocks).
-function _blockSpans(text) {
-  var starts = [], ends = [], start = 0
+// The blocks Qt exports to HTML, in document order. U+FDD1 ends a table's
+// last cell and starts a paragraph after the table. Qt omits that paragraph
+// while it is empty; once it holds text it owns an HTML block like any other.
+// The Markdown caret map and the decoration scan must use this same order.
+function blockSpans(text) {
+  var starts = [], ends = [], start = 0, afterTable = false
   for (var i = 0; i <= text.length; i++) {
     var c = i < text.length ? text.charCodeAt(i) : 0x2029  // the text's end closes the last block
-    if (c !== 0x2029 && c !== 0xFDD0) {
+    if (c !== 0x2029 && c !== 0xFDD0 && c !== 0xFDD1) {
       continue
     }
-    starts.push(start); ends.push(i)
+    if (!afterTable || start < i) {
+      starts.push(start)
+      ends.push(i)
+    }
     start = i + 1
+    afterTable = c === 0xFDD1
   }
   return { starts: starts, ends: ends }
 }
 
 // From the document's HTML plus its plain text.
 function runs(html, text) {
-  var kind = kinds(html), spans = _blockSpans(text)
+  var kind = kinds(html), spans = blockSpans(text)
   var count = Math.min(kind.length, spans.starts.length)
   return _collect(function(i) { return kind[i] }, count,
                   function(i) { return spans.starts[i] }, function(i) { return spans.ends[i] })
@@ -189,7 +195,7 @@ function runsFromBlocks(blocks) {
 // [{position, checked}] — one entry per checkbox item, `position` its
 // block's first character, ready for positionToRectangle.
 function boxes(html, text) {
-  var marker = markers(html), spans = _blockSpans(text), out = []
+  var marker = markers(html), spans = blockSpans(text), out = []
   var count = Math.min(marker.length, spans.starts.length)
   for (var i = 0; i < count; i++) {
     if (marker[i]) {
