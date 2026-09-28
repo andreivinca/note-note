@@ -21,7 +21,6 @@ are, and the mistakes that are expensive to repeat.
 | [Testing](testing.md) | verifying a change without a keyboard and without touching real notes |
 | [Release process](release-process.md) | cutting a release or answering the marketplace |
 | [Decisions](decisions.md) | wondering "why wasn't this done the obvious way?" |
-| [Future: themes, commands, and plugins](future/themes-commands-plugins.md) | reviewing the roadmap and remaining release validation |
 
 The user-facing documentation is [`../README.md`](../README.md); the provider
 contract is [`../docs/providers.md`](../docs/providers.md).
