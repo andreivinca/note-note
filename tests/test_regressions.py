@@ -311,6 +311,13 @@ class Content(unittest.TestCase):
         self.assertEqual(walk_text(tokens), "==literal==||left|right|")
         self.assertEqual(to_markdown(to_html(saved)), saved)
 
+    def test_empty_table_cells_carry_the_line_height(self):
+        # A bare cell would get it from normalizeLineHeights on the first
+        # edit, and a row of empty cells would grow under the caret.
+        empty = '<p style="line-height:%d%%;"></p>' % dialect.LINE_HEIGHT_PCT
+        self.assertEqual(to_html("| a |  |\n|---|---|\n|  | b |\n").count(empty), 2)
+        self.assertEqual(to_html("<table><tr><td><p></p></td><td><p>b</p></td></tr></table>\n").count(empty), 1)
+
     def test_classic_markdown_keeps_shell_code_in_ordered_items(self):
         markdown = ("1. **Install:**\n\n   ```bash\n   install-driver --needed\n   enable-service\n   ```\n\n"
                     "2. **Configure:**\n\n   ```bash\n   name=Token\n   slotListIndex=0\n   ```\n")

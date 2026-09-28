@@ -227,12 +227,17 @@ class _Renderer:
         style = "margin-top:%dpx; margin-bottom:%dpx;" % (dialect.TABLE_MARGIN_PX, dialect.TABLE_MARGIN_PX)
         return '<table border="1" cellspacing="0" cellpadding="10" style="%s">%s</table>' % (style, cells)
 
+    # An empty cell still states the line height on its (empty) paragraph.
+    # Qt writes it back as a bare cell, so the note is unchanged; without it
+    # the editor's normalizeLineHeights gives the cell 130% on the first edit
+    # and a row of empty cells grows taller under the reader's eyes.
     def table_cell(self, cell):
         if cell.get("attrs", {}).get("block"):
             body = self.document(cell.get("children"))
-            return "" if body == BLANK else body
-        body = self.inline(cell.get("children"))
-        return '<p style="%s">%s</p>' % (LINE_HEIGHT, body) if body else ""
+            if body != BLANK:
+                return body
+            return '<p style="%s"></p>' % LINE_HEIGHT
+        return '<p style="%s">%s</p>' % (LINE_HEIGHT, self.inline(cell.get("children")))
 
     # ---- inline ---------------------------------------------------------
 
