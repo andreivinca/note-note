@@ -1,13 +1,12 @@
 import QtQuick
 import "../design"
 
-// Shared by application menus, editing menus and their popup panels.
+// Shared by application menus, editing menus and their popup panels: the
+// theme's popup colours and one set of measures.
 QtObject {
-  property color background: Color.menu.background
-  property color foreground: Color.menu.text
-  readonly property color text: Color.token("popup.foreground", foreground)
-  readonly property color fill: Color.token("popup.background", Style.chromeSurface(background, foreground))
-  readonly property var borderSpec: Border.flat(Color.token("popup.border", Qt.tint(fill, Util.alpha(foreground, 0.18))), 1)
+  readonly property color text: Color.token("popup.foreground")
+  readonly property color fill: Color.token("popup.background")
+  readonly property var borderSpec: Border.flat(Color.token("popup.border"), 1)
   readonly property real radius: Math.min(Style.cornerRadius, Style.space(6))
   readonly property real padding: Style.spacing.xs
   readonly property real rowRadius: Math.max(0, radius - padding)

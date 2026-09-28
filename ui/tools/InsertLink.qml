@@ -76,7 +76,6 @@ Tool {
           text: tool.linkText
           placeholderText: "Link text"
           Accessible.name: "Link text"
-          foreground: form.foreground
           accent: tool.editor.accent
           font.family: form.fontFamily
           onTextEdited: tool.linkText = text
@@ -100,7 +99,6 @@ Tool {
           text: tool.linkUrl
           placeholderText: "https://…"
           Accessible.name: "Link URL"
-          foreground: form.foreground
           accent: tool.editor.accent
           font.family: form.fontFamily
           onTextEdited: tool.linkUrl = text

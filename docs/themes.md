@@ -45,7 +45,6 @@ Flatpak uses its app-scoped configuration directory inside its sandbox.
   "schemaVersion": 1,
   "id": "midnight",
   "name": "Midnight",
-  "appearance": "dark",
   "colors": {
     "surface.background": "#181A20",
     "text.primary": "#E6EAF0",
@@ -56,11 +55,12 @@ Flatpak uses its app-scoped configuration directory inside its sandbox.
 }
 ```
 
-`appearance` is `system`, `light`, or `dark`; it is descriptive metadata, not
-an OS setting. Values are `system`, `transparent`, `#RRGGBB`, or **`#AARRGGBB`
+A theme file holds `schemaVersion`, `id`, `name` and `colors`, and nothing
+else. Values are `system`, `transparent`, `#RRGGBB`, or **`#AARRGGBB`
 (alpha first, following Qt)**. Only overlay roles allow transparency. Unknown
-keys, duplicate JSON keys, invalid values, future schemas, and mismatched IDs
-are rejected. Themes contain no code, imports, expressions, or inheritance.
+fields and keys, duplicate JSON keys, invalid values, future schemas, and
+mismatched IDs are rejected. Themes contain no code, imports, expressions, or
+inheritance.
 
 An explicit `system` always reads that role from the unmodified desktop
 baseline, including when adjacent tokens are custom. Omitted root roles use
@@ -69,13 +69,24 @@ desktop's system text on a custom dark background can be unreadable. The picker
 reports low contrast without silently changing explicit colors.
 
 The complete token inventory, ordering, opacity rules, paired surfaces, and
-recipe names live in [tokens.json](../services/themes/tokens.json). The small
-[resolver](../services/themes/resolve.js) implements those recipes. Key groups
-cover surfaces/text, selection and interaction, inputs/buttons, popups/tooltips,
-sidebar/tabs/chrome, editor decorations, status, command palette, and Qt control
-roles. The [System file](../plugins/org.note-note.appearance/themes/system.json)
-lists every token. Fonts, dimensions, icons, provider identity hues and authored
-note content are outside this schema.
+recipe names live in [tokens.js](../design/tokens.js), the only list of them:
+the application reads it directly, and the theme validator is sent the names
+with each request. The small [resolver](../design/resolve.js) implements the
+recipes. Key groups cover surfaces/text, selection, inputs/buttons,
+popups/tooltips, sidebar/tabs/chrome, editor decorations, the error status,
+command palette, and Qt control roles. The
+[System file](../plugins/org.note-note.appearance/themes/system.json) lists
+every token. Fonts, dimensions, icons, provider identity hues and authored note
+content are outside this schema.
+
+The system's colours are resolved before anything is drawn, so the application
+never paints a colour of its own in place of a token. A custom theme is read
+from its file; the standalone window opens once that is done.
+
+How a control answers the pointer (its hover, pressed and selected fills) is
+made from the ink of the control itself, so a button in another colour keeps
+its own. A theme reaches those through the colours it gives the ink; they are
+not tokens.
 
 The editor uses Qt's native caret without a separate caret color setting.
 

@@ -1,5 +1,8 @@
 .pragma library
 
+var maxQuery = 256
+var maxItems = 4096
+
 function score(text, query) {
   var label = text.toLocaleLowerCase()
   if (label === query) {
@@ -12,7 +15,7 @@ function score(text, query) {
 }
 
 function filter(items, query, activeId) {
-  var search = query.trim().slice(0, 256).toLocaleLowerCase()
+  var search = query.trim().slice(0, maxQuery).toLocaleLowerCase()
   var result = []
   items.forEach(function(item) {
     var rank = search ? score(item.label, search) : 0
@@ -28,7 +31,12 @@ function filter(items, query, activeId) {
   result.sort(function(a, b) {
     return a.score - b.score || a.item.label.localeCompare(b.item.label) || a.item.id.localeCompare(b.item.id)
   })
-  var matches = result.slice(0, 4096).map(function(entry) { return entry.item })
-  var index = matches.findIndex(function(item) { return item.id === activeId })
-  return { items: matches, index: index >= 0 ? index : matches.length ? 0 : -1 }
+  var matches = result.slice(0, maxItems).map(function(entry) {
+    return entry.item
+  })
+  // The active choice stays active while it still matches; otherwise the first does.
+  var index = matches.findIndex(function(item) {
+    return item.id === activeId
+  })
+  return { items: matches, index: Math.max(index, matches.length ? 0 : -1) }
 }

@@ -1,18 +1,15 @@
 import QtQuick
-import "../../ui/KeyBindings.js" as Defaults
+import "defaults.js" as Defaults
 import "resolve.js" as Resolve
 import "stroke.js" as Stroke
 
 QtObject {
   id: registry
-  property bool active: true
   property var commands: []
   property var contributions: []
   property var tools: []
   property var overrides: []
-  readonly property var compiled: active
-    ? Resolve.build(Defaults.ACTIONS, commands, contributions, tools, overrides)
-    : Resolve.build([], [], [], [], [])
+  readonly property var compiled: Resolve.build(Defaults.ACTIONS, commands, contributions, tools, overrides)
   readonly property var diagnostics: compiled.diagnostics
   readonly property string helpText: Resolve.help(compiled)
 

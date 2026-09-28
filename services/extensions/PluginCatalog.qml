@@ -8,12 +8,28 @@ Item {
   property var keybindings: []
   property var themes: []
   property var providers: []
-  property var packages: []
   property var diagnostics: []
+  // What went wrong, as opposed to what is merely switched off.
+  readonly property var problems: diagnostics.filter(function(diagnostic) {
+    return diagnostic.level !== "note"
+  })
+  // One line for a status message or the palette's foot.
+  readonly property string problemSummary: {
+    if (!problems.length) {
+      return ""
+    }
+    var first = problems[0]
+    var more = problems.length > 1 ? " (and " + (problems.length - 1) + " more)" : ""
+    return catalog.nameOf(first) + ": " + first.message + more
+  }
   property bool ready: false
   readonly property string script: Platform.localPath(Qt.resolvedUrl("manifest.py"))
   signal loaded()
   ProcessRunner { id: runner }
+
+  function nameOf(diagnostic) {
+    return diagnostic.packageId || String(diagnostic.path || "").split("/").pop() || "the plugin catalog"
+  }
 
   function load(settings) {
     runner.run({ command: ["python3", catalog.script], timeoutMs: 15000, maxOutputBytes: 8 * 1024 * 1024,
@@ -24,13 +40,10 @@ Item {
       catalog.keybindings = result.keybindings || []
       catalog.themes = result.themes || []
       catalog.providers = result.providers || []
-      catalog.packages = result.packages || []
-      catalog.diagnostics = result.diagnostics || []
-      if (result.error) {
-        catalog.diagnostics = [{ stage: "discovery", message: result.error }]
-      }
+      catalog.diagnostics = result.error ? [{ stage: "discovery", level: "error", message: result.error }]
+        : result.diagnostics || []
       catalog.diagnostics.forEach(function(diagnostic) {
-        console.warn("note-note plugins:", diagnostic.packageId || diagnostic.path || "catalog", diagnostic.message)
+        console.warn("note-note plugins:", catalog.nameOf(diagnostic), diagnostic.message)
       })
       catalog.ready = true
       catalog.loaded()

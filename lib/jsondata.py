@@ -1,6 +1,7 @@
 """Bounded strict JSON for declarative application data."""
 import json
 import math
+import sys
 
 from readfile import read_document
 
@@ -42,3 +43,23 @@ def read(path, cap):
     if result.get("error"):
         raise ValueError(result["error"])
     return parse(result["text"])
+
+
+def answer(handle, cap):
+    """One JSON object from stdin in, one JSON object on stdout out.
+
+    A helper script's whole conversation with the application. What goes
+    wrong is part of the answer, as `error`, so the caller never has to read
+    a traceback.
+    """
+    try:
+        raw = sys.stdin.buffer.read(cap + 1)
+        if len(raw) > cap:
+            raise ValueError("request exceeds the byte limit")
+        request = parse(raw)
+        if not isinstance(request, dict):
+            raise ValueError("request must be a JSON object")
+        result = handle(request)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        result = {"error": str(error)}
+    json.dump(result, sys.stdout)

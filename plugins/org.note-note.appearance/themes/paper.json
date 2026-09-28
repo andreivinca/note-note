@@ -2,7 +2,6 @@
   "schemaVersion": 1,
   "id": "paper",
   "name": "Paper",
-  "appearance": "light",
   "colors": {
     "surface.background": "#FFFFFF",
     "text.primary": "#24292F",
@@ -14,10 +13,6 @@
     "overlay.scrim": "#4424292F",
     "selection.background": "#DDEBFC",
     "selection.foreground": "#184C83",
-    "interaction.hover": "#0D24292F",
-    "interaction.pressed": "#1F0969DA",
-    "interaction.selected": "#DDEBFC",
-    "interaction.selectedForeground": "#184C83",
     "input.background": "#FFFFFF",
     "input.border": "#D8DEE4",
     "input.placeholder": "#66717D",
@@ -43,8 +38,6 @@
     "editor.highlightBackground": "#FFF0B3",
     "editor.highlightForeground": "#493A16",
     "status.error": "#B42332",
-    "status.warning": "#946200",
-    "status.success": "#237444",
     "control.placeholderText": "#66717D"
   }
 }

@@ -12,7 +12,9 @@ ApplicationWindow {
   height: 760
   minimumWidth: 760
   minimumHeight: 480
-  visible: true
+  // Shown once the theme the settings name is known, found or not, so the
+  // window never opens in one theme and changes to another.
+  visible: workspace.themes.settled
   color: workspace.background
   palette: ControlPalette {}
 

@@ -1,6 +1,9 @@
 .pragma library
 
-// Application defaults. Labels and dispatch both use the parsed keys.
+// The application's own actions and the keys they start on. Labels and
+// dispatch both use the parsed keys. `workspace` marks an action the workspace
+// runs through its one executor (services/commands/WorkspaceActions.qml), the
+// way the palette runs it.
 var ACTIONS = [
   { id: "commandPalette", keys: ["Ctrl+Shift+P"], context: "application", group: "Getting around", description: "Open the command palette" },
   { id: "search", keys: ["Ctrl+K", "Ctrl+L"], context: "notes", group: "Getting around", description: "Search your notes" },
@@ -13,12 +16,12 @@ var ACTIONS = [
   { id: "previousTab", keys: ["Ctrl+Shift+Tab"], context: "notes", repeatable: true, group: "Getting around", description: "The notebook before it" },
   { id: "openTree", keys: ["Ctrl+Right"], context: "notes", repeatable: true, group: "Getting around", description: "Open the notebook under the cursor" },
   { id: "closeTree", keys: ["Ctrl+Left"], context: "notes", repeatable: true, group: "Getting around", description: "Fold the notebook under the cursor" },
-  { id: "toggleList", workspaceAction: true, keys: ["Ctrl+E"], context: "notes", group: "Getting around", description: "Show or hide the sidebar" },
+  { id: "toggleList", workspace: true, keys: ["Ctrl+E"], context: "notes", group: "Getting around", description: "Show or hide the sidebar" },
   { id: "back", keys: ["Escape"], context: "notes", group: "Getting around", description: "Clear the search or put the window away" },
-  { id: "newNote", workspaceAction: true, keys: ["Ctrl+N"], context: "notes", group: "Notes", description: "A new note in the open notebook" },
-  { id: "newNotebook", workspaceAction: true, keys: ["Ctrl+Shift+N"], context: "notes", group: "Notes", description: "A new notebook" },
-  { id: "deleteNote", workspaceAction: true, keys: ["Ctrl+D"], context: "notes", group: "Notes", description: "Delete the note you are reading" },
-  { id: "openSettings", workspaceAction: true, keys: [], context: "application", group: "Application", description: "Open Settings" },
+  { id: "newNote", workspace: true, keys: ["Ctrl+N"], context: "notes", group: "Notes", description: "A new note in the open notebook" },
+  { id: "newNotebook", workspace: true, keys: ["Ctrl+Shift+N"], context: "notes", group: "Notes", description: "A new notebook" },
+  { id: "deleteNote", workspace: true, keys: ["Ctrl+D"], context: "notes", group: "Notes", description: "Delete the note you are reading" },
+  { id: "openSettings", workspace: true, keys: [], context: "application", group: "Application", description: "Open Settings" },
   { id: "savePage", keys: ["Ctrl+S"], context: "page", group: "Settings", description: "Save settings" },
   { id: "paste", keys: ["Ctrl+V"], context: "editor", protected: true, group: "Editing", description: "Paste text or an image" },
   { id: "pastePlain", keys: ["Ctrl+Shift+V"], context: "editor", protected: true, group: "Editing", description: "Paste plain text" }

@@ -1,11 +1,15 @@
-"""Revision-checked application config transactions; notes use fileio directly."""
+"""Revision-checked application config transactions; notes use fileio directly.
+
+This helper owns the file: bounded strict JSON, its revision, the lock and the
+atomic write. What a field may hold is the application's own rule
+(services/settings/settings.js) and is stated there alone.
+"""
 import contextlib
 import fcntl
 import hashlib
 import json
 import os
 from pathlib import Path
-import re
 import stat
 import sys
 import time
@@ -14,34 +18,25 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib"))
 from fileio import write_atomic
 from readfile import read_document
 import jsondata
-import keybindings
 
 MAX_BYTES = 1024 * 1024
 LOCK_TIMEOUT = 2.0
-THEME_ID = re.compile(r"[a-z][a-z0-9.-]*/[a-z][a-z0-9-]*\Z")
 
 
 def parse(text):
+    """Strict JSON with an object at its root."""
+    if not isinstance(text, str):
+        raise ValueError("settings text must be a string")
     if len(text.encode("utf-8")) > MAX_BYTES:
         raise ValueError("configuration exceeds the byte limit")
     value = jsondata.parse(text)
     if not isinstance(value, dict):
         raise ValueError("settings must be a JSON object")
-    for key in ("providers", "editor", "appearance", "plugins"):
-        if key in value and not isinstance(value[key], dict):
-            raise ValueError(key + " must be an object")
-    for key in ("providers", "plugins"):
-        for entry in value.get(key, {}).values():
-            if not isinstance(entry, dict):
-                raise ValueError(key + " entries must be objects")
-            if "enabled" in entry and not isinstance(entry["enabled"], bool):
-                raise ValueError(key + ".enabled must be a boolean")
-    appearance = value.get("appearance", {})
-    theme = appearance.get("theme")
-    if "theme" in appearance and (not isinstance(theme, str) or not THEME_ID.fullmatch(theme)):
-        raise ValueError("appearance.theme must be a qualified theme ID")
-    keybindings.validate_overrides(value.get("keybindings", []))
     return value
+
+
+def revision_of(text):
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def snapshot(path):
@@ -51,12 +46,11 @@ def snapshot(path):
     if result.get("error"):
         return result
     text = result["text"]
-    revision = hashlib.sha256(text.encode("utf-8")).hexdigest()
     try:
         config = parse(text) if text.strip() else {}
-        return {"ok": True, "revision": revision, "config": config, "unwritten": not text.strip()}
+        return {"ok": True, "revision": revision_of(text), "config": config, "unwritten": not text.strip()}
     except (ValueError, RecursionError) as error:
-        return {"error": str(error), "kind": "invalid", "revision": revision}
+        return {"error": str(error), "kind": "invalid", "revision": revision_of(text)}
 
 
 @contextlib.contextmanager
@@ -81,55 +75,65 @@ def config_lock(path, timeout=LOCK_TIMEOUT):
         os.close(fd)
 
 
+def with_theme(config, theme):
+    if not isinstance(theme, str) or not theme:
+        raise ValueError("invalid theme ID")
+    if not isinstance(config.get("appearance"), dict):
+        config["appearance"] = {}
+    config["appearance"]["theme"] = theme
+    return config
+
+
+def refusal(operation, request, current):
+    """Why this write may not start from the file as it is, or nothing."""
+    if operation == "create":
+        # Another writer made the file first: the caller adopts theirs.
+        return None if current.get("unwritten") else current
+    if current["revision"] != request.get("revision"):
+        return {"error": "Settings changed in another window or program. Restart to load them before saving.",
+                "kind": "stale", "revision": current["revision"]}
+    # Explicit Settings Save may repair malformed JSON; theme patches cannot.
+    if operation == "theme" and current.get("error"):
+        return current
+    return None
+
+
+def write(path, value, revision):
+    text = json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
+    if len(text.encode("utf-8")) > MAX_BYTES:
+        raise ValueError("configuration exceeds the byte limit")
+    # Detect ordinary uncooperative edits as late as possible; advisory
+    # locks cannot make an external editor participate in this transaction.
+    if snapshot(path).get("revision") != revision:
+        return {"error": "Settings changed while saving; restart before retrying.", "kind": "stale"}
+    write_atomic(path, text)
+    return {"ok": True, "config": value, "revision": revision_of(text), "unwritten": False}
+
+
 def transact(request):
     path = request["path"]
+    if not isinstance(path, str):
+        raise ValueError("configuration path must be a string")
     operation = request["operation"]
     if operation == "validate":
         return {"ok": True, "config": parse(request["text"])}
     if operation == "read":
         return snapshot(path)
-    if operation not in ("replace", "theme"):
+    if operation not in ("create", "replace", "theme"):
         raise ValueError("unknown configuration operation")
     with config_lock(path):
         current = snapshot(path)
         if not current.get("revision"):
             return current
-        if current["revision"] != request.get("revision"):
-            return {"error": "Settings changed in another window or program. Restart to load them before saving.",
-                    "kind": "stale", "revision": current["revision"]}
-        if operation == "replace":
-            # Explicit Settings Save may repair malformed JSON; theme patches cannot.
-            value = parse(request["text"])
+        refused = refusal(operation, request, current)
+        if refused:
+            return refused
+        if operation == "theme":
+            value = with_theme(current["config"], request["theme"])
         else:
-            if current.get("error"):
-                return current
-            theme = request["theme"]
-            if not isinstance(theme, str) or not THEME_ID.fullmatch(theme):
-                raise ValueError("invalid theme ID")
-            value = current["config"]
-            value.setdefault("appearance", {})["theme"] = theme
-        text = json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
-        if len(text.encode("utf-8")) > MAX_BYTES:
-            raise ValueError("configuration exceeds the byte limit")
-        # Detect ordinary uncooperative edits as late as possible; advisory
-        # locks cannot make an external editor participate in this transaction.
-        if snapshot(path).get("revision") != current["revision"]:
-            return {"error": "Settings changed while saving; restart before retrying.", "kind": "stale"}
-        write_atomic(path, text)
-        return {"ok": True, "config": value,
-                "revision": hashlib.sha256(text.encode("utf-8")).hexdigest()}
-
-
-def main():
-    try:
-        raw = sys.stdin.buffer.read(MAX_BYTES * 2 + 1)
-        if len(raw) > MAX_BYTES * 2:
-            raise ValueError("configuration request exceeds the byte limit")
-        result = transact(json.loads(raw))
-    except (OSError, ValueError, KeyError, TypeError, RecursionError) as error:
-        result = {"error": str(error)}
-    json.dump(result, sys.stdout)
+            value = parse(request["text"])
+        return write(path, value, current["revision"])
 
 
 if __name__ == "__main__":
-    main()
+    jsondata.answer(transact, MAX_BYTES * 2)

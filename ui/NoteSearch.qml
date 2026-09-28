@@ -29,8 +29,6 @@ Item {
     id: searchField
     anchors.fill: parent
     placeholderText: "Search"
-    surfaceBackground: root.background
-    foreground: root.foreground
     accent: root.accent
     font.family: root.fontFamily
     onTextEdited: root.filterEdited(text)

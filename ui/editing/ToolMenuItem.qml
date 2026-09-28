@@ -61,6 +61,6 @@ QQC.MenuItem {
   }
   background: Rectangle {
     radius: row.popupStyle.rowRadius
-    color: row.highlighted ? Style.hoverFillFor(row.popupStyle.foreground, row.editor.accent) : "transparent"
+    color: row.highlighted ? Style.hoverFillFor(row.popupStyle.text, row.editor.accent) : "transparent"
   }
 }

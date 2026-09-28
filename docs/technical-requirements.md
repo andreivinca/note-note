@@ -78,7 +78,7 @@ bars are presentation components (`ui/TitleBar.qml`, `ui/TabStrip.qml`,
 `ui/ViewBar.qml`, `ui/TextPage.qml`): fed by bindings, answering with
 signals, holding no state of their own. `ui/TextPage.qml` serves both pages —
 settings edits and saves, key bindings only shows. Application defaults live
-in `ui/KeyBindings.js`. `services/shortcuts/KeybindingRegistry.qml` resolves them
+in `services/shortcuts/defaults.js`. `services/shortcuts/KeybindingRegistry.qml` resolves them
 with editing-tool defaults, plugin manifest bindings, and user overrides.
 Dispatch, command labels, tooltips, and keyboard help read the same result.
 

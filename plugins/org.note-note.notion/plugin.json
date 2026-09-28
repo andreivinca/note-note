@@ -8,7 +8,8 @@
     "providers": [
       {
         "id": "notion",
-        "path": "Provider.qml"
+        "path": "Provider.qml",
+        "order": 40
       }
     ]
   }

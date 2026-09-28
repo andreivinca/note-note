@@ -18,7 +18,7 @@ QtObject {
   property int shortcutModifiers: Qt.NoModifier
   property var keybindings: null
   readonly property string shortcutLabel: keybindings ? keybindings.label("tool/" + toolId) : ""
-  readonly property string tooltip: label + (shortcutLabel ? " (" + shortcutLabel + ")" : "")
+  readonly property string tooltip: label + (keybindings ? keybindings.hint("tool/" + toolId) : "")
 
   // A tool can own a fixed set of choices. Other menus take their members
   // and order from toolbar settings.

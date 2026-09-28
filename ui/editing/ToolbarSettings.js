@@ -17,48 +17,15 @@ function defaults() {
   ]
 }
 
-// Earlier default layouts still saved in uncustomised configurations.
-// Keep each until no installed config can hold it; configs are rewritten
-// only on Save.
+// The default layout of every release before this one. A config holds the
+// default it was first written with until its owner saves again, so one that
+// matches a layout here was never customised and takes the current default.
+// A release that changes defaults() adds the layout it replaces, under the
+// releases that shipped it; nothing else belongs here. An entry can go once
+// no installed config can still hold it.
 function previousDefaults() {
   return [
-    [
-      ["heading"],
-      ["bold", "italic", "underline", "strikeout"],
-      ["textColor", "highlight", "code"],
-      ["ul", "ol", "todo", "outdent", "indent"],
-      ["quote", "codeblock"],
-      ["addRow", "delRow", "addCol", "delCol"],
-      [{ dropdown: "insert", items: [
-        "table", "link",
-        { dropdown: "insertMonth", items: ["currentMonth", "nextMonth", "customMonth"] },
-        "rule"
-      ] }]
-    ],
-    [
-      ["heading"],
-      ["bold", "italic", "underline", "strikeout"],
-      ["ul", "ol", "todo", "outdent", "indent"],
-      ["quote", "codeblock"],
-      ["addRow", "delRow", "addCol", "delCol"],
-      [{ dropdown: "insert", items: [
-        "table", "link", "textColor", "highlight", "code",
-        { dropdown: "insertMonth", items: ["currentMonth", "nextMonth", "customMonth"] },
-        "rule"
-      ] }]
-    ],
-    [
-      ["heading"],
-      ["bold", "italic", "underline", "strikeout"],
-      ["ul", "ol", "todo", "outdent", "indent"],
-      ["quote", "codeblock", "link"],
-      ["addRow", "delRow", "addCol", "delCol"],
-      [{ dropdown: "insert", items: [
-        "table", "textColor", "highlight", "code",
-        { dropdown: "insertMonth", items: ["currentMonth", "nextMonth", "customMonth"] },
-        "rule"
-      ] }]
-    ],
+    // 1.0.17 to 1.0.22
     [
       ["heading"],
       ["bold", "italic", "underline", "strikeout"],
@@ -70,6 +37,7 @@ function previousDefaults() {
         "rule", "addRow", "delRow", "addCol", "delCol"
       ] }]
     ],
+    // 1.0.15
     [
       ["bold", "italic", "underline", "strikeout"],
       ["textColor", "highlight", "code", "heading"],
@@ -79,6 +47,17 @@ function previousDefaults() {
       [{ dropdown: "insert", items: [
         { dropdown: "insertMonth", items: ["currentMonth", "nextMonth", "customMonth"] },
         "rule"
+      ] }]
+    ],
+    // 1.0.14
+    [
+      ["bold", "italic", "underline", "strikeout"],
+      ["textColor", "highlight", "code", "heading"],
+      ["ul", "ol", "todo", "outdent", "indent"],
+      ["quote", "codeblock", "rule", "link"],
+      ["table", "addRow", "delRow", "addCol", "delCol"],
+      [{ dropdown: "insert", items: [
+        { dropdown: "insertMonth", items: ["currentMonth", "nextMonth", "customMonth"] }
       ] }]
     ]
   ]
@@ -126,16 +105,6 @@ function validate(layout) {
     }
   }
   return ""
-}
-
-function validateConfig(config) {
-  if (config.editor === undefined) {
-    return ""
-  }
-  if (!config.editor || typeof config.editor !== "object" || Array.isArray(config.editor)) {
-    return "editor settings must be an object"
-  }
-  return config.editor.toolbar === undefined ? "" : validate(config.editor.toolbar)
 }
 
 function editorDefaults(settings) {

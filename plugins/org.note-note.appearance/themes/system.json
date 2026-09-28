@@ -2,7 +2,6 @@
   "schemaVersion": 1,
   "id": "system",
   "name": "System",
-  "appearance": "system",
   "colors": {
     "surface.background": "system",
     "text.primary": "system",
@@ -15,10 +14,6 @@
     "overlay.scrim": "system",
     "selection.background": "system",
     "selection.foreground": "system",
-    "interaction.hover": "system",
-    "interaction.pressed": "system",
-    "interaction.selected": "system",
-    "interaction.selectedForeground": "system",
     "input.background": "system",
     "input.foreground": "system",
     "input.border": "system",
@@ -45,7 +40,6 @@
     "editor.selectionBackground": "system",
     "editor.selectionForeground": "system",
     "editor.link": "system",
-    "editor.linkVisited": "system",
     "editor.quoteForeground": "system",
     "editor.quoteBorder": "system",
     "editor.codeBackground": "system",
@@ -54,11 +48,8 @@
     "editor.highlightBackground": "system",
     "editor.highlightForeground": "system",
     "status.error": "system",
-    "status.warning": "system",
-    "status.success": "system",
     "palette.background": "system",
     "palette.foreground": "system",
-    "palette.matchForeground": "system",
     "palette.selectionBackground": "system",
     "palette.selectionForeground": "system",
     "control.base": "system",
@@ -72,6 +63,8 @@
     "control.dark": "system",
     "control.shadow": "system",
     "control.placeholderText": "system",
-    "control.disabledText": "system"
+    "control.disabledText": "system",
+    "control.link": "system",
+    "control.linkVisited": "system"
   }
 }

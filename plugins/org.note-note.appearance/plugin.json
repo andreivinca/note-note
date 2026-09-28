@@ -8,22 +8,18 @@
     "themes": [
       {
         "id": "system",
-        "name": "System",
         "path": "themes/system.json"
       },
       {
         "id": "paper",
-        "name": "Paper",
         "path": "themes/paper.json"
       },
       {
         "id": "newsprint",
-        "name": "Newsprint",
         "path": "themes/newsprint.json"
       },
       {
         "id": "nightfall",
-        "name": "Nightfall",
         "path": "themes/nightfall.json"
       }
     ],

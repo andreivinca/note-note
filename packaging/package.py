@@ -23,8 +23,11 @@ def output(command):
     return run(command, capture_output=True, text=True).stdout.strip()
 
 
-def source_files():
-    names = output(["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"]).split("\0")
+def tracked_files():
+    """What an archive is made of: the files the repository tracks. A file
+    nobody committed belongs to no release, whatever lies in the working
+    tree; BUILD-INFO says when that tree differed from the commit it names."""
+    names = output(["git", "ls-files", "-z"]).split("\0")
     return sorted({Path(name) for name in names if name and (ROOT / name).is_file()})
 
 
@@ -103,7 +106,7 @@ def main():
              "--resources", str(native / "share/note-note"), "--harness", str(build / "note-note-harness")],
             env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
         plugin = stage / plugin_name
-        for path in source_files():
+        for path in tracked_files():
             if plugin_file(path):
                 target = plugin / path
                 target.parent.mkdir(parents=True, exist_ok=True)

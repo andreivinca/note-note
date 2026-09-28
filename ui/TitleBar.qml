@@ -49,12 +49,10 @@ Item {
 
   // Match the mockup's darker tab strip while retaining the theme's hue.
   // The background and overflow fades share this fill.
-  readonly property color fill: Color.token("titlebar.background", Qt.darker(root.background, 1.12))
+  readonly property color fill: Color.token("titlebar.background")
 
   ChromePopupStyle {
     id: popupStyle
-    background: root.background
-    foreground: root.foreground
   }
 
   Rectangle {
@@ -189,8 +187,8 @@ Item {
       }
 
       QQC.Popup {
-            palette: ControlPalette {}
         id: menu
+        palette: ControlPalette {}
         // Hung from the button's right edge: the bar's own edge is a few
         // pixels further right, and a menu growing that way would run off it.
         x: menuButton.width - width

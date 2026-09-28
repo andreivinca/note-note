@@ -3,7 +3,40 @@
 #include <QTextList>
 #include <QTextTable>
 
+#include <optional>
+
 namespace {
+
+enum class ListStyle { Checkbox, Bullet, Numbered };
+
+// The names the editing tools know the styles by (ui/tools).
+std::optional<ListStyle> styleNamed(const QString &name)
+{
+    if (name == QLatin1String("todo")) {
+        return ListStyle::Checkbox;
+    }
+    if (name == QLatin1String("ul")) {
+        return ListStyle::Bullet;
+    }
+    if (name == QLatin1String("ol")) {
+        return ListStyle::Numbered;
+    }
+    return std::nullopt;
+}
+
+bool isNumbered(QTextListFormat::Style style)
+{
+    switch (style) {
+    case QTextListFormat::ListDecimal:
+    case QTextListFormat::ListLowerAlpha:
+    case QTextListFormat::ListUpperAlpha:
+    case QTextListFormat::ListLowerRoman:
+    case QTextListFormat::ListUpperRoman:
+        return true;
+    default:
+        return false;
+    }
+}
 
 void appendBlocks(QVector<QTextBlock> &blocks, QTextDocument *doc, int from, int through)
 {
@@ -45,18 +78,27 @@ QVector<QTextBlock> selectedBlocks(QTextDocument *doc, int from, int to)
     return blocks;
 }
 
-bool matchesStyle(const QTextBlock &block, const QString &style)
+bool hasStyle(const QTextBlock &block, ListStyle style)
 {
     const QTextList *list = block.textList();
     if (!list) {
         return false;
     }
     const bool checkbox = block.blockFormat().marker() != QTextBlockFormat::MarkerType::NoMarker;
-    if (style == "todo") {
+    if (style == ListStyle::Checkbox) {
         return checkbox;
     }
-    const bool ordered = list->format().style() <= QTextListFormat::ListDecimal;
-    return !checkbox && (style == "ol" ? ordered : !ordered);
+    return !checkbox && isNumbered(list->format().style()) == (style == ListStyle::Numbered);
+}
+
+bool allHaveStyle(const QVector<QTextBlock> &blocks, ListStyle style)
+{
+    for (const QTextBlock &block : blocks) {
+        if (!hasStyle(block, style)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 bool sameContainer(const QTextBlock &left, const QTextBlock &right)
@@ -70,49 +112,120 @@ bool sameContainer(const QTextBlock &left, const QTextBlock &right)
     return !table || table->cellAt(a) == table->cellAt(b);
 }
 
-QTextList *adjacentList(const QTextBlock &block, const QTextBlock &neighbour,
-                       const QTextListFormat &format, const QString &style)
+// The list a block is an item of, when it is one of the style and depth asked for.
+QTextList *listOf(const QTextBlock &block, const QTextListFormat &format, ListStyle style)
 {
-    if (!neighbour.isValid() || !sameContainer(block, neighbour) || !matchesStyle(neighbour, style)) {
+    if (!block.isValid() || !hasStyle(block, style)) {
         return nullptr;
     }
-    QTextList *list = neighbour.textList();
+    QTextList *list = block.textList();
     if (list->format().style() != format.style() || list->format().indent() != format.indent()) {
         return nullptr;
     }
     return list;
 }
 
+// A neighbour's list the block can join: list membership never crosses a
+// table cell.
+QTextList *neighbouringList(const QTextBlock &block, const QTextBlock &neighbour,
+                            const QTextListFormat &format, ListStyle style)
+{
+    return neighbour.isValid() && sameContainer(block, neighbour) ? listOf(neighbour, format, style) : nullptr;
+}
+
 void removeList(const QTextBlock &block)
 {
     block.textList()->remove(block);
     QTextBlockFormat format = block.blockFormat();
-    // QTextList::remove turns the list indent into a paragraph indent.
-    // Leaving the list restores an ordinary paragraph at the same position.
+    // QTextList::remove turns the list indent into a paragraph indent and
+    // leaves the item's margins. An ordinary paragraph has neither: the
+    // converter states every paragraph's vertical margins as zero
+    // (services/markdown/qthtml/writer.py, block_style), and a paragraph
+    // that left a list must not be spaced differently until the note reloads.
     format.setIndent(0);
     format.setMarker(QTextBlockFormat::MarkerType::NoMarker);
-    format.setTopMargin(12);
-    format.setBottomMargin(12);
+    format.setTopMargin(0);
+    format.setBottomMargin(0);
     QTextCursor(block).setBlockFormat(format);
 }
 
+QTextListFormat listFormat(const QTextBlock &block, ListStyle style)
+{
+    QTextListFormat format;
+    format.setStyle(style == ListStyle::Numbered ? QTextListFormat::ListDecimal : QTextListFormat::ListDisc);
+    format.setIndent(block.textList() ? block.textList()->format().indent() : 1);
+    return format;
 }
 
-QVariantMap TextBlocks::toggleList(int from, int to, const QString &style)
+// A checkbox keeps the state it has; any other style has no marker.
+QTextBlockFormat::MarkerType markerFor(const QTextBlock &block, ListStyle style)
+{
+    if (style != ListStyle::Checkbox) {
+        return QTextBlockFormat::MarkerType::NoMarker;
+    }
+    const bool checked = block.blockFormat().marker() == QTextBlockFormat::MarkerType::Checked;
+    return checked ? QTextBlockFormat::MarkerType::Checked : QTextBlockFormat::MarkerType::Unchecked;
+}
+
+// Bridge a paragraph inserted between compatible lists. Moving blocks
+// individually keeps a list in another cell or at another depth intact.
+void joinFollowing(QTextList *list, const QTextBlock &block, const QTextListFormat &format, ListStyle style)
+{
+    for (QTextBlock next = block.next(); next.isValid(); next = next.next()) {
+        QTextList *following = neighbouringList(block, next, format, style);
+        if (!following || following == list) {
+            return;
+        }
+        list->add(next);
+    }
+}
+
+void applyList(const QTextBlock &block, ListStyle style)
+{
+    const QTextListFormat format = listFormat(block, style);
+    QTextBlockFormat paragraph = block.blockFormat();
+    paragraph.setIndent(0);
+    paragraph.setMarker(markerFor(block, style));
+    QTextCursor cursor(block);
+    cursor.setBlockFormat(paragraph);
+
+    QTextList *list = neighbouringList(block, block.previous(), format, style);
+    if (!list) {
+        list = listOf(block, format, style);
+    }
+    if (list) {
+        list->add(block);
+    } else {
+        list = cursor.createList(format);
+    }
+    // Qt omits an empty cell's list when exporting HTML. Keep the same
+    // invisible item content that the Markdown writer uses on import.
+    if (block.text().isEmpty()) {
+        cursor.insertText(QString(NoteNoteDialect::BLANK_PARAGRAPH));
+    }
+    joinFollowing(list, block, format, style);
+}
+
+bool isEmptyItem(const QTextBlock &block)
+{
+    return block.text().isEmpty() || block.text() == QString(NoteNoteDialect::BLANK_PARAGRAPH);
+}
+
+}
+
+QVariantMap TextBlocks::toggleList(int from, int to, const QString &styleName)
 {
     QTextDocument *doc = m_document ? m_document->textDocument() : nullptr;
-    if (!doc || from < 0 || from > to || to >= doc->characterCount()
-        || (style != "todo" && style != "ul" && style != "ol")) {
+    const std::optional<ListStyle> style = styleNamed(styleName);
+    if (!doc || !style || from < 0 || from > to || to >= doc->characterCount()) {
         return {};
     }
     const QVector<QTextBlock> blocks = selectedBlocks(doc, from, to);
-    bool remove = true;
-    for (const QTextBlock &block : blocks) {
-        remove = remove && matchesStyle(block, style);
-    }
     if (blocks.isEmpty()) {
         return {};
     }
+    // A selection that is the style already loses it; a mixed one adopts it.
+    const bool remove = allHaveStyle(blocks, *style);
     QTextCursor start(doc);
     start.setPosition(from);
     start.setKeepPositionOnInsert(true);
@@ -124,42 +237,8 @@ QVariantMap TextBlocks::toggleList(int from, int to, const QString &style)
     for (const QTextBlock &block : blocks) {
         if (remove) {
             removeList(block);
-            continue;
-        }
-        QTextListFormat format;
-        format.setStyle(style == "ol" ? QTextListFormat::ListDecimal : QTextListFormat::ListDisc);
-        format.setIndent(block.textList() ? block.textList()->format().indent() : 1);
-        QTextBlockFormat paragraph = block.blockFormat();
-        const bool checked = paragraph.marker() == QTextBlockFormat::MarkerType::Checked;
-        paragraph.setIndent(0);
-        paragraph.setMarker(style == "todo"
-            ? (checked ? QTextBlockFormat::MarkerType::Checked : QTextBlockFormat::MarkerType::Unchecked)
-            : QTextBlockFormat::MarkerType::NoMarker);
-        QTextCursor cursor(block);
-        cursor.setBlockFormat(paragraph);
-
-        QTextList *list = adjacentList(block, block.previous(), format, style);
-        if (!list) {
-            list = adjacentList(block, block, format, style);
-        }
-        if (list) {
-            list->add(block);
         } else {
-            list = cursor.createList(format);
-        }
-        // Qt omits an empty cell's list when exporting HTML. Keep the same
-        // invisible item content that the Markdown writer uses on import.
-        if (block.text().isEmpty()) {
-            cursor.insertText(QString(NoteNoteDialect::BLANK_PARAGRAPH));
-        }
-        // Bridge a paragraph inserted between compatible lists. Moving blocks
-        // individually keeps a list in another cell or at another depth intact.
-        for (QTextBlock next = block.next(); next.isValid(); next = next.next()) {
-            QTextList *following = adjacentList(block, next, format, style);
-            if (!following || following == list) {
-                break;
-            }
-            list->add(next);
+            applyList(block, *style);
         }
     }
     transaction.endEditBlock();
@@ -190,14 +269,14 @@ bool TextBlocks::leaveEmptyList(int position)
         return false;
     }
     const QTextBlock block = doc->findBlock(position);
-    if (!block.textList() || (!block.text().isEmpty()
-        && block.text() != QString(NoteNoteDialect::BLANK_PARAGRAPH))) {
+    if (!block.textList() || !isEmptyItem(block)) {
         return false;
     }
     QTextCursor cursor(block);
     cursor.beginEditBlock();
     removeList(block);
     if (!block.text().isEmpty()) {
+        // The filler that kept the empty item alive goes with the list.
         cursor.setPosition(block.position() + block.length() - 1, QTextCursor::KeepAnchor);
         cursor.removeSelectedText();
     }

@@ -89,7 +89,10 @@ its own content.
 
 Default shortcuts match OneNote for Windows: **Ctrl+1** for checkboxes,
 **Ctrl+.** for bullets, and **Ctrl+/** for numbered lists. They invoke the
-same actions as the toolbar buttons and can be changed in Key bindings.
+same actions as the toolbar buttons. The Key bindings page lists them, as
+`ctrl+1`, `ctrl+period` and `ctrl+slash`; to change one, name `tool/todo`,
+`tool/ul` or `tool/ol` under `keybindings` in Settings
+([commands](commands.md#registering-shortcuts)).
 
 Checkbox, bullet and numbered list actions format the paragraph at the caret or
 the selected paragraphs, including empty paragraphs and table cells. A selection
@@ -274,7 +277,7 @@ an action's content, rules and UI belong in its tool file.
 | `insertSnippet(markdown)` | Insert after the current block, or on an empty paragraph, with a landing paragraph when needed. |
 | `insertTable(markdown)` | Insert table content at the caret inside a cell, or as a normal snippet outside tables. |
 | `transformBlocks(transform, options)` | Transform selected Markdown blocks. The callback receives `{ indent, prefix, content, isList }` and returns a line. `options.list` manages paragraph separators when toggling lists; `unchangedMessage` supplies optional feedback. |
-| `toggleList(style)` | Toggle `todo`, `ul` or `ol` on actual document blocks, including table cells, preserving selections and undo. |
+| `toggleListStyle(style)` | Toggle `todo`, `ul` or `ol` on actual document blocks, including table cells, preserving selections and undo. |
 | `tableContext()`, `changeTable(operation, index, count)` | Read the innermost table's row/column and dimensions, and insert/remove rows or columns as one undo transaction. Operations are `insertRows`, `removeRows`, `insertColumns`, `removeColumns`. |
 | `transformTable(transform)` | Plain-table fallback when the native helper is absent. Callback arguments are `(rows, row, column)`; row 1 is the Markdown separator row. Return `false` to leave the document unchanged. |
 | `withMarkdown(callback, asText)` | Read Markdown lines and the line/block map, rejecting stale or failed conversions. `asText` optionally reads a code block as prose. |

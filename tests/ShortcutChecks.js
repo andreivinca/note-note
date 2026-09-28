@@ -1,7 +1,7 @@
 .pragma library
 .import "../services/shortcuts/resolve.js" as Resolve
 .import "../services/shortcuts/stroke.js" as Stroke
-.import "../ui/KeyBindings.js" as Defaults
+.import "../services/shortcuts/defaults.js" as Defaults
 
 function run(verify) {
   var commands = [
@@ -68,7 +68,7 @@ function run(verify) {
   changed = compile([], [{ command: "tool/bold", keys: ["Ctrl+Alt+B"] }], tools)
   verify(!match(changed, "Ctrl+B", "editor") && match(changed, "Ctrl+Alt+B", "editor") === "tool/bold"
     && label(changed, "tool/bold") === "ctrl+alt+b", "tools use the same overrides and labels")
-  verify(Resolve.help(changed).indexOf("ctrl+alt+b   Bold") >= 0, "help uses effective tool binding")
+  verify(/ctrl\+alt\+b +Bold/.test(Resolve.help(changed)), "help uses effective tool binding")
   tools[0].shortcutKey = Qt.Key_S
   changed = compile([], [], tools)
   verify(match(changed, "Ctrl+S", "editor") === "tool/bold" && match(changed, "Ctrl+S", "page") === "app/savePage", "tool and page defaults coexist")

@@ -5,6 +5,11 @@
   "version": "1.0.0",
   "apiVersion": 1,
   "contributes": {
-    "providers": [{ "id": "hello", "path": "Provider.qml" }]
+    "providers": [
+      {
+        "id": "hello",
+        "path": "Provider.qml"
+      }
+    ]
   }
 }

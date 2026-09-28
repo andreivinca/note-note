@@ -8,6 +8,7 @@ Item {
   id: bar
   required property var registry
   property color background: Color.menu.background
+  property color fill: Color.token("toolbar.background")
   property bool toolsVisible: true
   readonly property real groupPadding: Style.spacing.xs
   readonly property real popupMargin: Style.spacing.lg
@@ -16,15 +17,11 @@ Item {
   readonly property real rowHeight: Math.max(Style.space(44),
     toolFlow.buttonHeight + 2 * (groupPadding + Style.spacing.sm))
   readonly property var editor: registry.editor
-  readonly property bool panelOpen: registry.actions.some(function(tool) {
-    return tool.panelOpen
-  })
+  readonly property bool panelOpen: registry.panelOpen
   height: visible ? Math.max(rowHeight, strip.implicitHeight) + Style.spacing.hairline : 0
 
   AppUi.ChromePopupStyle {
     id: chromePopupStyle
-    background: bar.background
-    foreground: bar.editor.foreground
   }
 
   Component {
@@ -39,7 +36,7 @@ Item {
 
   Rectangle {
     anchors.fill: parent
-    color: Color.token("toolbar.background", Style.chromeSurface(bar.background, bar.editor.foreground))
+    color: bar.fill
   }
 
   Column {
@@ -153,8 +150,8 @@ Item {
         Item {
           objectName: "editingPopupHolder-" + modelData.toolId
           QQC.Popup {
-            palette: ControlPalette {}
             id: popup
+            palette: ControlPalette {}
             readonly property var tool: modelData
             parent: bar
             objectName: "editingPopup-" + tool.toolId

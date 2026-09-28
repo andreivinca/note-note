@@ -15,7 +15,9 @@ Item {
   property bool filtering: false
   // The exact fill behind the strip, for the overflow fades to fade into.
   property color background: Color.menu.background
-  property color activeBackground: Color.token("tab.activeBackground", Color.menu.selectedBackground)
+  property color activeBackground: Color.token("tab.activeBackground")
+  property color activeForeground: Color.token("tab.activeForeground")
+  property color inactiveForeground: Color.token("tab.inactiveForeground")
   property color foreground: Color.menu.text
   property string fontFamily: Style.font.menuFamily
   property int fontSize: Style.font.bodySmall
@@ -156,10 +158,7 @@ Item {
               // elides, and the tooltip below says the whole of it.
               width: Math.min(implicitWidth, Style.space(200))
               text: tab.displayName
-              // Active tabs share the command palette's selection ink.
-              color: tab.current
-                ? Color.token("tab.activeForeground", Color.menu.selectedText)
-                : Color.token("tab.inactiveForeground", Util.alpha(root.foreground, 0.68))
+              color: tab.current ? root.activeForeground : root.inactiveForeground
               font.family: root.fontFamily
               font.pixelSize: root.fontSize
               elide: Text.ElideRight

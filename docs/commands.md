@@ -35,31 +35,28 @@ Implemented context interfaces:
 | `resources.readJson(path, callback)` | Strict JSON read returning `{value}` or `{error}` |
 | `cancellation.isActive()` | Whether this invocation still accepts work |
 | `cancellation.onCancel(callback)` | Register cancellation cleanup |
-| `themes.list(callback)` | Reread and validate theme descriptors; returns `{items, diagnostics}` |
-| `themes.current()`, `themes.supported` | Saved identity; availability of native display styling |
-| `themes.beginPreview()` | Owned session with `preview(id)`, `commit(id)`, `cancel()` |
+| `themes.list(callback)` | Reread and validate theme descriptors; returns `{items, diagnostics}`. Each item says whether this host can show it (`enabled`, `reason`) |
+| `themes.current()` | Saved identity |
+| `themes.beginPreview()` | Owned session with `preview(id)`, `commit(id)`, `cancel()`; it ends with the command |
 | `themes.diagnostics()` | Contrast diagnostics for the effective snapshot |
 | `settings.check(callback)` | Detect stale configuration before an interaction |
-| `settings.revision` | Captured configuration revision |
-| `settings.setTheme(id, revision, callback)` | Persist one selection transaction; accepted writes finish before disposal |
+| `settings.setTheme(id, callback)` | Persist one selection transaction; accepted writes finish before disposal |
 
-Other proposed interfaces (editor commands and helper tasks) are added when a
-real command needs them. The workspace, provider instances, and account objects
-are not part of this command context.
+Every member is a function. Other proposed interfaces (editor commands and
+helper tasks) are added when a real command needs them. The workspace, provider
+instances, and account objects are not part of this command context.
 
 The built-in [workspace plugin](../plugins/org.note-note.workspace/plugin.json)
 provides New Note, New Notebook, Open Settings, Toggle Sidebar, and Delete Note.
-Each handler uses the public API, for example:
+Each is a manifest entry naming its `workspaceAction` and ships no handler: the
+registry runs the action itself, through the executor the shortcut uses.
 
-```qml
-import NoteNote.Extensions 1.0
-
-Command {
-  function execute(context, parameters, done) {
-    done(context.workspace.invoke("newNote"))
-  }
-}
+```json
+{"id": "new-note", "title": "New Note", "category": "Notes", "workspaceAction": "newNote"}
 ```
+
+A command names a `handler` or a `workspaceAction`, one of the two. A handler
+reaches the same actions through `context.workspace.invoke(action)`.
 
 Supported action IDs are `newNote`, `newNotebook`, `openSettings`, `toggleList`,
 and `deleteNote`. Success means the existing workspace flow accepted the action;
@@ -69,12 +66,10 @@ later results and errors belong to those workspace flows. The palette closes
 before control transfers, preserving the destination's focus. Each invocation
 can hand off at most one action; canceled or finished commands cannot invoke one.
 
-A command's optional manifest `workspaceAction` names its associated action.
-The registry uses it to check availability and read the shortcut label from the
-same keybinding definitions used by the keyboard and help page. The handler
-still invokes the action explicitly. No shortcut is registered by this metadata.
-Unknown actions remain unavailable. Availability is checked again when the API
-is called, including for commands without a `workspaceAction` declaration.
+A `workspaceAction` command takes its availability and its shortcut label from
+the action it names: the command and the application's own action are one thing
+to bind. Unknown actions remain unavailable. Availability is checked again when
+`workspace.invoke` is called from a handler.
 Note actions and the sidebar toggle are unavailable while a page is open; note
 creation needs a supported destination, notebook creation needs a provider's
 creation entry, and deletion needs a deletable note. Existing transition and
@@ -83,11 +78,13 @@ Settings page without replacing its unsaved text.
 
 Picker options are `{title, items, selectedId, message}`. An item has a stable
 `id`, `label`, optional `detail`, `keywords`, `enabled`, `reason`, and `shortcut`.
-Rows show only the label, with an optional shortcut hint aligned to the right.
-The shortcut is display text; it does not register a keybinding. Details and
-command categories remain searchable without appearing in the row. Callbacks
-are `preview(id)`, `accept(id)`, and optional `cancel()`. Empty results preview
-an empty ID. The returned controller provides `setBusy(bool, message)`,
+Rows show the label, then the detail (for a command, the package it comes from)
+and an optional shortcut hint aligned to the right. The shortcut is display
+text; it does not register a keybinding. Details and command categories are
+searchable. Callbacks are `preview(id)`, `accept(id)`, and optional `cancel()`,
+which runs when the command is cancelled. The first preview arrives once
+`pick` has returned its controller. Empty results preview an empty ID. The
+returned controller provides `setBusy(bool, message)`,
 `showError(message)`, and `setMessage(message)`; it belongs to that picker session.
 An accept callback decides when its command completes.
 
@@ -100,8 +97,10 @@ when it closes. The palette is unavailable over an active confirmation or
 editing tool panel, and owns its keyboard events before page/editor shortcuts.
 
 Commands can declare `requires` from `hasDocument`, `editorWritable`, and
-`settingsClean`. Unavailable commands remain visible; selecting one shows its
-reason in the footer.
+`settingsClean`. A name this version does not know counts as not met, so a
+command written for a later version stays unavailable instead of running
+without what it asked for. Unavailable commands remain visible; selecting one
+shows its reason in the footer.
 The default palette shortcut is `Ctrl+Shift+P`. It participates in the same
 registry and can be rebound with `app/commandPalette`.
 
@@ -118,7 +117,9 @@ happens during discovery, before any handler executes:
 ```
 
 `command` must name a local command in the same package. Discovery qualifies it
-as `<package-id>/export-markdown`. The palette obtains the effective label from
+as `<package-id>/export-markdown`. A key or context the shortcut resolver cannot
+use costs that one binding and is listed on the Key bindings page; the package
+and its commands load all the same. The palette obtains the effective label from
 that identity; handlers never provide or format their command's shortcut label.
 Keyboard execution uses the same executor and availability checks as the palette.
 A picker opened by a shortcut restores the previous input focus when closed.
@@ -150,7 +151,7 @@ without restarting providers or redeploying plugins:
 
 Each entry replaces **all** defaults for that action; an empty array unbinds it.
 Removing an entry restores defaults. Up to eight keys per action are allowed.
-Use `app/<action>` for built-ins (see [the catalogue](../ui/KeyBindings.js)),
+Use `app/<action>` for built-ins (see [the catalogue](../services/shortcuts/defaults.js)),
 `tool/<toolId>` for editing tools, and qualified command IDs for plugin commands.
 A command with `workspaceAction: "newNote"` aliases `app/newNote`; overriding
 either ID updates both keyboard execution and every associated command label.

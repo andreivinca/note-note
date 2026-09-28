@@ -1,54 +1,73 @@
 import QtQuick
-import "../processes"
 
+// Looks commands up, says whether one can run, and owns an invocation from
+// its first moment to its last. What a command may ask of the application
+// is the CommandApi's to say.
 Item {
   id: registry
   property var descriptors: []
-  property var catalog: null
-  property var themeCatalog: null
-  property var themes: null
-  property var settings: null
+  property var api: null
   property var workspaceActions: null
   property var keybindings: null
   property var picker: null
   property var contextState: ({})
+  // What the palette says when it opens with nothing else to report.
+  property string notice: ""
   property var active: null
-  property int sequence: 0
   readonly property bool busy: active !== null
+  // What a command may require of the moment, and what to say when the
+  // moment does not offer it. A manifest names these; nothing else lists them.
+  readonly property var requirements: ({
+    hasDocument: "Open a note first.",
+    editorWritable: "This note is read-only.",
+    settingsClean: "Save or discard your Settings edits first."
+  })
   signal notified(string message)
   signal listingChanged()
   onDescriptorsChanged: listingChanged()
   onContextStateChanged: listingChanged()
   Connections {
     target: registry.keybindings
-    function onCompiledChanged() { registry.listingChanged() }
+    function onCompiledChanged() {
+      registry.listingChanged()
+    }
   }
-  ProcessRunner { id: processes }
+  Connections {
+    target: registry.workspaceActions
+    function onAvailabilityChanged() {
+      registry.listingChanged()
+    }
+  }
+
+  // The first requirement the moment does not meet, in words, or nothing. A
+  // name this version does not know is not met: it fails closed.
+  function unmet(names) {
+    var missing = names.find(function(name) {
+      return !registry.contextState[name]
+    })
+    if (!missing) {
+      return ""
+    }
+    return registry.requirements[missing]
+      || "This command needs \"" + missing + "\", which this version does not provide."
+  }
 
   function unavailable(descriptor) {
-    if (!registry.contextState.extensionsAvailable) {
+    if (descriptor.url && !registry.contextState.extensionsAvailable) {
       return "Build the native module (sh cpp/build.sh) and restart to enable commands."
     }
-    var reasons = { hasDocument: "Open a note first.", editorWritable: "This note is read-only.",
-      settingsClean: "Save or discard your Settings edits first." }
-    var requirements = descriptor.requires || []
-    for (var i = 0; i < requirements.length; i++) {
-      if (!registry.contextState[requirements[i]]) {
-        return reasons[requirements[i]]
-      }
+    var reason = registry.unmet(descriptor.requires || [])
+    if (reason || !descriptor.workspaceAction) {
+      return reason
     }
-    if (descriptor.workspaceAction) {
-      return registry.workspaceActions ? registry.workspaceActions.unavailable(descriptor.workspaceAction)
-        : "Workspace actions are unavailable in this host."
-    }
-    return ""
+    return registry.workspaceActions.unavailable(descriptor.workspaceAction)
   }
 
   function list() {
     return registry.descriptors.map(function(descriptor) {
       var reason = registry.unavailable(descriptor)
-      return { id: descriptor.id, label: descriptor.title,
-        detail: reason || descriptor.packageName, keywords: (descriptor.keywords || []).concat(descriptor.category || []),
+      return { id: descriptor.id, label: descriptor.title, detail: descriptor.packageName,
+        keywords: (descriptor.keywords || []).concat(descriptor.category || []),
         shortcut: registry.keybindings ? registry.keybindings.label(descriptor.id) : "",
         enabled: !reason, reason: reason }
     })
@@ -58,13 +77,9 @@ Item {
     return registry.active === invocation && !invocation.finished
   }
 
-  function finish(invocation, result) {
-    if (!registry.valid(invocation)) {
-      return
-    }
-    invocation.finished = true
-    var cleanup = invocation.cleanup.concat(invocation.cancelRequested ? invocation.cancellations : [])
-    cleanup.forEach(function(callback) {
+  function release(invocation) {
+    var endings = invocation.cleanup.concat(invocation.cancelRequested ? invocation.cancellations : [])
+    endings.forEach(function(callback) {
       try {
         callback()
       } catch (error) {
@@ -80,6 +95,14 @@ Item {
     if (invocation.component) {
       invocation.component.destroy()
     }
+  }
+
+  function finish(invocation, result) {
+    if (!registry.valid(invocation)) {
+      return
+    }
+    invocation.finished = true
+    registry.release(invocation)
     registry.active = null
     if (result && result.error) {
       registry.picker.showCommands(registry.list(), result.error)
@@ -88,178 +111,113 @@ Item {
     }
   }
 
+  // Nothing when the active command was cancelled or none was running;
+  // otherwise what it is in the middle of, in the words of whoever asked it
+  // to wait. It ends by itself once that is over.
   function cancel() {
     var invocation = registry.active
     if (!invocation) {
-      return true
+      return ""
     }
     invocation.cancelRequested = true
-    if (invocation.committing) {
-      return false
+    if (invocation.hold) {
+      return invocation.hold
     }
     registry.finish(invocation, { cancelled: true })
-    return true
+    return ""
   }
 
-  function contextFor(invocation) {
-    function guarded(callback) {
-      return function(result) {
-        if (registry.valid(invocation)) {
-          try {
-            callback(result)
-          } catch (error) {
-            registry.finish(invocation, { error: error.message })
-          }
-        }
-      }
+  function honourCancel(invocation) {
+    if (invocation.cancelRequested && !invocation.hold) {
+      registry.finish(invocation, { cancelled: true })
     }
-    function read(path, json, callback) {
-      var task = registry.catalog.readResource(invocation.descriptor, path, json, guarded(callback))
-      invocation.tasks.push(task)
+  }
+
+  function refuse(message) {
+    registry.picker.showCommands(registry.list(), message)
+  }
+
+  // Arguments travel as bounded JSON, so a handler gets data and nothing live.
+  function encoded(parameters) {
+    var text = JSON.stringify(parameters || {})
+    if (text.length > 65536) {
+      throw new Error("Command arguments exceed the size limit.")
     }
-    return {
-      workspace: {
-        invoke: function(action) {
-          if (!registry.valid(invocation) || invocation.cancelRequested || invocation.committing || invocation.handedOff) {
-            return { error: "This command cannot start another workspace action." }
-          }
-          var reason = registry.workspaceActions ? registry.workspaceActions.unavailable(action)
-            : "Workspace actions are unavailable in this host."
-          if (reason) {
-            return { error: reason }
-          }
-          invocation.handedOff = true
-          // Restore the old focus before an action opens a page, input or
-          // confirmation. Closing after it would steal the new view's focus.
-          registry.picker.close()
-          return registry.workspaceActions.invoke(action)
-        }
-      },
-      ui: {
-        pick: function(options, callbacks) {
-          if (callbacks.cancel) {
-            invocation.cancellations.push(function() {
-              if (invocation.cancelRequested) {
-                callbacks.cancel()
-              }
-            })
-          }
-          return registry.picker.pick(options, {
-            preview: guarded(callbacks.preview || function() {}),
-            accept: guarded(callbacks.accept), cancel: guarded(callbacks.cancel || function() {})
-          })
-        },
-        notify: function(message) {
-          if (registry.valid(invocation)) {
-            registry.notified(String(message).slice(0, 1024))
-          }
-        }
-      },
-      themes: {
-        list: function(callback) {
-          invocation.tasks.push(registry.themeCatalog.refresh(guarded(function(result) {
-            callback(result.error ? result : { items: registry.themeCatalog.list(), diagnostics: registry.themeCatalog.diagnostics })
-          })))
-        },
-        current: function() { return registry.themes.committedThemeId },
-        supported: registry.contextState.nativeDisplay,
-        beginPreview: function() {
-          var session = registry.themes.beginPreview()
-          invocation.cleanup.push(session.cancel)
-          return session
-        },
-        diagnostics: function() { return registry.themes.diagnostics }
-      },
-      settings: {
-        revision: registry.settings.revision,
-        check: function(callback) { registry.settings.check(guarded(callback)) },
-        setTheme: function(id, revision, callback) {
-          if (invocation.committing || !registry.valid(invocation)) {
-            return
-          }
-          if (!registry.contextState.settingsClean) {
-            callback({ error: "Save or discard Settings edits and wait for pending settings operations first." })
-            return
-          }
-          invocation.committing = true
-          registry.settings.setTheme(id, revision, function(result) {
-            invocation.committing = false
-            guarded(callback)(result)
-            if (invocation.cancelRequested && registry.valid(invocation)) {
-              registry.finish(invocation, { cancelled: true })
-            }
-          })
-        }
-      },
-      resources: {
-        readText: function(path, callback) { read(path, false, callback) },
-        readJson: function(path, callback) { read(path, true, callback) }
-      },
-      cancellation: {
-        isActive: function() { return registry.valid(invocation) && !invocation.cancelRequested },
-        onCancel: function(callback) { invocation.cancellations.push(callback) }
-      }
-    }
+    return text
   }
 
   function execute(id, parameters, focusOwner) {
-    if (!registry.cancel()) {
+    if (registry.cancel()) {
       return
     }
     if (!registry.picker.opened) {
       registry.picker.rememberFocus(focusOwner || null)
     }
-    var encodedArguments
-    try {
-      encodedArguments = JSON.stringify(parameters || {})
-      if (encodedArguments.length > 65536) {
-        throw new Error("Command arguments exceed the size limit.")
-      }
-    } catch (error) {
-      registry.picker.showCommands(registry.list(), error.message)
-      return
-    }
-    var descriptor = registry.descriptors.find(function(item) { return item.id === id })
-    if (!descriptor) {
-      registry.picker.showCommands(registry.list(), "This command is no longer available.")
-      return
-    }
-    var reason = registry.unavailable(descriptor)
+    var descriptor = registry.descriptors.find(function(item) {
+      return item.id === id
+    })
+    var reason = descriptor ? registry.unavailable(descriptor) : "This command is no longer available."
     if (reason) {
-      registry.picker.showCommands(registry.list(), reason)
+      registry.refuse(reason)
       return
     }
-    var invocation = { id: ++registry.sequence, descriptor: descriptor, handler: null, component: null,
-      cancellations: [], cleanup: [], tasks: [], finished: false, committing: false, cancelRequested: false, handedOff: false }
+    if (descriptor.workspaceAction) {
+      registry.runWorkspaceAction(descriptor)
+      return
+    }
+    try {
+      registry.runHandler(descriptor, registry.encoded(parameters))
+    } catch (error) {
+      registry.refuse(error.message)
+    }
+  }
+
+  function runWorkspaceAction(descriptor) {
+    // Restore the old focus before the action opens a page, an input or a
+    // confirmation. Closing after it would take the new view's focus.
+    registry.picker.close()
+    var result = registry.workspaceActions.invoke(descriptor.workspaceAction)
+    if (result.error) {
+      registry.refuse(result.error)
+    }
+  }
+
+  function runHandler(descriptor, encodedArguments) {
+    var invocation = { descriptor: descriptor, handler: null, component: null, cancellations: [], cleanup: [],
+      tasks: [], finished: false, hold: "", cancelRequested: false, handedOff: false }
     registry.active = invocation
     registry.picker.setBusy(true, "Loading command…")
     var component = Qt.createComponent(descriptor.url, Component.Asynchronous)
     invocation.component = component
     function loaded() {
-      if (!registry.valid(invocation) || component.status === Component.Loading) {
-        return
-      }
-      if (component.status !== Component.Ready) {
-        registry.finish(invocation, { error: component.errorString() })
-        return
-      }
-      try {
-        var handler = component.createObject(registry)
-        invocation.handler = handler
-        if (!handler || handler.apiVersion !== 1 || typeof handler.execute !== "function") {
-          throw new Error("Invalid command handler: " + descriptor.id)
-        }
-        handler.execute(registry.contextFor(invocation), JSON.parse(encodedArguments), function(result) {
-          registry.finish(invocation, result || { ok: true })
-        })
-      } catch (error) {
-        registry.finish(invocation, { error: error.message })
+      if (registry.valid(invocation) && component.status !== Component.Loading) {
+        registry.start(invocation, encodedArguments)
       }
     }
     if (component.status === Component.Loading) {
       component.statusChanged.connect(loaded)
     } else {
       loaded()
+    }
+  }
+
+  function start(invocation, encodedArguments) {
+    var component = invocation.component
+    if (component.status !== Component.Ready) {
+      registry.finish(invocation, { error: component.errorString() })
+      return
+    }
+    try {
+      var handler = component.createObject(registry)
+      invocation.handler = handler
+      if (!handler || handler.apiVersion !== 1 || typeof handler.execute !== "function") {
+        throw new Error("Invalid command handler: " + invocation.descriptor.id)
+      }
+      handler.execute(registry.api.contextFor(invocation), JSON.parse(encodedArguments), function(result) {
+        registry.finish(invocation, result || { ok: true })
+      })
+    } catch (error) {
+      registry.finish(invocation, { error: error.message })
     }
   }
 }

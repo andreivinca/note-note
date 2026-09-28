@@ -12,6 +12,9 @@ Item {
   readonly property alias ready: registryState.ready
   readonly property alias errors: registryState.errors
   readonly property alias tools: registryState.tools
+  readonly property bool panelOpen: actions.some(function(tool) {
+    return tool.panelOpen
+  })
   readonly property var actions: tools.reduce(function(result, tool) {
     return result.concat(registry.definitions(tool))
   }, [])

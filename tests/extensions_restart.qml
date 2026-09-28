@@ -25,7 +25,7 @@ Window {
         Qt.exit(1)
         return
       }
-      if (!workspace.providersLoaded || workspace.themes.revision === 0) {
+      if (!workspace.providersLoaded || !workspace.themes.settled) {
         return
       }
       var id = backend.env("NOTE_NOTE_EXPECT_THEME")

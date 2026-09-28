@@ -13,7 +13,9 @@ import "app/plugins/org.note-note.sticky" as Sticky
 import "app/plugins/org.note-note.notion" as Notion
 import "app/services/microsoft" as Microsoft
 import "app/services/notes/sidebar.js" as Sidebar
-import "app/services/providers/settings.js" as Settings
+import "app/services/providers/plan.js" as Plan
+import "app/services/shortcuts" as Shortcuts
+import "app/services/settings/settings.js" as Settings
 import "app/ui/MarkdownBlocks.js" as Blocks
 import "app/ui/Dialect.js" as Dialect
 import "app/ui/editing/ToolbarSettings.js" as ToolbarSettings
@@ -147,8 +149,13 @@ ShellRoot {
     function takeImage(done) { callback = done }
     function hasImage(done) { callback = done }
   }
+  Shortcuts.KeybindingRegistry {
+    id: editorBindings
+    tools: editor.tools.actions
+  }
   Ui.NoteEditor {
     id: editor
+    keybindings: editorBindings
     width: 700
     height: 500
     hasNote: true
@@ -377,14 +384,13 @@ ShellRoot {
     property var providers: [configured]
     property bool opened: false
     property int retired: 0
-    function mergeConfigDefaults(value) { return value }
     function providerById(id) { return configured }
     function providerOf(path) { return configured }
     function providerSnapshot() { return {} }
     function providerBusy(p) { return p.busy }
     function applyProviderSettings(p) { p.notebookTabs = config.providers.test.notebookTabs }
     function retireProvider(p) { retired++ }
-    function addProvider(url) { return configured }
+    function addProvider(id) { return configured }
     function reorderProviders() {}
     function rebuildRows() {}
     function saveState() {}
@@ -404,6 +410,7 @@ ShellRoot {
     property string lastText: ""
     property bool busy: false
     property string revision: "test"
+    function merge(value) { return value }
     function prepare(text, callback) {
       callback({ config: JSON.parse(text) })
     }
@@ -424,7 +431,7 @@ ShellRoot {
     var result = null
     session.onEdited()
     document.body = "settings draft"
-    lifecycle.apply(JSON.stringify({ providers: { test: { enabled: true, notebookTabs: true } } }), function(r) { result = r })
+    lifecycle.apply(JSON.stringify({ providers: { test: { enabled: true, notebookTabs: true } } }), function(r) { result = r }, configFiles.revision)
     check("settings drain waits for document conversion", lifecycle.busy && configFiles.writes === 0)
     document.conversions.shift()("settings draft", true)
     lifecycle.tryCommit()
@@ -435,7 +442,7 @@ ShellRoot {
     check("failed settings transition keeps the editable draft", session.dirty && !document.readOnly && !session.locked)
 
     result = null
-    lifecycle.apply(JSON.stringify({ providers: { test: { enabled: true, notebookTabs: true } } }), function(r) { result = r })
+    lifecycle.apply(JSON.stringify({ providers: { test: { enabled: true, notebookTabs: true } } }), function(r) { result = r }, configFiles.revision)
     document.conversions.shift()("settings draft", true)
     provider.saves.shift().callback({})
     lifecycle.tryCommit()
@@ -447,7 +454,7 @@ ShellRoot {
     session.onEdited()
     var conversions = document.conversions.length
     var appearanceConfig = { providers: host.config.providers, appearance: { theme: "example.colors/dark" } }
-    lifecycle.apply(JSON.stringify(appearanceConfig), function(r) { result = r })
+    lifecycle.apply(JSON.stringify(appearanceConfig), function(r) { result = r }, configFiles.revision)
     check("appearance-only settings never flush or lock a dirty note",
           session.dirty && !session.locked && !document.readOnly && document.conversions.length === conversions)
     configFiles.callback({ ok: true })
@@ -456,7 +463,7 @@ ShellRoot {
     document.conversions.shift()("settings draft", true)
     provider.saves.shift().callback({})
 
-    lifecycle.apply(JSON.stringify({ providers: { test: { enabled: false } } }), function(r) { result = r })
+    lifecycle.apply(JSON.stringify({ providers: { test: { enabled: false } } }), function(r) { result = r }, configFiles.revision)
     configFiles.callback({ error: "permission denied" })
     check("failed config write leaves the running setup intact", result.error && host.retired === 0 && session.currentPath === "test:B")
 
@@ -464,10 +471,10 @@ ShellRoot {
       { dropdown: "insertMonth", items: ["bold", "futureTool"] }
     ] }]]
     var toolbarConfig = { providers: host.config.providers, editor: { toolbar: layout } }
-    lifecycle.apply(JSON.stringify(toolbarConfig), function(r) { result = r })
+    lifecycle.apply(JSON.stringify(toolbarConfig), function(r) { result = r }, configFiles.revision)
     configFiles.callback({ error: "permission denied" })
     check("failed toolbar settings save preserves the active layout", result.error && !host.config.editor)
-    lifecycle.apply(JSON.stringify(toolbarConfig), function(r) { result = r })
+    lifecycle.apply(JSON.stringify(toolbarConfig), function(r) { result = r }, configFiles.revision)
     configFiles.callback({ ok: true })
     check("toolbar settings commit without replacing providers or losing the note",
           result.ok && host.retired === 0 && session.currentPath === "test:B"
@@ -476,13 +483,13 @@ ShellRoot {
           JSON.stringify(ToolbarSettings.editorDefaults(JSON.parse(configFiles.lastText).editor).toolbar) === JSON.stringify(layout))
     var previousWrites = configFiles.writes
     toolbarConfig.editor.toolbar = [["bold", { dropdown: "insert", items: ["bold"] }]]
-    lifecycle.apply(JSON.stringify(toolbarConfig), function(r) { result = r })
+    lifecycle.apply(JSON.stringify(toolbarConfig), function(r) { result = r }, configFiles.revision)
     check("invalid toolbar settings are rejected before writes or document locks",
           result.error && configFiles.writes === previousWrites && !session.locked
           && JSON.stringify(host.config.editor.toolbar) === JSON.stringify(layout))
 
     configured.busy = true
-    lifecycle.apply(JSON.stringify({ providers: { test: { enabled: false } } }), function(r) { result = r })
+    lifecycle.apply(JSON.stringify({ providers: { test: { enabled: false } } }), function(r) { result = r }, configFiles.revision)
     var writes = configFiles.writes
     lifecycle.tryCommit()
     check("provider retirement waits for accepted mutations", host.retired === 0 && configFiles.writes === writes)
@@ -563,8 +570,25 @@ ShellRoot {
     }))
     check("toolbar validation permits empty groups and tools not installed yet", !ToolbarSettings.validate(layout))
     check("editor settings validation rejects invalid containers", [null, [], "invalid"].every(function(value) {
-      return !!ToolbarSettings.validateConfig({ editor: value })
+      return !!Settings.validate({ editor: value })
     }))
+    var damaged = { providers: { local: { enabled: 0, notesDir: "/notes" }, sticky: "off" }, appearance: { theme: 7 },
+      editor: { toolbar: ["bold"], future: 42 }, keybindings: [{ command: "app/newNote", keys: ["Ctrl+V"] }], unknown: [1] }
+    var found = Settings.problems(damaged)
+    var kept = Settings.usable(damaged, found)
+    check("each invalid settings field is reported by itself", found.map(function(problem) {
+      return problem.path.join(".")
+    }).join(",") === "providers.local.enabled,providers.sticky,appearance.theme,editor.toolbar,keybindings", JSON.stringify(found))
+    check("the valid rest of a damaged config stays in force", kept.providers.local.notesDir === "/notes"
+          && kept.providers.local.enabled === undefined && kept.providers.sticky === undefined
+          && kept.appearance.theme === undefined && kept.editor.future === 42 && kept.unknown[0] === 1
+          && damaged.providers.sticky === "off")
+    var merged = Settings.merge(kept, ["local", "sticky"], { local: { notesDir: "~/Notes" } })
+    check("defaults fill only what a damaged config left out", merged.providers.local.notesDir === "/notes"
+          && merged.providers.local.enabled === true && merged.providers.sticky.enabled === true
+          && JSON.stringify(merged.editor.toolbar) === JSON.stringify(ToolbarSettings.defaults()) && merged.keybindings.length === 0)
+    check("a Save names the first problem and accepts a valid config", Settings.validate(damaged) === found[0].message
+          && !Settings.validate({}) && !!Settings.validate([]) && !!Settings.summary(found) && !Settings.summary([]))
     check("malformed toolbar defaults preserve unrelated editor settings",
           JSON.stringify(ToolbarSettings.editorDefaults({ toolbar: ["bold"], future: 42 }).toolbar) === JSON.stringify(ToolbarSettings.defaults())
           && ToolbarSettings.editorDefaults({ toolbar: ["bold"], future: 42 }).future === 42)
@@ -613,15 +637,15 @@ ShellRoot {
           && Sidebar.timestamp("invalid") === 0)
     var noLive = function(id) { return [] }
     var tabsLive = function(id) { return ["notebookTabs"] }
-    check("provider setting order does not cause replacement", Settings.plan(
+    check("provider setting order does not cause replacement", Plan.plan(
       { providers: { a: { path: "x", enabled: true } } },
       { providers: { a: { enabled: true, path: "x" } } }, ["a"], noLive).length === 0)
-    check("changing a resource requires replacement", Settings.plan(
+    check("changing a resource requires replacement", Plan.plan(
       { providers: { a: { path: "x" } } }, { providers: { a: { path: "y" } } }, ["a"], noLive)[0].replace)
-    var flip = Settings.plan({ providers: { a: { notebookTabs: false } } }, { providers: { a: { notebookTabs: true } } }, ["a"], tabsLive)
+    var flip = Plan.plan({ providers: { a: { notebookTabs: false } } }, { providers: { a: { notebookTabs: true } } }, ["a"], tabsLive)
     check("a live setting the provider declares changes it in place", flip.length === 1 && flip[0].presentation && !flip[0].replace)
     check("the same key on a provider that did not declare it live replaces the instance",
-          Settings.plan({ providers: { a: { notebookTabs: false } } }, { providers: { a: { notebookTabs: true } } }, ["a"], noLive)[0].replace)
+          Plan.plan({ providers: { a: { notebookTabs: false } } }, { providers: { a: { notebookTabs: true } } }, ["a"], noLive)[0].replace)
     if (Platform.env("NOTE_NOTE_TEST_HOST") === "1" || Platform.env("NOTE_NOTE_TEST_STANDALONE") === "1") {
       var component = Qt.createComponent(Platform.env("NOTE_NOTE_TEST_STANDALONE") ? "app/Workspace.qml" : "app/hosts/omarchy/Notes.qml")
       check("the complete host component compiles", component.status === Component.Ready, component.errorString())
@@ -630,11 +654,11 @@ ShellRoot {
         check("the host instantiates with its real controllers", !!test.appHost)
         if (test.appHost) {
           test.appHost.initialize()
-          var oldConfig = test.appHost.mergeConfigDefaults({ providers: {} })
+          var oldConfig = test.appHost.settings.merge({ providers: {} })
           check("host adds toolbar settings to older configuration", JSON.stringify(oldConfig.editor.toolbar) === JSON.stringify(ToolbarSettings.defaults()))
-          var customConfig = test.appHost.mergeConfigDefaults({ editor: { toolbar: layout, future: 42 } })
+          var customConfig = test.appHost.settings.merge({ editor: { toolbar: layout, future: 42 } })
           check("host preserves custom toolbar order and unknown editor settings", JSON.stringify(customConfig.editor.toolbar) === layoutBefore && customConfig.editor.future === 42)
-          var malformedConfig = test.appHost.mergeConfigDefaults({ providers: { local: { enabled: false } }, editor: { toolbar: ["bold"] } })
+          var malformedConfig = test.appHost.settings.merge({ providers: { local: { enabled: false } }, editor: { toolbar: ["bold"] } })
           check("invalid toolbar at startup does not reset valid provider settings", !malformedConfig.providers.local.enabled
                 && JSON.stringify(malformedConfig.editor.toolbar) === JSON.stringify(ToolbarSettings.defaults()))
           // A provider's defaults are its own: recorded off the instance and
@@ -885,7 +909,7 @@ ShellRoot {
   // stored note when the backend has taken it, a delete removes it when the
   // backend has, a cancelled delete is a failure, and a failed one leaves
   // the note where it was.
-  Ui.NoteEditor { id: noticeEditor; visible: false }
+  Ui.NoteEditor { id: noticeEditor; visible: false; keybindings: editorBindings }
   // A clipboard that cannot be read: the editor says so instead of pasting
   // nothing in silence.
   QtObject {
@@ -895,7 +919,7 @@ ShellRoot {
     function takeHtml(done) { done("", "the clipboard text is too large") }
     function takeText(done) { done("", "the clipboard text is too large") }
   }
-  Ui.NoteEditor { id: pasteEditor; visible: false; hasNote: true; canImages: true; clipboard: failingClipboard }
+  Ui.NoteEditor { id: pasteEditor; visible: false; keybindings: editorBindings; hasNote: true; canImages: true; clipboard: failingClipboard }
   function clipboardCases() {
     var said = []
     var record = function(text) { said.push(text) }
@@ -906,7 +930,7 @@ ShellRoot {
     check("a clipboard that cannot be read is reported, not pasted in silence",
           said.join("|") === "the clipboard image is too large|the clipboard text is too large")
   }
-  Ui.NoteEditor { id: staleInspectorEditor; visible: false; inspectorUrl: Qt.resolvedUrl("app/tests/StaleInspector.qml") }
+  Ui.NoteEditor { id: staleInspectorEditor; visible: false; keybindings: editorBindings; inspectorUrl: Qt.resolvedUrl("app/tests/StaleInspector.qml") }
   // The native inspector is taken whole or not at all: the built module
   // speaks the editor's version, a module of another version is refused.
   function inspectorCases() {

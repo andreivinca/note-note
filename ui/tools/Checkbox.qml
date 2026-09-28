@@ -10,6 +10,6 @@ Tool {
   shortcutModifiers: Qt.ControlModifier
 
   function execute() {
-    editor.toggleList("todo")
+    editor.toggleListStyle("todo")
   }
 }

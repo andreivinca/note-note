@@ -1,6 +1,5 @@
 import QtQuick
 import QtQuick.Controls as QQC
-import "../services/shortcuts" as Shortcuts
 import "../services/platform"
 import "../design"
 import "../design/controls"
@@ -71,9 +70,9 @@ Item {
   onPlainChanged: Qt.callLater(root.configureLinkDisplay)
   onLinkColourChanged: Qt.callLater(root.configureLinkDisplay)
   onHighlightInkChanged: Qt.callLater(root.configureLinkDisplay)
-  readonly property color displayHighlight: Color.token("editor.highlightBackground", root.highlightColour)
-  readonly property color displayCodeBackground: Color.token("editor.inlineCodeBackground", Qt.darker(root.background, 1.16))
-  readonly property color displayCodeForeground: Color.token("editor.codeForeground", root.foreground)
+  readonly property color displayHighlight: Color.token("editor.highlightBackground")
+  readonly property color displayCodeBackground: Color.token("editor.inlineCodeBackground")
+  readonly property color displayCodeForeground: Color.token("editor.codeForeground")
   onDisplayHighlightChanged: Qt.callLater(root.configureLinkDisplay)
   onDisplayCodeBackgroundChanged: Qt.callLater(root.configureLinkDisplay)
   onDisplayCodeForegroundChanged: Qt.callLater(root.configureLinkDisplay)
@@ -216,12 +215,13 @@ Item {
   }
 
   // (KeyEvent) -> bool. Runs before the inputs' own key handling so app
-  // shortcuts win over TextEdit's built-in Ctrl+K / Ctrl+D bindings.
+  // shortcuts win over TextEdit's built-in Ctrl+K / Ctrl+D bindings. A host
+  // that sets one answers for every key, its own modal states included;
+  // without one the editor runs its tools' shortcuts itself.
   property var shortcutHandler: null
   function shortcut(event) {
-    if (shortcutHandler && shortcutHandler(event)) {
-      event.accepted = true
-    } else if (area.activeFocus && root.handleToolShortcut(event)) {
+    var handled = shortcutHandler ? shortcutHandler(event) : area.activeFocus && toolRegistry.handleShortcut(event)
+    if (handled) {
       event.accepted = true
     }
   }
@@ -712,7 +712,7 @@ Item {
   }
 
   function deleteListMarker() {
-    if (!editing.writable || area.selectionStart !== area.selectionEnd || !nativeBlocks.item) {
+    if (root.readOnly || root.plain || area.selectionStart !== area.selectionEnd || !nativeBlocks.item) {
       return false
     }
     if (!nativeBlocks.item.removeListAtStart(area.cursorPosition)) {
@@ -773,12 +773,11 @@ Item {
     try { edit() } finally { nb.endEditBlock() }
   }
 
-  function toggleList(style) {
+  // Whether the native helper took the request. A host without it has the
+  // Markdown way (EditorApi.toggleListStyle), which asks here first.
+  function toggleListStyle(style) {
     if (!nativeBlocks.item) {
       return false
-    }
-    if (!editing.writable) {
-      return true
     }
     var backwards = area.cursorPosition === area.selectionStart
     var selection = nativeBlocks.item.toggleList(area.selectionStart, area.selectionEnd, style)
@@ -792,9 +791,10 @@ Item {
 
   readonly property string sep: "\u2029"
   // ── document conversion shared by tools and keyboard editing ────────
-  // QML cannot set block styles directly. Lists use the native helper above;
-  // the other block tools read the document as Markdown, rewrite the lines
-  // they own, and put it back. The
+  // QML cannot set block styles directly. Lists use the native helper above
+  // where it is built; the other block tools, and lists without the helper,
+  // read the document as Markdown, rewrite the lines they own, and put it
+  // back. The
   // conversion answers with a map from Markdown line to document block, which
   // is how the caret finds its line.
   //
@@ -984,8 +984,8 @@ Item {
   // eye sees. The marker itself stays in the document — it carries the
   // state, and a click on it is Qt's own toggle.
   property var checkBoxes: []
-  readonly property color quoteBarColour: Color.token("editor.quoteBorder", Util.alpha(root.accent, 0.6))
-  readonly property color codeSlabColour: Color.token("editor.codeBackground", Qt.darker(root.background, 1.16))
+  readonly property color quoteBarColour: Color.token("editor.quoteBorder")
+  readonly property color codeSlabColour: Color.token("editor.codeBackground")
   Timer { id: decorTimer; interval: 120; onTriggered: root.updateDecorations() }
   // With the native inspector the pass is cheap — real block formats, no
   // serialisation — so it runs synchronously and the bars and slabs move in
@@ -1660,12 +1660,8 @@ Item {
     return t ? t.split(/\s+/).length : 0
   }
 
-  property var keybindings: localBindings
-  Shortcuts.KeybindingRegistry {
-    id: localBindings
-    active: root.keybindings === localBindings
-    tools: active ? toolRegistry.actions : []
-  }
+  // The registry the tools' keys and labels come from (services/shortcuts).
+  required property var keybindings
 
   readonly property alias tools: toolRegistry
   property alias toolDirectory: toolRegistry.directory
@@ -1690,15 +1686,11 @@ Item {
     return toolRegistry.execute(id)
   }
 
-  function handleToolShortcut(event) {
-    return toolRegistry.handleShortcut(event)
-  }
-
   Editing.ToolBar {
     id: toolStrip
     width: parent.width
     registry: toolRegistry
-    background: Color.token("toolbar.background", root.background)
+    background: root.background
     // Keep this row aligned with the sidebar header when tools are unavailable.
     toolsVisible: root.toolsVisible
   }
@@ -1861,6 +1853,9 @@ Item {
         contentHeight: area.height
         boundsBehavior: Flickable.StopAtBounds
 
+        // The wheel keeps the one scroll feel every list has; the bar adds a
+        // thumb to drag through a long note.
+        ListWheel { flick: flick }
         QQC.ScrollBar.vertical: QQC.ScrollBar {
           objectName: "noteScrollBar"
         }
@@ -1907,7 +1902,7 @@ Item {
           readOnly: true
           color: root.foreground
           selectionColor: Style.selectionFill
-          selectedTextColor: Color.token("editor.selectionForeground", root.foreground)
+          selectedTextColor: Color.token("editor.selectionForeground")
           // Rich text in, rich text out. Markdown cannot hold a highlight,
           // an empty paragraph or an indent, so the document keeps HTML and
           // services/markdown converts at both ends.

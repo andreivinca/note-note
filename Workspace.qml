@@ -34,8 +34,7 @@ Item {
   property bool initialized: false
   property string closeError: ""
   readonly property string statePath: Platform.stateDir + "/note-note.json"
-  readonly property string configDir: Platform.configDir
-  readonly property string configPath: configDir + "/config.json"
+  readonly property alias configPath: settingsStore.path
   property bool opened: false
   onOpenedChanged: {
     if (!opened) {
@@ -107,18 +106,20 @@ Item {
   // services.microsoft.create(providerId, scopes, clientId).
   property var accounts: []
   // Links use the theme accent blended with its text color for readable ink.
-  readonly property string linkColour: Color.token("editor.link", Qt.tint(root.foreground, Util.alpha(root.accent, 0.65))).toString()
+  readonly property string linkColour: Color.token("editor.link").toString()
   // A quote keeps the theme's own ink at reduced strength; the editor draws
   // the classic bar beside it and the rounded slab behind a code block
   // (NoteEditor, block decorations). The document's own code background is
   // only the dialect's marker for "this block is code", so it is passed
   // fully transparent — presence is all anything reads back, and Qt Quick
   // paints even a faint one unevenly (first block only, measured on 6.11).
-  readonly property string quoteInkColour: Color.token("editor.quoteForeground", Qt.tint(root.background, Util.alpha(root.foreground, 0.8))).toString()
+  readonly property string quoteInkColour: Color.token("editor.quoteForeground").toString()
   readonly property string codeBackgroundColour: "transparent"
-  // Native display styling owns the inline-code chip. Script-only hosts
-  // retain their existing System rendering; custom themes require the helper.
-  readonly property string codeChipColour: editor.canColorText ? "transparent" : Qt.darker(root.background, 1.16).toString()
+  // Native display styling paints the inline-code chip. A script-only host
+  // cannot, so there the chip's colour is written into the document; such a
+  // host keeps the System theme, so that colour is the system's.
+  readonly property string codeChipColour: editor.canColorText
+    ? "transparent" : Color.token("editor.inlineCodeBackground").toString()
   readonly property var services: ({
     "platform": Platform,
     "style": Style,
@@ -161,10 +162,10 @@ Item {
   property var providerUrls: ({})
   property bool stateReady: false
   // ── settings (~/.config/notenote/config.json) ────────────────────────
-  // Runs alongside the state read, not chained after it — a different
-  // concern, a different directory. loadProviders() must not run until both
-  // this and the external-provider scan have landed, or a disabled provider
-  // would flash on screen for a moment before disappearing.
+  // Read alongside the state, not chained after it — a different concern, a
+  // different directory. The plugin catalog is read once the settings say
+  // which packages are enabled, and loadProviders() waits for all three, or
+  // a disabled provider would flash on screen before disappearing.
   property alias config: settingsStore.config
   // The config file is still to be written for the first time: it did not
   // exist when read, and it is written once the providers have loaded.
@@ -371,7 +372,6 @@ Item {
   }
 
   function dismiss() {
-    commandPalette.requestClose()
     root.flushSave()
     root.opened = false
     stopWatching()
@@ -661,7 +661,20 @@ Item {
     return Object.assign({}, cfg, { "providers": providers })
   }
 
-  function addProvider(url) {
+  // A provider is what it was registered as: the instance carries the
+  // identity its package declared, and that identity is loaded once.
+  function providerRefusal(provider, id) {
+    if (!provider) {
+      return "could not be created"
+    }
+    if (provider.id !== id) {
+      return "calls itself \"" + provider.id + "\""
+    }
+    return root.providerById(id) ? "is loaded already" : ""
+  }
+
+  function addProvider(id) {
+    var url = root.providerUrls[id]
     var comp = Qt.createComponent(url)
     if (comp.status === Component.Error) {
       console.warn("note-note: provider failed:", url, comp.errorString())
@@ -671,12 +684,11 @@ Item {
       "host": root,
       "services": root.services
     })
-    var expectedId = Object.keys(root.providerUrls).find(function(id) {
-      return root.providerUrls[id].toString() === url.toString()
-    })
-    if (!p || !p.id || (expectedId && p.id !== expectedId) || root.providerById(p.id)) {
-      console.warn("note-note: provider identity is invalid or duplicated:", url)
+    var refusal = root.providerRefusal(p, id)
+    if (refusal) {
+      console.warn("note-note: provider", id, refusal + ":", url)
       if (p) {
+        root.cancelQueuedFor(p)
         p.destroy()
       }
       return null
@@ -776,12 +788,12 @@ Item {
     }), root.config)
     for (var u = 0; u < ids.length; u++) {
       if (root.providerEnabledIn(root.config, ids[u])) {
-        root.addProvider(root.providerUrls[ids[u]])
+        root.addProvider(ids[u])
       }
     }
     root.providersLoaded = true
     if (root.configUnwritten) {
-      root.writeConfig(root.config)
+      root.writeFirstConfig()
     }
     if (root.opened) {
       root.open("{}")
@@ -796,27 +808,25 @@ Item {
     root.loadProviders(pluginCatalog.providers)
   }
 
-  function mergeConfigDefaults(parsed) {
-    return settingsStore.merge(parsed)
-  }
-
   function providerEnabledIn(cfg, id) {
     var p = cfg && cfg.providers, e = p && p[id]
     return !(e && e.enabled === false); // absent or malformed => enabled
   }
 
-  function writeConfig(cfg, callback) {
-    settingsStore.replace(JSON.stringify(cfg), settingsStore.revision, function(result) {
-      if (callback) {
-        callback(result)
-      } else if (result.error) {
+  // The defaults are written once the providers have recorded theirs, so the
+  // file shows every known setting from the moment it exists.
+  function writeFirstConfig() {
+    settingsStore.create(JSON.stringify(root.config), function(result) {
+      if (result.error) {
         root.reportSave(result.error)
       }
     })
   }
 
+  // `revision` is the one the edited text was read at; a file that moved on
+  // since is not overwritten.
   function applySettingsJson(text, callback, revision) {
-    lifecycle.apply(text, callback, revision === undefined ? settingsStore.revision : revision)
+    lifecycle.apply(text, callback, revision)
   }
 
   function retireProvider(provider) {
@@ -1897,65 +1907,108 @@ Item {
       commandPalette.handleKey(event)
       return true
     }
-    if (editor.tools.actions.some(function(tool) { return tool.panelOpen })) {
+    if (editor.tools.panelOpen) {
       return false
     }
     var openPage = root.currentPage()
     if (openPage && openPage.handleKey(event)) {
       return true
     }
-    var context = openPage ? "page" : titleBar.searchFocused ? "search"
-      : editor.bodyFocused ? "editor" : "workspace"
-    var binding = keybindings.match(event, context)
+    var binding = shortcutRegistry.match(event, root.shortcutContext())
     if (!binding) {
       return false
     }
     if (event.isAutoRepeat && !binding.repeatable) {
       return true
     }
+    return root.runBinding(binding)
+  }
+
+  // Where a key is pressed decides which bindings it can mean.
+  function shortcutContext() {
+    if (root.currentPage()) {
+      return "page"
+    }
+    if (titleBar.searchFocused) {
+      return "search"
+    }
+    return editor.bodyFocused ? "editor" : "workspace"
+  }
+
+  function focusOwner() {
+    return content.Window.window ? content.Window.window.activeFocusItem : null
+  }
+
+  function runBinding(binding) {
     if (binding.kind === "tool") {
       editor.tools.execute(binding.action)
       return true
     }
-    var focusOwner = content.Window.window ? content.Window.window.activeFocusItem : null
     if (binding.kind === "command") {
       titleBar.closeMenu()
-      commandRegistry.execute(binding.action, {}, focusOwner)
+      commandRegistry.execute(binding.action, {}, root.focusOwner())
       return true
     }
-    var handlers = {
-      commandPalette: function() {
-        titleBar.closeMenu()
-        commandPalette.open(focusOwner)
-      },
-      back: root.goBack,
-      search: titleBar.focusSearch,
-      nextSearch: function() { root.moveSelection(1) },
-      previousSearch: function() { root.moveSelection(-1) },
-      acceptSearch: editor.focusEditor,
-      newNote: root.newNote,
-      newNotebook: root.startNewNotebook,
-      openSettings: function() { root.openPage("settings") },
-      deleteNote: function() { root.requestDelete(root.currentPath) },
-      nextNote: function() { root.moveSelection(1) },
-      previousNote: function() { root.moveSelection(-1) },
-      openTree: root.openTreeCursor,
-      closeTree: root.closeTreeCursor,
-      nextTab: function() { root.cycleSection(1) },
-      previousTab: function() { root.cycleSection(-1) },
-      selectTab: function() {
-        var tab = root.tabs[binding.parameters.tab - 1]
-        if (tab) {
-          root.setActiveSection(tab.key)
-        }
-      },
-      toggleList: root.toggleList,
-      savePage: function() { return openPage ? openPage.runAction() : false },
-      paste: function() { return !editor.plain && !editor.readOnly ? editor.paste() : false },
-      pastePlain: function() { return !editor.plain && !editor.readOnly ? editor.pastePlain() : false }
+    if (binding.workspace) {
+      // The executor the palette uses, so a key and a command agree on when
+      // an action can run and say why when it cannot.
+      var result = workspaceActions.invoke(binding.action)
+      if (result.error) {
+        root.showStatus(result.error)
+      }
+      return true
     }
-    return handlers[binding.action] ? handlers[binding.action]() !== false : false
+    var action = root.keyActions[binding.action]
+    return action ? action(binding) !== false : false
   }
+
+  // What the application's own bindings run (services/shortcuts/defaults.js
+  // names them). The workspace's actions are WorkspaceActions' to run.
+  readonly property var keyActions: ({
+    commandPalette: function() {
+      titleBar.closeMenu()
+      commandPalette.open(root.focusOwner())
+    },
+    back: root.goBack,
+    search: titleBar.focusSearch,
+    nextSearch: function() {
+      root.moveSelection(1)
+    },
+    previousSearch: function() {
+      root.moveSelection(-1)
+    },
+    acceptSearch: editor.focusEditor,
+    nextNote: function() {
+      root.moveSelection(1)
+    },
+    previousNote: function() {
+      root.moveSelection(-1)
+    },
+    openTree: root.openTreeCursor,
+    closeTree: root.closeTreeCursor,
+    nextTab: function() {
+      root.cycleSection(1)
+    },
+    previousTab: function() {
+      root.cycleSection(-1)
+    },
+    selectTab: function(binding) {
+      var tab = root.tabs[binding.parameters.tab - 1]
+      if (tab) {
+        root.setActiveSection(tab.key)
+      }
+    },
+    savePage: function() {
+      var openPage = root.currentPage()
+      return openPage ? openPage.runAction() : false
+    },
+    paste: function() {
+      return editor.plain || editor.readOnly ? false : editor.paste()
+    },
+    pastePlain: function() {
+      return editor.plain || editor.readOnly ? false : editor.pastePlain()
+    }
+  })
 
   function onEdited() {
     session.onEdited()
@@ -2136,7 +2189,7 @@ Item {
     quoteInk: root.quoteInkColour
     codeBackground: root.codeBackgroundColour
     codeChip: root.codeChipColour
-    highlightInk: Color.token("editor.highlightForeground", "#1e1e2e")
+    highlightInk: Color.token("editor.highlightForeground")
   }
 
   // Pasting a picture into a note; only providers that can store one take it.
@@ -2181,6 +2234,9 @@ Item {
   Extensions.PluginCatalog {
     id: pluginCatalog
     onLoaded: {
+      if (pluginCatalog.problemSummary) {
+        root.showStatus("Plugins: " + pluginCatalog.problemSummary)
+      }
       root.maybeLoadProviders()
       themeService.setCommitted(root.config.appearance.theme)
     }
@@ -2202,8 +2258,12 @@ Item {
     providerIds: Object.keys(root.providerUrls)
     providerDefaults: root.providerDefaults
     onLoaded: {
-      if (settingsStore.error) {
-        console.warn("note-note: could not read settings:", settingsStore.error)
+      if (settingsStore.readError) {
+        console.warn("note-note: could not read settings:", settingsStore.readError)
+        root.showStatus("Settings could not be read (" + settingsStore.readError + "); running on the defaults")
+      } else if (settingsStore.problems.length) {
+        console.warn("note-note: settings:", settingsStore.problemSummary)
+        root.showStatus("Settings: " + settingsStore.problemSummary)
       }
       pluginCatalog.load(root.config)
     }
@@ -2243,37 +2303,50 @@ Item {
   Commands.WorkspaceActions {
     id: workspaceActions
     host: root
-    blocked: session.locked || lifecycle.busy || root.deleteConfirmOpen
-      || editor.tools.actions.some(function(tool) { return tool.panelOpen })
+    blocked: session.locked || lifecycle.busy || root.deleteConfirmOpen || editor.tools.panelOpen
   }
 
   Shortcuts.KeybindingRegistry {
-    id: keybindings
+    id: shortcutRegistry
     commands: pluginCatalog.commands
     contributions: pluginCatalog.keybindings
     tools: editor.tools.actions
     overrides: root.config.keybindings || []
   }
-  readonly property alias shortcuts: keybindings
+  readonly property alias shortcuts: shortcutRegistry
 
-  Commands.CommandRegistry {
-    id: commandRegistry
-    descriptors: pluginCatalog.commands
+  Commands.CommandApi {
+    id: commandApi
+    registry: commandRegistry
     catalog: pluginCatalog
     themeCatalog: themeCatalog
     themes: themeService
     settings: settingsStore
     workspaceActions: workspaceActions
-    keybindings: root.shortcuts
     picker: commandPalette
-    contextState: ({ hasDocument: !!root.currentPath, editorWritable: !!root.currentPath && !editor.readOnly,
+  }
+
+  Commands.CommandRegistry {
+    id: commandRegistry
+    descriptors: pluginCatalog.commands
+    api: commandApi
+    workspaceActions: workspaceActions
+    keybindings: shortcutRegistry
+    picker: commandPalette
+    notice: pluginCatalog.problemSummary ? "Plugins: " + pluginCatalog.problemSummary : ""
+    contextState: ({
+      hasDocument: !!root.currentPath,
+      editorWritable: !!root.currentPath && !editor.readOnly,
       settingsClean: !settingsPage.dirty && !lifecycle.busy && !settingsStore.busy,
-      extensionsAvailable: Platform.backend && Platform.backend.extensionsReady === true,
-      nativeDisplay: editor.canColorText })
-    onNotified: function(message) { root.showStatus(message) }
+      extensionsAvailable: !!Platform.backend && Platform.backend.extensionsReady === true
+    })
+    onNotified: function(message) {
+      root.showStatus(message)
+    }
   }
 
   readonly property alias commands: commandRegistry
+  readonly property alias commandApi: commandApi
   readonly property alias themes: themeService
   readonly property alias commandUi: commandPalette
 
@@ -2355,7 +2428,7 @@ Item {
         fontFamily: root.interfaceFont
         tabFontSize: root.chromeFontSize
         shortcutHandler: root.handleShortcut
-        keybindings: root.shortcuts
+        keybindings: shortcutRegistry
         onFilterEdited: function(text) {
           root.setFilter(text)
         }
@@ -2399,8 +2472,8 @@ Item {
           activeKey: root.revision < 0 ? "" : root.activeKey()
           headerHeight: editor.toolbarHeight
           headerContentHeight: editor.toolbarRowHeight
-          background: Color.token("sidebar.background", root.background)
-          foreground: Color.token("sidebar.foreground", root.foreground)
+          background: root.background
+          foreground: Color.token("sidebar.foreground")
           accent: root.accent
           fontFamily: root.interfaceFont
           noteFontSize: root.chromeFontSize
@@ -2574,14 +2647,14 @@ Item {
               }
               return ""
             }
-            foreground: Color.token("editor.foreground", root.foreground)
+            foreground: Color.token("editor.foreground")
             accent: root.accent
-            background: Color.token("editor.background", root.background)
+            background: Color.token("editor.background")
             fontFamily: root.interfaceFont
             noteFontFamily: root.noteFont
             bodyFontSize: root.noteFontSize
             shortcutHandler: root.handleShortcut
-            keybindings: root.shortcuts
+            keybindings: shortcutRegistry
             onEdited: root.onEdited()
             onLinkOpenRequested: function(url) {
               if (!Qt.openUrlExternally(url)) {
@@ -2595,8 +2668,8 @@ Item {
 
           // ---- view bar
           ViewBar {
-            keybindings: root.shortcuts
             id: viewBar
+            keybindings: shortcutRegistry
             width: parent.width
             // The outer corner is the card's; the inner one, against the
             // sidebar, is square — unless the sidebar is folded away and the
@@ -2627,8 +2700,8 @@ Item {
             hoveredLink: editor.hoveredLink
             wordCount: editor.wordCount
             countVisible: root.currentPath !== "" && !editor.showingNotice
-            background: Color.token("statusbar.background", root.background)
-            foreground: Color.token("statusbar.foreground", root.foreground)
+            background: Color.token("statusbar.background")
+            foreground: Color.token("statusbar.foreground")
             accent: root.accent
             fontFamily: root.interfaceFont
             fontSize: root.captionFontSize
@@ -2654,14 +2727,15 @@ Item {
           if (opened) {
             configRevision = settingsStore.revision
             settingsStore.check(function(result) {
-              if (result.error) {
-                settingsPage.showNotice(result.error, true)
+              var trouble = result.error || settingsStore.problemSummary
+              if (trouble) {
+                settingsPage.showNotice(trouble, true)
               }
             })
           }
         }
         actionText: "Save"
-        actionTooltip: "Write this to the config file" + keybindings.hint("app/savePage") + ". The page stays open"
+        actionTooltip: "Write this to the config file" + shortcutRegistry.hint("app/savePage") + ". The page stays open"
         cornerRadius: root.chromeRadius
         background: root.background
         foreground: root.foreground
@@ -2694,7 +2768,7 @@ Item {
         opened: root.page === "keys"
         title: "Key bindings"
         subtitle: "Getting around your notes without reaching for the mouse"
-        bodyText: keybindings.helpText
+        bodyText: shortcutRegistry.helpText
         readOnly: true
         cornerRadius: root.chromeRadius
         background: root.background

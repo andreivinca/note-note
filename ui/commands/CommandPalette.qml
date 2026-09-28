@@ -5,6 +5,9 @@ import "../../design"
 import ".." as AppUi
 import "matching.js" as Matching
 
+// One surface for two uses: the list of commands, and a choice a command
+// asks for. It searches, moves and accepts; what a choice means is the
+// command's own, through the callbacks it handed over.
 FocusScope {
   id: pickerRoot
   property bool opened: false
@@ -19,19 +22,29 @@ FocusScope {
   property Item priorFocus: null
   property var registry: null
   property int session: 0
+  readonly property int pageStep: 8
+  readonly property var steps: {
+    var result = {}
+    result[Qt.Key_Up] = -1
+    result[Qt.Key_Down] = 1
+    result[Qt.Key_PageUp] = -pageStep
+    result[Qt.Key_PageDown] = pageStep
+    return result
+  }
   signal fallbackFocusRequested()
   visible: opened
   z: 1000
   anchors.fill: parent
   readonly property var current: currentIndex >= 0 && currentIndex < matches.length ? matches[currentIndex] : null
   readonly property string unavailableReason: current && current.enabled === false ? current.reason || "" : ""
+  readonly property color ink: Color.token("palette.foreground")
 
   Connections {
     target: pickerRoot.registry
     function onListingChanged() {
       if (pickerRoot.opened && !pickerRoot.choosing && !pickerRoot.busy) {
         pickerRoot.items = pickerRoot.registry.list()
-        pickerRoot.refilter("")
+        pickerRoot.refilter()
       }
     }
   }
@@ -40,11 +53,15 @@ FocusScope {
     pickerRoot.priorFocus = owner
   }
 
-  function refilter(preferredId) {
+  function filter(preferredId) {
     var result = Matching.filter(pickerRoot.items, query.text, preferredId || (pickerRoot.current ? pickerRoot.current.id : ""))
     pickerRoot.matches = result.items
     pickerRoot.currentIndex = result.index
     results.positionViewAtIndex(Math.max(0, result.index), ListView.Contain)
+  }
+
+  function refilter() {
+    pickerRoot.filter("")
     pickerRoot.preview()
   }
 
@@ -54,24 +71,42 @@ FocusScope {
     }
   }
 
-  function showCommands(commands, error) {
-    pickerRoot.session++
-    pickerRoot.choosing = false
-    pickerRoot.callbacks = null
-    pickerRoot.title = "Commands"
+  function previewFor(ticket) {
+    if (pickerRoot.session === ticket) {
+      pickerRoot.preview()
+    }
+  }
+
+  // Both uses begin the same way and differ in what is listed and who is
+  // told. The first preview follows once the caller holds what it asked for.
+  function present(state) {
+    var ticket = ++pickerRoot.session
+    pickerRoot.choosing = !!state.callbacks
+    pickerRoot.callbacks = state.callbacks || null
+    pickerRoot.title = state.title
+    pickerRoot.items = state.items
+    pickerRoot.message = state.message || ""
     pickerRoot.busy = false
-    pickerRoot.items = commands
-    pickerRoot.message = error || ""
     pickerRoot.opened = true
     query.text = ""
-    pickerRoot.refilter("")
+    pickerRoot.filter(state.selectedId || "")
     query.forceActiveFocus()
+    Qt.callLater(pickerRoot.previewFor, ticket)
+    return ticket
+  }
+
+  function showCommands(commands, error) {
+    pickerRoot.present({ title: "Commands", items: commands, message: error || registry.notice })
+  }
+
+  function focusQuery() {
+    query.forceActiveFocus()
+    query.selectAll()
   }
 
   function open(focusOwner) {
     if (pickerRoot.opened) {
-      query.forceActiveFocus()
-      query.selectAll()
+      pickerRoot.focusQuery()
       return
     }
     pickerRoot.priorFocus = focusOwner
@@ -79,17 +114,9 @@ FocusScope {
   }
 
   function pick(options, callbacks) {
-    var ticket = ++pickerRoot.session
-    pickerRoot.choosing = true
-    pickerRoot.callbacks = callbacks
-    pickerRoot.title = options.title || "Choose"
-    pickerRoot.items = (options.items || []).slice(0, 4096)
-    pickerRoot.message = options.message || ""
-    pickerRoot.busy = false
-    pickerRoot.opened = true
-    query.text = ""
-    pickerRoot.refilter(options.selectedId || "")
-    query.forceActiveFocus()
+    var ticket = pickerRoot.present({ callbacks: callbacks, title: options.title || "Choose",
+      items: (options.items || []).slice(0, Matching.maxItems), message: options.message,
+      selectedId: options.selectedId })
     return {
       setBusy: function(value, message) {
         if (pickerRoot.session === ticket) {
@@ -115,6 +142,14 @@ FocusScope {
     pickerRoot.message = message || ""
   }
 
+  function inside(item) {
+    var ancestor = item
+    while (ancestor && ancestor !== pickerRoot.parent) {
+      ancestor = ancestor.parent
+    }
+    return !!ancestor
+  }
+
   function close() {
     var owner = pickerRoot.priorFocus
     pickerRoot.priorFocus = null
@@ -126,11 +161,7 @@ FocusScope {
     }
     pickerRoot.session++
     pickerRoot.opened = false
-    var ancestor = owner
-    while (ancestor && ancestor !== pickerRoot.parent) {
-      ancestor = ancestor.parent
-    }
-    if (owner && ancestor && owner.visible && owner.enabled) {
+    if (owner && pickerRoot.inside(owner) && owner.visible && owner.enabled) {
       owner.forceActiveFocus()
     } else {
       pickerRoot.fallbackFocusRequested()
@@ -138,10 +169,11 @@ FocusScope {
   }
 
   function requestClose() {
-    if (registry.cancel()) {
-      pickerRoot.close()
+    var waiting = registry.cancel()
+    if (waiting) {
+      pickerRoot.message = waiting
     } else {
-      pickerRoot.message = "Finishing the settings save…"
+      pickerRoot.close()
     }
   }
 
@@ -166,6 +198,11 @@ FocusScope {
     pickerRoot.preview()
   }
 
+  function opens(event) {
+    var binding = registry.keybindings ? registry.keybindings.match(event, "workspace") : null
+    return !!binding && binding.id === "app/commandPalette"
+  }
+
   function handleKey(event) {
     if (event.key === Qt.Key_Escape) {
       pickerRoot.requestClose()
@@ -175,14 +212,18 @@ FocusScope {
       query.forceActiveFocus()
       return true
     }
-    if (event.key === Qt.Key_Up || event.key === Qt.Key_Down || event.key === Qt.Key_PageUp || event.key === Qt.Key_PageDown) {
-      pickerRoot.move(event.key === Qt.Key_Up ? -1 : event.key === Qt.Key_Down ? 1 : event.key === Qt.Key_PageUp ? -8 : 8)
+    if (pickerRoot.steps[event.key] !== undefined) {
+      pickerRoot.move(pickerRoot.steps[event.key])
       return true
     }
     if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
       if (!query.inputMethodComposing) {
         pickerRoot.accept()
       }
+      return true
+    }
+    if (pickerRoot.opens(event)) {
+      pickerRoot.focusQuery()
       return true
     }
     return false
@@ -192,7 +233,9 @@ FocusScope {
     anchors.fill: parent
     acceptedButtons: Qt.AllButtons
     onPressed: pickerRoot.requestClose()
-    onWheel: function(wheel) { wheel.accepted = true }
+    onWheel: function(wheel) {
+      wheel.accepted = true
+    }
   }
 
   Rectangle {
@@ -205,15 +248,13 @@ FocusScope {
     implicitHeight: content.implicitHeight + padding * 2
     height: Math.max(0, Math.min(parent.height - y - Style.space(12), implicitHeight))
     radius: popupStyle.radius
-    color: Color.token("palette.background", Color.background)
+    color: Color.token("palette.background")
     border.width: Border.width(popupStyle.borderSpec)
     border.color: popupStyle.borderSpec.color
     clip: true
 
     AppUi.ChromePopupStyle {
       id: popupStyle
-      background: panel.color
-      foreground: Color.token("palette.foreground", Color.foreground)
     }
 
     MouseArea {
@@ -234,11 +275,9 @@ FocusScope {
         Layout.fillWidth: true
         // The query keeps focus throughout the session; retain the search bar's quiet border.
         focusBorderVisible: false
-        maximumLength: 256
+        maximumLength: Matching.maxQuery
         placeholderText: pickerRoot.choosing ? "Type to filter…" : "Type a command…"
         leftPadding: commandGlyph.visible ? commandGlyph.width + Style.spacing.md + Style.spacing.xs : horizontalPadding + 1
-        foreground: Color.token("palette.foreground", Color.foreground)
-        color: foreground
         Accessible.name: pickerRoot.choosing ? pickerRoot.title : "Search commands"
         Keys.priority: Keys.BeforeItem
         Keys.onPressed: function(event) {
@@ -246,7 +285,7 @@ FocusScope {
             event.accepted = true
           }
         }
-        onTextChanged: pickerRoot.refilter("")
+        onTextEdited: pickerRoot.refilter()
         Text {
           id: commandGlyph
           visible: !pickerRoot.choosing
@@ -254,7 +293,7 @@ FocusScope {
           anchors.leftMargin: Style.spacing.md
           anchors.verticalCenter: parent.verticalCenter
           text: ">"
-          color: Util.alpha(query.foreground, 0.55)
+          color: query.placeholderTextColor
           font: query.font
         }
       }
@@ -278,8 +317,15 @@ FocusScope {
           required property var modelData
           required property int index
           readonly property bool selected: index === pickerRoot.currentIndex
-          readonly property color ink: selected ? Color.token("palette.selectionForeground", Color.menu.selectedText)
-            : Color.token("palette.foreground", Color.foreground)
+          readonly property string detail: modelData.detail || ""
+          readonly property color ink: selected ? Color.token("palette.selectionForeground")
+            : pickerRoot.ink
+          readonly property color fill: {
+            if (selected) {
+              return Color.token("palette.selectionBackground")
+            }
+            return hovered ? Style.hoverFillFor(pickerRoot.ink, Color.accent) : "transparent"
+          }
           objectName: "commandChoice-" + modelData.id
           width: results.width
           height: Math.max(popupStyle.rowHeight, contentItem.implicitHeight + topPadding + bottomPadding)
@@ -289,10 +335,10 @@ FocusScope {
           bottomPadding: topPadding
           focusPolicy: Qt.NoFocus
           hoverEnabled: true
-          Accessible.name: modelData.label + (modelData.reason ? ", unavailable: " + modelData.reason : "")
+          Accessible.name: modelData.label + (detail ? ", " + detail : "")
+            + (modelData.reason ? ", unavailable: " + modelData.reason : "")
           background: Rectangle {
-            color: row.selected ? Color.token("palette.selectionBackground", Color.menu.selectedBackground)
-              : row.hovered ? Style.hoverFillFor(popupStyle.foreground, Color.accent) : "transparent"
+            color: row.fill
             radius: popupStyle.rowRadius
           }
           contentItem: RowLayout {
@@ -307,6 +353,20 @@ FocusScope {
               color: row.ink
               elide: Text.ElideRight
               verticalAlignment: Text.AlignVCenter
+            }
+            // Where the choice comes from, so two of one name can be told apart.
+            Text {
+              objectName: "commandDetail"
+              visible: text.length > 0
+              Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+              Layout.maximumWidth: row.width * 0.4
+              text: row.detail
+              textFormat: Text.PlainText
+              font.family: Style.font.menuFamily
+              font.pixelSize: Style.font.caption
+              color: row.ink
+              opacity: 0.6
+              elide: Text.ElideRight
             }
             Text {
               visible: text.length > 0
@@ -330,16 +390,17 @@ FocusScope {
       Text {
         id: footer
         objectName: "commandFooter"
+        readonly property string notice: pickerRoot.message || pickerRoot.unavailableReason
+          || (pickerRoot.matches.length ? "" : "No matching results")
         Layout.fillWidth: true
         Layout.leftMargin: Style.spacing.sm
         Layout.rightMargin: Style.spacing.sm
-        text: pickerRoot.message || pickerRoot.unavailableReason
-          || (!pickerRoot.matches.length ? "No matching results" : "↑ ↓ to navigate · Enter to select · Esc to cancel")
+        text: notice || "↑ ↓ to navigate · Enter to select · Esc to cancel"
         textFormat: Text.PlainText
         font.family: Style.font.menuFamily
         font.pixelSize: Style.font.caption
-        color: Color.token("palette.foreground", Color.foreground)
-        opacity: pickerRoot.message || pickerRoot.unavailableReason || !pickerRoot.matches.length ? 1 : 0.6
+        color: pickerRoot.ink
+        opacity: notice ? 1 : 0.6
         wrapMode: Text.WordWrap
         maximumLineCount: 3
         elide: Text.ElideRight

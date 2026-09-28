@@ -2,7 +2,6 @@
   "schemaVersion": 1,
   "id": "newsprint",
   "name": "Newsprint",
-  "appearance": "light",
   "colors": {
     "surface.background": "#F5F0E7",
     "text.primary": "#39332C",
@@ -14,10 +13,6 @@
     "overlay.scrim": "#50392F24",
     "selection.background": "#E5D5BC",
     "selection.foreground": "#52391F",
-    "interaction.hover": "#1039332C",
-    "interaction.pressed": "#2486562F",
-    "interaction.selected": "#E5D5BC",
-    "interaction.selectedForeground": "#52391F",
     "input.background": "#FAF7F0",
     "input.border": "#D6CABB",
     "input.placeholder": "#7B6D5D",
@@ -43,8 +38,6 @@
     "editor.highlightBackground": "#F1D89B",
     "editor.highlightForeground": "#4E3A19",
     "status.error": "#AD3B36",
-    "status.warning": "#8C641D",
-    "status.success": "#447147",
     "control.placeholderText": "#7B6D5D"
   }
 }

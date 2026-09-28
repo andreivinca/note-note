@@ -8,7 +8,8 @@
     "providers": [
       {
         "id": "local",
-        "path": "Provider.qml"
+        "path": "Provider.qml",
+        "order": 10
       }
     ]
   }

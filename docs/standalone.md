@@ -124,7 +124,7 @@ the plugin manifest before creating `build/dist/<version>/`:
 - `SHA256SUMS` and `BUILD-INFO.json`: archive checksums and build provenance.
 
 Archives contain no user settings, credentials or notebook contents. The
-packager selects tracked source files for the plugin and CMake-installed
+packager selects tracked source files (a file nobody committed is in no archive) for the plugin and CMake-installed
 resources for the native application. It does not publish or install either
 archive. Extract each into a fresh directory; installation instructions are
 included in `INSTALL.md`.

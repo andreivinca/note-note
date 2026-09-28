@@ -11,16 +11,14 @@ QQC.Control {
   default property alias fields: fields.data
   property alias submitButton: confirmButton
   property alias cancelButton: rejectButton
-  readonly property color foreground: Color.token("popup.foreground", action.editor.foreground)
+  readonly property color foreground: Color.token("popup.foreground")
   readonly property string fontFamily: action.editor.fontFamily
   signal submitted()
   implicitWidth: Style.space(320)
   implicitHeight: contentItem.implicitHeight + topPadding + bottomPadding
   padding: Style.spacing.lg
 
-  property AppUi.ChromeControlStyle controlStyle: AppUi.ChromeControlStyle {
-    foreground: form.foreground
-  }
+  property AppUi.ChromeControlStyle controlStyle: AppUi.ChromeControlStyle {}
 
   contentItem: Column {
     spacing: Style.space(12)

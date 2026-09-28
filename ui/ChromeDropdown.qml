@@ -6,8 +6,7 @@ import "../design/controls" as Controls
 // A choice field with the same surface and dimensions as ChromeTextField.
 Controls.Dropdown {
   id: control
-  property color surfaceBackground: Color.menu.background
-  foreground: Color.menu.text
+  foreground: controlStyle.text
   fontFamily: Style.font.menuFamily
   implicitHeight: Math.max(controlStyle.height, implicitContentHeight + topPadding + bottomPadding)
   leftPadding: Style.spacing.controlPaddingX + controlStyle.borderWidth
@@ -19,20 +18,16 @@ Controls.Dropdown {
 
   ChromeControlStyle {
     id: controlStyle
-    background: control.surfaceBackground
-    foreground: control.foreground
   }
   ChromePopupStyle {
     id: popupStyle
-    background: control.surfaceBackground
-    foreground: control.foreground
   }
 
   contentItem: Text {
     text: control.displayText
     textFormat: Text.PlainText
     font: control.font
-    color: Color.token("input.foreground", control.foreground)
+    color: control.foreground
     verticalAlignment: Text.AlignVCenter
     elide: Text.ElideRight
   }

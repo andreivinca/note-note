@@ -2,7 +2,6 @@
   "schemaVersion": 1,
   "id": "nightfall",
   "name": "Nightfall",
-  "appearance": "dark",
   "colors": {
     "surface.background": "#282C34",
     "text.primary": "#D6D8DE",
@@ -14,10 +13,6 @@
     "overlay.scrim": "#990F1218",
     "selection.background": "#424F68",
     "selection.foreground": "#EDF2FC",
-    "interaction.hover": "#10D6D8DE",
-    "interaction.pressed": "#269BBBE4",
-    "interaction.selected": "#424F68",
-    "interaction.selectedForeground": "#EDF2FC",
     "input.background": "#303640",
     "input.border": "#4B5362",
     "input.placeholder": "#A3AAB5",
@@ -43,8 +38,6 @@
     "editor.highlightBackground": "#695B32",
     "editor.highlightForeground": "#F8E7B2",
     "status.error": "#F09A93",
-    "status.warning": "#DFC186",
-    "status.success": "#96C69C",
     "control.placeholderText": "#A3AAB5"
   }
 }

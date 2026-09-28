@@ -4,7 +4,9 @@ import "app" as App
 import "app/hosts/standalone" as Native
 import "app/services/processes"
 import "app/design"
-import "app/services/themes/resolve.js" as Resolve
+import "app/design/resolve.js" as Resolve
+import "app/design/tokens.js" as Tokens
+import "app/services/themes/system.js" as SystemTheme
 import "app/ui/commands/matching.js" as Matching
 import "app/tests/ShortcutChecks.js" as ShortcutChecks
 
@@ -206,7 +208,7 @@ Window {
       workspace.commandUi.open(window.activeFocusItem)
       workspace.commands.execute("org.example.greeting/greet", {})
       tryVerify(function() { return workspace.commandUi.choosing }, 10000)
-      var context = workspace.commands.contextFor(workspace.commands.active)
+      var context = workspace.commandApi.contextFor(workspace.commands.active)
       verify(!!context.workspace.invoke("missingAction").error)
       workspace.deleteConfirmOpen = true
       verify(!!context.workspace.invoke("toggleList").error)
@@ -219,7 +221,7 @@ Window {
       workspace.commandUi.open(window.activeFocusItem)
       workspace.commands.execute("org.example.greeting/greet", {})
       tryVerify(function() { return workspace.commandUi.choosing }, 10000)
-      context = workspace.commands.contextFor(workspace.commands.active)
+      context = workspace.commandApi.contextFor(workspace.commands.active)
       verify(context.workspace.invoke("toggleList").ok)
       verify(!!context.workspace.invoke("toggleList").error, "one accepted handoff per command")
       compare(workspace.listCollapsed, !collapsed)
@@ -316,15 +318,28 @@ Window {
     }
 
     function run() {
-      tryVerify(function() { return workspace.providersLoaded && workspace.themes.revision > 0 && !workspace.settings.busy }, 10000)
+      // Before anything was read from disk the colours are whole: the system's.
+      compare(Object.keys(workspace.themes.colors).length, Object.keys(Tokens.specification).length)
+      tryVerify(function() { return workspace.providersLoaded && workspace.themes.settled && !workspace.settings.busy }, 10000)
       compare(workspace.catalog.commands.length, 7)
-      var spec = workspace.themes.catalog.specification
+      compare(workspace.catalog.problemSummary, "")
+      var spec = Tokens.specification, resolvedSoFar = {}
       Object.keys(spec).forEach(function(key) {
-        verify(typeof Resolve.recipes[spec[key].recipe] === "function", key)
+        var recipe = Resolve.recipes[spec[key].recipe]
+        verify(typeof recipe === "function", key + " names a recipe")
+        compare(recipe.length, spec[key].inputs.length, key + " gives its recipe what it reads")
+        verify(spec[key].inputs.every(function(input) { return resolvedSoFar[input] }), key + " follows its inputs")
+        verify(!spec[key].pair || !!spec[spec[key].pair], key + " is paired with a token")
+        resolvedSoFar[key] = true
       })
+      var shipped = workspace.themes.catalog.entries[SystemTheme.themeId].value.colors
+      compare(Object.keys(shipped).sort().join(), Object.keys(spec).sort().join(), "System states every token")
+      verify(Object.keys(shipped).every(function(key) { return shipped[key] === "system" }))
       var system = workspace.themes.system
       compare(JSON.stringify(workspace.themes.colors), JSON.stringify(system))
-      var partial = Resolve.resolve(spec, system, { "surface.background": "#181a20", "text.primary": "#ffffff", "editor.foreground": "system" })
+      verify(Object.keys(system).every(function(key) { return /^#[0-9a-f]{6,8}$/i.test(system[key]) }),
+        "every token resolves to a colour")
+      var partial = Resolve.resolve(system, { "surface.background": "#181a20", "text.primary": "#ffffff", "editor.foreground": "system" })
       compare(partial["surface.background"], "#181a20")
       compare(partial["editor.foreground"], system["editor.foreground"])
       verify(partial["surface.raised"] !== system["surface.raised"])
@@ -372,7 +387,9 @@ Window {
       keyClick(Qt.Key_P, Qt.ControlModifier | Qt.ShiftModifier)
       verify(workspace.commandUi.opened)
       var query = findChild(workspace.commandUi, "commandQuery")
-      query.text = "Color Theme"
+      for (var letter of "Color Theme") {
+        keyClick(letter)
+      }
       compare(workspace.commandUi.matches.length, 1)
       var results = findChild(workspace.commandUi, "commandResults")
       // A one-result palette must fit the whole row above its footer.

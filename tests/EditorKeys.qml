@@ -7,6 +7,7 @@ import "../ui/editing/ToolbarSettings.js" as ToolbarSettings
 import "../ui/editing/Calendar.js" as Calendar
 import "../services/markdown" as Markdown
 import "../services/notes" as Notes
+import "../services/shortcuts" as Shortcuts
 
 // Real keys and the real converter, in the transition runner's isolated
 // offscreen window. The optional desktop host check keeps this window shut.
@@ -34,8 +35,13 @@ Window {
     function takeHtml(done) { done(clip.html) }
     function takeText(done) { done(clip.text) }
   }
+  Shortcuts.KeybindingRegistry {
+    id: editorBindings
+    tools: editor.tools.actions
+  }
   Ui.NoteEditor {
     id: editor
+    keybindings: editorBindings
     width: parent.width
     height: parent.height - viewBar.height
     hasNote: true
@@ -45,6 +51,26 @@ Window {
     toolDirectory: Platform.env("NOTE_NOTE_TEST_TOOLS") || Qt.resolvedUrl("../ui/tools")
     onLinkOpenRequested: function(url) { test.openedLinks.push(url) }
     onEdited: test.editSignals++
+  }
+  // The editor as a shell installation without the native helper has it: the
+  // stand-in inspector is refused at load, as a module of older sources is.
+  property var helperlessStatus: []
+  Shortcuts.KeybindingRegistry {
+    id: helperlessBindings
+    tools: helperlessEditor.tools.actions
+  }
+  Ui.NoteEditor {
+    id: helperlessEditor
+    keybindings: helperlessBindings
+    visible: false
+    width: parent.width
+    height: parent.height - viewBar.height
+    hasNote: true
+    markdown: converter
+    noteFontFamily: noteFont.name
+    inspectorUrl: Qt.resolvedUrl("StaleInspector.qml")
+    toolDirectory: Platform.env("NOTE_NOTE_TEST_TOOLS") || Qt.resolvedUrl("../ui/tools")
+    onStatusRequested: function(text) { test.helperlessStatus.push(text) }
   }
   Ui.ViewBar {
     id: viewBar
@@ -1033,7 +1059,7 @@ Window {
     selectText("word")
     keys.keyClick(Qt.Key_G, Qt.ControlModifier | Qt.ShiftModifier)
     require(read() === "Hello\n", "new file did not get its shortcut")
-    require(editor.keybindings.helpText.indexOf("ctrl+shift+g   Insert greeting") >= 0,
+    require(/ctrl\+shift\+g +Insert greeting/.test(editor.keybindings.helpText),
             "new shortcut was missing from help")
   }
 
@@ -1741,6 +1767,64 @@ Window {
     }
   }
 
+  function listPrefix(id) {
+    return { todo: "- [ ] ", ul: "- ", ol: "1. " }[id]
+  }
+
+  function listToolShortcut(id) {
+    var key = { todo: Qt.Key_1, ul: Qt.Key_Period, ol: Qt.Key_Slash }[id]
+    load({ source: "Target\n" })
+    editor.setCursorPosition(0)
+    keys.keyClick(key, Qt.ControlModifier)
+    require(savedMarkdown() === listPrefix(id) + "Target\n", "the shortcut did not make the list: " + savedMarkdown())
+    keys.keyClick(key, Qt.ControlModifier)
+    require(savedMarkdown() === "Target\n", "the shortcut did not take the list off again: " + savedMarkdown())
+  }
+
+  function helperlessMarkdown() {
+    var result = null
+    helperlessEditor.requestMarkdown(function(markdown, ok) {
+      result = { markdown: markdown, ok: ok }
+    })
+    keys.tryVerify(function() { return result !== null }, 3000)
+    require(result && result.ok, "note could not be serialized without the helper")
+    return result.markdown
+  }
+
+  function helperlessLoad(source, find) {
+    var rendered = null
+    converter.toHtml(source, function(html, ok) {
+      rendered = { html: html, ok: ok }
+    })
+    keys.tryVerify(function() { return rendered !== null }, 3000)
+    require(rendered.ok, "fixture did not render")
+    helperlessEditor.restoreDocument({ title: "", body: rendered.html, base: "" })
+    helperlessEditor.setCursorPosition(helperlessEditor.plainText().indexOf(find))
+  }
+
+  // Without the native helper a list is a rewrite of the note's Markdown.
+  function listToolWithoutHelper(id) {
+    require(!helperlessEditor.canColorText, "the stand-in inspector was accepted")
+    var source = "Above\n\nTarget\n\nBelow\n"
+    var listed = source.replace("Target", listPrefix(id) + "Target")
+    helperlessLoad(source, "Target")
+    helperlessEditor.tools.execute(id)
+    keys.tryVerify(function() { return helperlessMarkdown() === listed }, 3000)
+    require(helperlessMarkdown() === listed, "the Markdown way did not make the list: " + helperlessMarkdown())
+    helperlessEditor.setCursorPosition(helperlessEditor.plainText().indexOf("Target"))
+    helperlessEditor.tools.execute(id)
+    keys.tryVerify(function() { return helperlessMarkdown() === source }, 3000)
+    require(helperlessMarkdown() === source, "the Markdown way did not take the list off: " + helperlessMarkdown())
+
+    var table = "| Header |\n|---|\n| Cell |\n"
+    helperlessLoad(table, "Cell")
+    test.helperlessStatus = []
+    helperlessEditor.tools.execute(id)
+    require(test.helperlessStatus.length === 1 && test.helperlessStatus[0].indexOf("native text helper") >= 0,
+            "a list in a table cell was not refused with a reason: " + JSON.stringify(test.helperlessStatus))
+    require(helperlessMarkdown() === table, "the refused list changed the table: " + helperlessMarkdown())
+  }
+
   function clickListTool(id) {
     var button = keys.findChild(editor, "editingTool-" + id)
     require(button && button.visible && button.enabled, id + " button is unavailable")
@@ -1750,7 +1834,7 @@ Window {
   }
 
   function listToolTargeting(id) {
-    var prefix = id === "todo" ? "- [ ] " : (id === "ol" ? "1. " : "- ")
+    var prefix = listPrefix(id)
     var sources = ["", "Above\n", "| Header |\n|---|\n| Cell |\n\nAfter\n"]
     for (var source of sources) {
       load({ source: source })
@@ -1776,7 +1860,7 @@ Window {
   }
 
   function listToolSelections(id) {
-    var prefix = id === "todo" ? "- [ ] " : (id === "ol" ? "1. " : "- ")
+    var prefix = listPrefix(id)
     for (var backwards of [false, true]) {
       load({ source: "First\n\nSecond\n\nThird\n" })
       var body = keys.findChild(editor, "noteBody")
@@ -1876,7 +1960,7 @@ Window {
   }
 
   function listToolBoundaries(id) {
-    var prefix = id === "todo" ? "- [ ] " : (id === "ol" ? "1. " : "- ")
+    var prefix = listPrefix(id)
     var sources = ["Above\n\nTarget\n\nBelow\n", "| Header |\n|---|\n| Cell |\n\nTarget\n\nBelow\n"]
     for (var source of sources) {
       for (var offset of [0, 3, 6]) {
@@ -2016,7 +2100,8 @@ Window {
       }
     }
     for (var id of ["todo", "ul", "ol"]) {
-      for (var check of [listToolTargeting, listToolSelections, listToolTables, listToolTyping, listToolBoundaries, listToolBackspace]) {
+      for (var check of [listToolTargeting, listToolSelections, listToolTables, listToolTyping, listToolBoundaries,
+                         listToolBackspace, listToolShortcut, listToolWithoutHelper]) {
         try {
           check(id)
           test.checked(id + " " + check.name, true, "")

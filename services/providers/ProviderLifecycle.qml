@@ -1,6 +1,6 @@
 import QtQuick
-import "settings.js" as Settings
-import "../settings/settings.js" as Config
+import "plan.js" as Plan
+import "../settings/settings.js" as Settings
 
 // Settings changes have three phases: validate, drain, commit. Providers stay
 // alive until their accepted writes settle; a failed save keeps the old setup.
@@ -48,11 +48,7 @@ Item {
       callback({ error: "Invalid JSON: " + error.message })
       return
     }
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      callback({ error: "The settings must be a JSON object" })
-      return
-    }
-    var validationError = Config.validate(parsed)
+    var validationError = Settings.validate(parsed)
     if (validationError) {
       callback({ error: validationError })
       return
@@ -67,8 +63,8 @@ Item {
   }
 
   function applyPrepared(parsed, text, callback, expectedRevision) {
-    var merged = host.mergeConfigDefaults(parsed)
-    var changes = Settings.plan(host.config, merged, Object.keys(host.providerUrls), function(id) {
+    var merged = settings.merge(parsed)
+    var changes = Plan.plan(host.config, merged, Object.keys(host.providerUrls), function(id) {
       var provider = host.providerById(id)
       return provider && Array.isArray(provider.liveSettings) ? provider.liveSettings : []
     })
@@ -110,7 +106,7 @@ Item {
     // may be settled already.
     lifecycle.pending = { text: text, merged: merged, changes: changes,
                           callback: callback, readOnly: readOnly, watched: watched, drain: drain,
-                          revision: expectedRevision === undefined ? settings.revision : expectedRevision }
+                          revision: expectedRevision }
     lifecycle.tryCommit()
   }
 
@@ -153,7 +149,7 @@ Item {
           host.retireProvider(provider)
         }
         if (change.enabled) {
-          provider = host.addProvider(host.providerUrls[change.id])
+          provider = host.addProvider(change.id)
           if (provider) {
             provider.refresh()
           }

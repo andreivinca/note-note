@@ -267,20 +267,31 @@ QtObject {
     })
   }
 
-  function toggleList(style) {
-    if (!writable || host.toggleList(style)) {
+  // The list styles as Markdown writes them: what shows a line is of the
+  // style already, and what makes it one.
+  readonly property var listStyles: ({
+    todo: { marked: /\[[ xX]\]/, prefix: "- [ ] " },
+    ol: { marked: /^\d+[.)][ \t]/, prefix: "1. " },
+    ul: { marked: /^[-*+][ \t](?!\[)/, prefix: "- " }
+  })
+
+  // `todo`, `ul` or `ol` on the paragraphs under the caret or the selection;
+  // asked of paragraphs that are all of that style already, it takes it off.
+  function toggleListStyle(style) {
+    var markdown = listStyles[style]
+    if (!writable || !markdown || host.toggleListStyle(style)) {
       return
     }
-    if (host.tableContext() || inTable) {
+    // A shell installation without the native helper rewrites the Markdown,
+    // and a Markdown table cell cannot hold a list.
+    host.updateInTable()
+    if (inTable) {
       report("Build the native text helper to format lists in table cells")
       return
     }
-    // Compatibility with shell installations without the native helper.
     transformBlocks(function(line) {
-      var matches = style === "todo" ? /\[[ xX]\]/.test(line.prefix)
-        : (style === "ol" ? /^\d+[.)][ \t]/.test(line.prefix) : /^[-*+][ \t](?!\[)/.test(line.prefix))
-      var prefix = style === "todo" ? "- [ ] " : (style === "ol" ? "1. " : "- ")
-      return line.indent + (matches ? "" : prefix) + (line.content || Dialect.EMPTY_ITEM)
+      var prefix = markdown.marked.test(line.prefix) ? "" : markdown.prefix
+      return line.indent + prefix + (line.content || Dialect.EMPTY_ITEM)
     }, { list: true })
   }
 

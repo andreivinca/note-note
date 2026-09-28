@@ -54,7 +54,7 @@ class Transactions(unittest.TestCase):
         self.assertEqual(self.theme("missing")["kind"], "stale")
 
     def test_invalid_file_is_not_repaired_by_theme_patch(self):
-        for text in ('{"providers":', '{"a":1,"a":2}', '[]', '{"appearance":null}'):
+        for text in ('{"providers":', '{"a":1,"a":2}', '[]'):
             Path(self.path).write_text(text)
             snapshot = config.snapshot(self.path)
             self.assertEqual(snapshot["kind"], "invalid")
@@ -80,26 +80,47 @@ class Transactions(unittest.TestCase):
                 with config.config_lock(self.path, timeout=0.03):
                     self.fail("a second lock was acquired")
 
-    def test_preparation_rejects_invalid_shapes_without_writing(self):
-        for text in ('{"providers":{},"providers":{}}', '{"appearance":{"theme":null}}',
-                     '{"plugins":{"example.code":{"enabled":"yes"}}}', '{"number":1e999}'):
+    def test_preparation_rejects_what_is_not_strict_json(self):
+        for text in ('{"providers":{},"providers":{}}', '{"number":1e999}', '[]', '{"a":', 42, None):
             with self.subTest(text=text), self.assertRaises(ValueError):
                 config.transact({"path": self.path, "operation": "validate", "text": text})
         self.assertFalse(Path(self.path).exists())
 
-    def test_keybinding_validation_and_persistence(self):
-        bindings = [{"command": "app/newNote", "keys": ["Ctrl+Alt+N", "F6"]},
-                    {"command": "org.example.greeting/greet", "keys": []}]
-        self.assertEqual(config.parse(json.dumps({"keybindings": bindings}))["keybindings"], bindings)
-        result = self.theme(self.write({"keybindings": bindings}))
-        self.assertEqual(result["config"]["keybindings"], bindings, "theme changes preserve overrides")
-        for invalid in (None, {}, [None], [{"command": "newNote", "keys": []}],
-                        [{"command": "app/newNote", "keys": "Ctrl+N"}], bindings + bindings):
-            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
-                config.parse(json.dumps({"keybindings": invalid}))
-        for key in ("Ctrl+V", "Ctrl+Z", "Shift+A", "A", "Ctrl+Ctrl+N", "Ctrl+", "Ctrl+F36", "constructor+N"):
-            with self.subTest(key=key), self.assertRaises(ValueError):
-                config.parse(json.dumps({"keybindings": [{"command": "app/newNote", "keys": [key]}]}))
+    def test_fields_are_the_applications_to_judge(self):
+        # services/settings/settings.js owns what a field may hold; a field it
+        # would refuse still reads, so the rest of the file stays in force.
+        value = {"providers": {"local": {"enabled": 0, "notesDir": "/example"}}, "appearance": None,
+                 "keybindings": [{"command": "app/newNote", "keys": ["Ctrl+V"]}]}
+        revision = self.write(value)
+        self.assertEqual(config.snapshot(self.path)["config"], value)
+        result = self.theme(revision)
+        self.assertTrue(result["ok"])
+        saved = json.loads(Path(self.path).read_text())
+        self.assertEqual(saved["appearance"], {"theme": "example.colors/dark"})
+        self.assertEqual(saved["providers"], value["providers"])
+        self.assertEqual(saved["keybindings"], value["keybindings"], "theme changes preserve overrides")
+        for theme in ("", None, 7):
+            with self.subTest(theme=theme), self.assertRaises(ValueError):
+                self.theme(result["revision"], theme)
+
+    def test_first_write_adopts_a_file_another_host_made(self):
+        create = {"path": self.path, "operation": "create", "text": '{"providers": {}}'}
+        made = config.transact(create)
+        self.assertTrue(made["ok"])
+        self.assertEqual(json.loads(Path(self.path).read_text()), {"providers": {}})
+        theirs = self.write({"providers": {"local": {"notesDir": "/theirs"}}})
+        adopted = config.transact(dict(create, text='{"providers": {"local": {"notesDir": "/mine"}}}'))
+        self.assertEqual(adopted["revision"], theirs)
+        self.assertEqual(adopted["config"]["providers"]["local"]["notesDir"], "/theirs")
+        self.assertEqual(config.snapshot(self.path)["revision"], theirs)
+
+    def test_a_request_names_its_file_and_text_as_strings(self):
+        # The envelope (lib/jsondata.answer) turns these into the answer's error.
+        for request in ({"path": 7, "operation": "read"}, {"operation": "read"},
+                        {"path": self.path, "operation": "replace", "revision": "missing", "text": 42}):
+            with self.subTest(request=request), self.assertRaises((ValueError, KeyError)):
+                config.transact(request)
+        self.assertFalse(Path(self.path).exists())
 
 
 if __name__ == "__main__":

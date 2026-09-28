@@ -95,7 +95,7 @@ Item {
   // Rows draw as rounded pills; the search panel's rows measure the same way.
   readonly property real rowRadius: Math.min(Style.cornerRadius, Style.space(6))
 
-  readonly property color page: Color.token("sidebar.background", Qt.tint(root.background, Util.alpha(root.foreground, 0.018)))
+  property color page: Color.token("sidebar.background")
   readonly property color selectionFill: Qt.tint(page, Util.alpha(root.accent, 0.22))
 
   // Whichever list is on screen: the search panel replaces the main list

@@ -16,11 +16,17 @@ from the repository root's Omarchy `manifest.json`.
   "contributes": {
     "commands": [{"id": "hello", "title": "Hello", "handler": "Hello.qml"}],
     "keybindings": [{"command": "hello", "key": "Ctrl+Alt+H", "context": "notes"}],
-    "themes": [{"id": "blue", "name": "Blue", "path": "blue.json"}],
-    "providers": [{"id": "example", "path": "Provider.qml"}]
+    "themes": [{"id": "blue", "path": "blue.json"}],
+    "providers": [{"id": "example", "path": "Provider.qml", "order": 500}]
   }
 }
 ```
+
+A command names a `handler` or a `workspaceAction`, one of the two
+([commands](commands.md)). A theme's name is the one its file states. A
+provider's optional `order` (0 to 9999, 1000 when left out) says where its tabs
+stand among the others while the settings name no order of their own; lower
+comes first.
 
 Use only the kinds the package actually supplies. API and manifest versions are
 integers; package versions are `major.minor.patch` without leading zeroes. Package
@@ -57,7 +63,18 @@ Discovery examines immediate directories, validates complete manifests, then
 publishes descriptors. It never executes a command to obtain its title. Invalid
 packages produce diagnostics without disabling unrelated packages. Duplicate
 external package IDs reject every claimant. Built-in provider IDs are reserved;
-ambiguous external provider IDs also reject every claimant.
+ambiguous external provider IDs also reject every claimant, each named in its
+own diagnostic.
+
+What the application ships is read first, so nothing installed beside it can
+use up its share of a limit: a package that would cross one is left out, with
+a diagnostic, and the rest stands. What could not be loaded is said in the
+status line at startup and at the foot of the command palette, and written to
+the log in full.
+
+A shortcut a package contributes is checked for its key and context by the
+shortcut resolver, not by discovery: one it cannot use costs that binding and
+is listed on the Key bindings page.
 
 Manifest resources must be regular files beneath their package. Absolute paths,
 schemes, traversal and symlinks are refused. Supported resource reads reopen via

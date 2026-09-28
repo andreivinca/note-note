@@ -8,7 +8,8 @@
     "providers": [
       {
         "id": "sticky",
-        "path": "Provider.qml"
+        "path": "Provider.qml",
+        "order": 20
       }
     ]
   }

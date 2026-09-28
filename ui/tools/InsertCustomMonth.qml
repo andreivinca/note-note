@@ -81,7 +81,6 @@ Tool {
             label: "Month"
             options: tool.months
             value: String(tool.selectedMonth)
-            foreground: form.foreground
             accent: tool.editor.accent
             fontFamily: form.fontFamily
             onSelected: function(value) {
@@ -108,7 +107,6 @@ Tool {
             validator: IntValidator { bottom: 1; top: 9999 }
             maximumLength: 4
             inputMethodHints: Qt.ImhDigitsOnly
-            foreground: form.foreground
             accent: tool.editor.accent
             font.family: form.fontFamily
             onTextEdited: tool.yearText = text
