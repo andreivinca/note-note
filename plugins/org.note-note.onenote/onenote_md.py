@@ -245,7 +245,8 @@ class Converter:
                 self.lines.append("")
             return
         if t in ("ul", "ol"):
-            n = 0
+            start = node.attrs.get("start", "1") if t == "ol" else "1"
+            n = int(start) - 1 if re.fullmatch(r"-?\d+", start) else 0
             for c in node.children:
                 if c.tag == "li":
                     n += 1
@@ -302,7 +303,8 @@ class Converter:
             self.block(s, depth + 1)
 
     def table(self, node):
-        if self.table_depth or htmltables.nested(node):
+        tasks = any("to-do" in child.attrs.get("data-tag", "") for child in _find_all(node, "p"))
+        if self.table_depth or htmltables.structured(node) or tasks:
             rows = [[self.rich_cell(cell) for cell in row.children if cell.tag in {"td", "th"}]
                     for row in htmltables.rows(node)]
             if self.lines and self.lines[-1] != "":
@@ -335,9 +337,11 @@ class Converter:
         converter = Converter(self.image_path_for)
         converter.table_depth = self.table_depth + 1
         for child in node.children:
-            if converter.lines and converter.lines[-1] != "":
-                converter.lines.append("")
-            converter.last = None
+            task = child.tag == "p" and converter.para_prefix(child).startswith("- [")
+            if not (task and converter.last == "item"):
+                if converter.lines and converter.lines[-1] != "":
+                    converter.lines.append("")
+                converter.last = None
             converter.block(child)
         self.editable = self.editable and converter.editable
         self.images.extend(converter.images)
@@ -563,7 +567,9 @@ def _render_list(t, out, depth, image_ref=None):
             tag = "to-do:completed" if i.get("attrs", {}).get("checked") else "to-do"
             out.append(_p(tag, _item_inline(i, image_ref)))
         return
-    out.append("<ol>" if ordered else "<ul>")
+    start = t.get("attrs", {}).get("start", 1)
+    attrs = ' start="%d"' % start if ordered and start != 1 else ""
+    out.append("<ol%s>" % attrs if ordered else "<ul>")
     for i in items:
         li = ["<li>"]
         if i["type"] == "task_list_item":

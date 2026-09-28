@@ -6,10 +6,10 @@ Tool {
   toolId: "ul"
   label: "Bullet list"
   icon: "󰉹"
+  shortcutKey: Qt.Key_Period
+  shortcutModifiers: Qt.ControlModifier
 
   function execute() {
-    editor.transformBlocks(function(line) {
-      return line.indent + (/^[-*+][ \t](?!\[)/.test(line.prefix) ? "" : "- ") + line.content
-    }, { list: true })
+    editor.toggleList("ul")
   }
 }

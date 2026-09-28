@@ -167,6 +167,32 @@ class SaveTests(unittest.TestCase):
         self.assertTrue(actual["editable"])
         self.assertEqual(actual["body"], source)
 
+    def test_table_lists_preserve_markers_and_check_states(self):
+        for contents in ("- **One**\n- Two", "3. One\n4. Two", "- [x] One\n- [ ] Two"):
+            with self.subTest(contents=contents):
+                source = onenote.onenote_md.htmltables.table_markup([[contents, "Neighbour"]])
+                rendered = onenote.onenote_md.markdown_to_onenote_html(source)
+                actual = onenote.onenote_md.html_to_markdown(rendered)
+                self.assertTrue(actual["editable"])
+                self.assertEqual(actual["body"], source)
+
+    def test_apply_lists_in_table_cells_saves_without_replacing_neighbours(self):
+        for contents in ("- One", "1. One", "- [ ] One"):
+            with self.subTest(contents=contents):
+                with self.store() as journal:
+                    journal.discard()
+                self.remote = ('<html><head><title>Title</title></head><body><div><table id="table:lists">'
+                               '<tr><td><p id="p:header">Header</p></td><td><p id="p:neighbour">Neighbour</p></td></tr>'
+                               '<tr><td><p id="p:target">One</p></td><td><p id="p:untouched">untouched</p></td></tr>'
+                               '</table></div></body></html>')
+                neighbour = next(node for node in ET.fromstring(self.remote).iter("p") if node.text == "untouched")
+                loaded = self.load()
+                desired = onenote.onenote_md.htmltables.table_markup([["Header", "Neighbour"], [contents, "untouched"]])
+                result = self.save(note(desired), loaded["view"])
+                self.assertTrue(result.get("ok"), result)
+                self.assertEqual(self.load()["body"], desired)
+                self.assertIn(neighbour.get("id"), self.remote)
+
     def test_table_export_uses_onenote_border_attribute(self):
         cases = [
             "| Item | Quantity |\n|---|---|\n| Apples | 2 |",

@@ -262,7 +262,7 @@ freezing the schema. A group below lists individual keys, not a wildcard API.
 | `sidebar.background`, `sidebar.foreground` | Base behind notebook washes and list text |
 | `tab.activeBackground`, `tab.activeForeground`, `tab.inactiveForeground` | Tab presentation; does not replace provider identity |
 | `toolbar.background`, `statusbar.background`, `statusbar.foreground` | Toolbar and bottom chrome surfaces/text |
-| `editor.background`, `editor.foreground`, `editor.caret` | Note display surface, default ink, caret |
+| `editor.background`, `editor.foreground` | Note display surface and default ink |
 | `editor.selectionBackground`, `editor.selectionForeground` | Text selection pair, distinct from list selection |
 | `editor.link`, `editor.linkVisited`, `editor.quoteForeground`, `editor.quoteBorder` | Semantic display ink and quote rule |
 | `editor.codeBackground`, `editor.codeForeground`, `editor.inlineCodeBackground` | Display colors for code blocks and inline code |

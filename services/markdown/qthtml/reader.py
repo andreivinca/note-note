@@ -360,7 +360,7 @@ class _Reader:
         """A row is one Markdown line, owning every paragraph in its cells;
         a nested table is one line of HTML. The third answer is the kind of
         every line: "table" or "html"."""
-        if self.table_depth or htmltables.nested(node):
+        if self.table_depth or htmltables.structured(node):
             self.table_depth += 1
             try:
                 lines, blocks = self.rich_table(node)
@@ -390,7 +390,7 @@ class _Reader:
         return lines, blocks, "table"
 
     def rich_table(self, node):
-        """Nested tables keep each cell's block structure in semantic HTML."""
+        """Tables with lists or nested tables keep their blocks in semantic HTML."""
         start = self.next_block
         rows = []
         for row in _rows(node):

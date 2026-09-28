@@ -383,7 +383,11 @@ QVariantList TextBlocks::blocks() const
         // note leaves the caret no position after it (escapeForward).
         entry.insert(QStringLiteral("rule"),
                      format.hasProperty(QTextFormat::BlockTrailingHorizontalRulerWidth));
-        const QTextBlockFormat::MarkerType marker = format.marker();
+        // Backspace can detach a block from its list without clearing its
+        // marker property. Qt no longer paints a checkbox on that paragraph;
+        // decorations must follow list membership as well as the stored flag.
+        const QTextBlockFormat::MarkerType marker = block.textList()
+                ? format.marker() : QTextBlockFormat::MarkerType::NoMarker;
         entry.insert(QStringLiteral("marker"),
                      marker == QTextBlockFormat::MarkerType::Checked         ? 2
                              : marker == QTextBlockFormat::MarkerType::Unchecked ? 1

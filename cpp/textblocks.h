@@ -16,6 +16,8 @@
 // block's list membership and character format, which QML cannot set.
 // Table operations use native frame boundaries to target the caret's table,
 // including Backspace immediately after a table and edits inside nested ones.
+// List actions target document blocks directly, including empty table cells;
+// textlists.cpp owns list membership, toggles and leaving an empty item.
 // TextLinks colours and locates URLs without changing the document, and
 // clears inherited anchors from empty paragraphs.
 // The edit-block brackets (beginEditBlock/
@@ -60,7 +62,7 @@ class TextBlocks : public QObject
     // of another version at load.
     Q_PROPERTY(int version READ version CONSTANT)
     Q_PROPERTY(int contentRevision READ contentRevision NOTIFY contentChanged)
-    static constexpr int Version = 2;
+    static constexpr int Version = 4;
 
 public:
     Q_INVOKABLE int insertFormattedText(int from, int to, const QString &text, const QVariantMap &styles);
@@ -69,6 +71,16 @@ public:
     Q_INVOKABLE int editTable(int position, const QString &operation, int index, int count);
     Q_INVOKABLE int appendTableRow(int position);
     Q_INVOKABLE int deletePreviousTable(int position);
+
+    // Format the actual selected paragraphs, with an exclusive selection end.
+    // Mixed selections adopt the style; a uniform selection toggles it off.
+    // List membership never crosses a table cell. Return the selection adjusted
+    // for empty items' rendering fillers. The operation is one undo step.
+    Q_INVOKABLE QVariantMap toggleList(int from, int to, const QString &style);
+    // Backspace at the start of an item removes its marker and list indent
+    // together, without deleting text or crossing a table-cell boundary.
+    Q_INVOKABLE bool removeListAtStart(int position);
+    Q_INVOKABLE bool leaveEmptyList(int position);
 
     explicit TextBlocks(QObject *parent = nullptr);
 
@@ -112,7 +124,8 @@ public:
     // and a block background marks a code line (qthtml/dialect.py).
     // `list` says the block is an item of a QTextList, which is how the
     // editor knows a second Enter should leave the list. `marker` is the
-    // item's task-list state — 0 none, 1 an unchecked box, 2 a checked one;
+    // item's task-list state — 0 none, 1 an unchecked box, 2 a checked one.
+    // Non-list paragraphs have no marker, even when Qt retains an old flag.
     // Qt Quick paints the marker as a raw ☐/☒ glyph hardcoded in its
     // renderer, so the editor covers it and draws its own box over the
     // glyph's cell (NoteEditor.qml, block decorations).

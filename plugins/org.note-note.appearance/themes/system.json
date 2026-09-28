@@ -42,7 +42,6 @@
     "statusbar.foreground": "system",
     "editor.background": "system",
     "editor.foreground": "system",
-    "editor.caret": "system",
     "editor.selectionBackground": "system",
     "editor.selectionForeground": "system",
     "editor.link": "system",

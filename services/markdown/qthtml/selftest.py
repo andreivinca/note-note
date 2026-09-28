@@ -95,6 +95,12 @@ CASES = {
     "code after quote": "> quoted\n\n```\nx = 1\n```\n",
     "table": "| a | b |\n|---|---|\n| 1 | 2 |\n",
     "table with empty cells": "| a |  |\n|---|---|\n|  | 2 |\n",
+    "table with bullet list": (
+        "<table><tr><td><ul><li><strong>One</strong></li><li>Two</li></ul><p>After</p></td>"
+        "<td><p>Neighbour</p></td></tr></table>\n"),
+    "table with numbered list": (
+        '<table><tr><td><ol start="3"><li>One</li><li>Two</li></ol></td>'
+        '<td><p>Neighbour</p></td></tr></table>\n'),
     "literal pipes in table headers and cells": (
         r"| \| | left\|right |" "\n|---|---|\n" r"| \| | \| |" "\n"),
     "backslashes before table pipes": (

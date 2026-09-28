@@ -9,7 +9,7 @@ var LINE_HEIGHT_PCT = 130
 // The native text inspector's interface the editor was written against
 // (cpp/textblocks.h, TextBlocks::Version): a built module of another
 // version is refused whole at load.
-var NATIVE_VERSION = 2
+var NATIVE_VERSION = 4
 
 // The invisible characters the editor itself plants, mirrored from
 // services/markdown/qthtml/dialect.py: Markdown has no empty paragraph, so a

@@ -544,9 +544,10 @@ ShellRoot {
     check("removing a dropdown tool returns its members to the toolbar", fallback.toolbar.length === tools.length)
     check("older settings get the full default layout",
           JSON.stringify(ToolbarSettings.editorDefaults().toolbar) === JSON.stringify(ToolbarSettings.defaults()))
-    check("the previous default toolbar upgrades to the new arrangement",
-          JSON.stringify(ToolbarSettings.editorDefaults({ toolbar: ToolbarSettings.previousDefaults() }).toolbar)
-          === JSON.stringify(ToolbarSettings.defaults()))
+    check("previous default toolbars upgrade to the new arrangement", ToolbarSettings.previousDefaults().every(function(layout) {
+      return JSON.stringify(ToolbarSettings.editorDefaults({ toolbar: layout }).toolbar)
+        === JSON.stringify(ToolbarSettings.defaults())
+    }))
     check("a customized previous toolbar stays in its chosen arrangement",
           JSON.stringify(ToolbarSettings.editorDefaults({ toolbar: layout }).toolbar) === JSON.stringify(layout))
     check("explicit empty layouts and unknown editor settings survive default merging",

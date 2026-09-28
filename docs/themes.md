@@ -77,6 +77,8 @@ roles. The [System file](../plugins/org.note-note.appearance/themes/system.json)
 lists every token. Fonts, dimensions, icons, provider identity hues and authored
 note content are outside this schema.
 
+The editor uses Qt's native caret without a separate caret color setting.
+
 Only `appearance.theme` is saved to config.json. Missing/invalid themes fall
 back to System without replacing that stored ID. Theme files are reread when
 the picker opens; navigation uses that validated session snapshot. Package

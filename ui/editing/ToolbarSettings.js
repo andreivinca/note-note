@@ -6,32 +6,81 @@ function defaults() {
   return [
     ["heading"],
     ["bold", "italic", "underline", "strikeout"],
+    ["textColor", "highlight", "code"],
     ["ul", "ol", "todo", "outdent", "indent"],
-    ["quote", "codeblock", "table", "link"],
+    ["quote", "codeblock"],
+    ["addRow", "delRow", "addCol", "delCol"],
     [{ dropdown: "insert", items: [
-      "textColor", "highlight", "code",
       { dropdown: "insertMonth", items: ["currentMonth", "nextMonth", "customMonth"] },
-      "rule", "addRow", "delRow", "addCol", "delCol"
+      "rule", "link", "table"
     ] }]
   ]
 }
 
-// The default layout before the current one, kept so a config that still
-// holds it — written by an earlier version and never customised — reads
-// as the new default rather than as an arrangement of the user's. It may
-// go once no installed config can hold it: a config is rewritten only on
-// Save, so that is when every user has saved once on the new default.
+// Earlier default layouts still saved in uncustomised configurations.
+// Keep each until no installed config can hold it; configs are rewritten
+// only on Save.
 function previousDefaults() {
   return [
-    ["bold", "italic", "underline", "strikeout"],
-    ["textColor", "highlight", "code", "heading"],
-    ["ul", "ol", "todo", "outdent", "indent"],
-    ["quote", "codeblock", "link"],
-    ["table", "addRow", "delRow", "addCol", "delCol"],
-    [{ dropdown: "insert", items: [
-      { dropdown: "insertMonth", items: ["currentMonth", "nextMonth", "customMonth"] },
-      "rule"
-    ] }]
+    [
+      ["heading"],
+      ["bold", "italic", "underline", "strikeout"],
+      ["textColor", "highlight", "code"],
+      ["ul", "ol", "todo", "outdent", "indent"],
+      ["quote", "codeblock"],
+      ["addRow", "delRow", "addCol", "delCol"],
+      [{ dropdown: "insert", items: [
+        "table", "link",
+        { dropdown: "insertMonth", items: ["currentMonth", "nextMonth", "customMonth"] },
+        "rule"
+      ] }]
+    ],
+    [
+      ["heading"],
+      ["bold", "italic", "underline", "strikeout"],
+      ["ul", "ol", "todo", "outdent", "indent"],
+      ["quote", "codeblock"],
+      ["addRow", "delRow", "addCol", "delCol"],
+      [{ dropdown: "insert", items: [
+        "table", "link", "textColor", "highlight", "code",
+        { dropdown: "insertMonth", items: ["currentMonth", "nextMonth", "customMonth"] },
+        "rule"
+      ] }]
+    ],
+    [
+      ["heading"],
+      ["bold", "italic", "underline", "strikeout"],
+      ["ul", "ol", "todo", "outdent", "indent"],
+      ["quote", "codeblock", "link"],
+      ["addRow", "delRow", "addCol", "delCol"],
+      [{ dropdown: "insert", items: [
+        "table", "textColor", "highlight", "code",
+        { dropdown: "insertMonth", items: ["currentMonth", "nextMonth", "customMonth"] },
+        "rule"
+      ] }]
+    ],
+    [
+      ["heading"],
+      ["bold", "italic", "underline", "strikeout"],
+      ["ul", "ol", "todo", "outdent", "indent"],
+      ["quote", "codeblock", "table", "link"],
+      [{ dropdown: "insert", items: [
+        "textColor", "highlight", "code",
+        { dropdown: "insertMonth", items: ["currentMonth", "nextMonth", "customMonth"] },
+        "rule", "addRow", "delRow", "addCol", "delCol"
+      ] }]
+    ],
+    [
+      ["bold", "italic", "underline", "strikeout"],
+      ["textColor", "highlight", "code", "heading"],
+      ["ul", "ol", "todo", "outdent", "indent"],
+      ["quote", "codeblock", "link"],
+      ["table", "addRow", "delRow", "addCol", "delCol"],
+      [{ dropdown: "insert", items: [
+        { dropdown: "insertMonth", items: ["currentMonth", "nextMonth", "customMonth"] },
+        "rule"
+      ] }]
+    ]
   ]
 }
 
@@ -92,7 +141,10 @@ function validateConfig(config) {
 function editorDefaults(settings) {
   var result = settings && typeof settings === "object" && !Array.isArray(settings)
     ? Object.assign({}, settings) : {}
-  if (validate(result.toolbar) || JSON.stringify(result.toolbar) === JSON.stringify(previousDefaults())) {
+  var savedLayout = JSON.stringify(result.toolbar)
+  if (validate(result.toolbar) || previousDefaults().some(function(layout) {
+    return savedLayout === JSON.stringify(layout)
+  })) {
     result.toolbar = defaults()
   }
   return result

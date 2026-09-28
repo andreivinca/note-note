@@ -6,10 +6,10 @@ Tool {
   toolId: "ol"
   label: "Numbered list"
   icon: "󰉻"
+  shortcutKey: Qt.Key_Slash
+  shortcutModifiers: Qt.ControlModifier
 
   function execute() {
-    editor.transformBlocks(function(line) {
-      return line.indent + (/^\d+[.)][ \t]/.test(line.prefix) ? "" : "1. ") + line.content
-    }, { list: true })
+    editor.toggleList("ol")
   }
 }

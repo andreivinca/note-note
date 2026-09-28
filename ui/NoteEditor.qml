@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls as QQC
 import "../services/shortcuts" as Shortcuts
 import "../services/platform"
 import "../design"
@@ -710,6 +711,18 @@ Item {
     return true
   }
 
+  function deleteListMarker() {
+    if (!editing.writable || area.selectionStart !== area.selectionEnd || !nativeBlocks.item) {
+      return false
+    }
+    if (!nativeBlocks.item.removeListAtStart(area.cursorPosition)) {
+      return false
+    }
+    root.updateInList()
+    root.edited()
+    return true
+  }
+
   function deletePreviousTable() {
     if (root.readOnly || root.plain || area.selectionStart !== area.selectionEnd || !nativeBlocks.item) {
       return false
@@ -760,11 +773,28 @@ Item {
     try { edit() } finally { nb.endEditBlock() }
   }
 
+  function toggleList(style) {
+    if (!nativeBlocks.item) {
+      return false
+    }
+    if (!editing.writable) {
+      return true
+    }
+    var backwards = area.cursorPosition === area.selectionStart
+    var selection = nativeBlocks.item.toggleList(area.selectionStart, area.selectionEnd, style)
+    if (selection.from !== undefined) {
+      area.select(backwards ? selection.to : selection.from, backwards ? selection.from : selection.to)
+      updateInList()
+      root.edited()
+    }
+    return true
+  }
+
   readonly property string sep: "\u2029"
   // ── document conversion shared by tools and keyboard editing ────────
-  // A block style is not something QML can set on the document, and it is one
-  // line of Markdown — so every block tool takes the same trip: read the
-  // document as Markdown, rewrite the lines it owns, put it back. The
+  // QML cannot set block styles directly. Lists use the native helper above;
+  // the other block tools read the document as Markdown, rewrite the lines
+  // they own, and put it back. The
   // conversion answers with a map from Markdown line to document block, which
   // is how the caret finds its line.
   //
@@ -1239,8 +1269,8 @@ Item {
 
   // ── leaving a block: the second Enter ───────────────────────────────
   // Qt's own Enter continues a code block, quote or list with a fresh empty
-  // line; Enter again on that empty line leaves the block instead. The edit
-  // takes the same markdown trip as every block tool (docs/decisions.md):
+  // line; Enter again on that empty line leaves the block instead. Lists
+  // leave through the native helper. Other blocks take the Markdown trip:
   // the empty line comes off the block, a blank paragraph lands after it,
   // and its rendering filler is removed so typing starts clean.
 
@@ -1303,6 +1333,11 @@ Item {
   function returnLeavesBlock() {
     if (root.readOnly || root.plain || area.selectionStart !== area.selectionEnd) {
       return false
+    }
+    if (nativeBlocks.item && nativeBlocks.item.leaveEmptyList(area.cursorPosition)) {
+      updateInList()
+      root.edited()
+      return true
     }
     if (root.tableReturn()) {
       return true
@@ -1826,7 +1861,9 @@ Item {
         contentHeight: area.height
         boundsBehavior: Flickable.StopAtBounds
 
-        ListWheel { flick: flick }
+        QQC.ScrollBar.vertical: QQC.ScrollBar {
+          objectName: "noteScrollBar"
+        }
 
         function ensureVisible(r) {
           if (contentY >= r.y) {
@@ -1871,10 +1908,6 @@ Item {
           color: root.foreground
           selectionColor: Style.selectionFill
           selectedTextColor: Color.token("editor.selectionForeground", root.foreground)
-          cursorDelegate: TextCursor {
-            textInput: area
-            color: Color.token("editor.caret", root.foreground)
-          }
           // Rich text in, rich text out. Markdown cannot hold a highlight,
           // an empty paragraph or an indent, so the document keeps HTML and
           // services/markdown converts at both ends.
@@ -1934,7 +1967,7 @@ Item {
               return
             }
             if (event.key === Qt.Key_Backspace && event.modifiers === Qt.NoModifier
-                && root.deletePreviousTable()) {
+                && (root.deleteListMarker() || root.deletePreviousTable())) {
               event.accepted = true
               return
             }
@@ -2178,30 +2211,4 @@ Item {
     bodyFontSize: root.bodyFontSize
   }
 
-  // ---- there is more: the sidebar's thin track, on the note's own edge.
-  // Outside the Column (whose layout would give it a row of its own) and
-  // outside the Flickable (whose children scroll away with the content).
-  Rectangle {
-    id: editorTrack
-    visible: flick.visible && flick.contentHeight > flick.height + 1
-    anchors.right: parent.right
-    anchors.rightMargin: Style.spacing.xs
-    // The sheet starts under the tools strip and flick.y is measured inside
-    // it; their sum is the viewport's top in this Item's coordinates.
-    y: sheet.y + flick.y
-    height: flick.height
-    width: Style.space(3)
-    color: "transparent"
-
-    Rectangle {
-      width: parent.width
-      radius: width / 2
-      height: Math.max(Style.space(24),
-                       editorTrack.height * (flick.height / Math.max(1, flick.contentHeight)))
-      y: (editorTrack.height - height)
-         * Math.max(0, Math.min(1, flick.contentY / Math.max(1, flick.contentHeight - flick.height)))
-      color: Util.alpha(root.foreground, flick.moving ? 0.45 : 0.2)
-      Behavior on color { ColorAnimation { duration: 150 } }
-    }
-  }
 }

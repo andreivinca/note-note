@@ -478,6 +478,38 @@ Window {
     require(read() === source.replace("code", "[code](https://)"), "the link bar did not type the link: " + JSON.stringify(read()))
   }
 
+  function noteScrolling() {
+    var paragraphs = []
+    for (var i = 0; i < 80; i++) {
+      paragraphs.push("Paragraph " + i)
+    }
+    load({ source: paragraphs.join("\n\n") + "\n" })
+    var body = keys.findChild(editor, "noteBody")
+    var bar = keys.findChild(editor, "noteScrollBar")
+    keys.waitForRendering(body)
+    require(bar && bar.interactive && bar.size < 1, "long note has no usable scrollbar")
+    var original = editor.documentHtml()
+    var caret = editor.cursorPosition()
+    keys.mouseWheel(body, body.width / 2, 30, 0, -120)
+    keys.tryVerify(function() { return editor.viewState().scroll > 0 }, 3000)
+    require(editor.viewState().scroll > 0, "wheel did not scroll the note")
+    var thumb = bar.contentItem
+    var start = thumb.mapToItem(bar, thumb.width / 2, thumb.height / 2)
+    var beforeDrag = editor.viewState().scroll
+    keys.mouseDrag(bar, start.x, start.y, 0, bar.height / 2, Qt.LeftButton, Qt.NoModifier, 20)
+    require(editor.viewState().scroll > beforeDrag, "dragging the scrollbar did not scroll the note")
+    require(editor.cursorPosition() === caret && editor.documentHtml() === original && editor.bodyFocused,
+            "scrolling changed the note, moved the caret or took editor focus")
+    var beforeWheel = editor.viewState().scroll
+    keys.mouseWheel(bar, bar.width / 2, bar.height / 2, 0, 120)
+    keys.tryVerify(function() { return editor.viewState().scroll < beforeWheel }, 3000)
+    require(editor.viewState().scroll < beforeWheel, "wheel over the scrollbar did not scroll up")
+    load({ source: "Short note\n" })
+    keys.waitForRendering(body)
+    keys.mouseWheel(body, body.width / 2, 30, 0, -120)
+    require(bar.size >= 1 && editor.viewState().scroll === 0, "short note scrolled beyond its contents")
+  }
+
   // From the title, Down lands the caret on the body's first line, and a
   // reload in place puts the caret and the scroll back where they were.
   function titleDownAndViewState() {
@@ -889,16 +921,10 @@ Window {
     selectText("Mushrooms")
     var tool = editor.tools.find("textColor")
     var original = savedMarkdown()
-    var button = keys.findChild(editor, "editingTool-insert")
-    require(button && button.visible, "Insert button missing")
-    var insertMenu = Array.from(button.data).find(function(object) {
-      return object.objectName === "editingPopup-insert"
-    })
+    var button = keys.findChild(editor, "editingTool-textColor")
+    require(button && button.visible, "Text color button missing")
+    keys.waitForRendering(button)
     keys.mouseClick(button)
-    keys.tryVerify(function() { return insertMenu.opened }, 1000)
-    var colorAction = keys.findChild(insertMenu.contentItem, "editingMenu-textColor")
-    require(colorAction && colorAction.visible, "text color missing from Insert")
-    keys.mouseClick(colorAction)
     keys.tryVerify(function() { return tool.panelOpen }, 1000)
     var holder = keys.findChild(editor, "editingPopupHolder-textColor")
     var popup = Array.from(holder.data).find(function(object) {
@@ -1166,12 +1192,12 @@ Window {
     load({ source: "word\n" })
     require(editor.tools.menuTools("insert").map(function(tool) {
       return tool.toolId
-    }).join(",") === "textColor,highlight,code,insertMonth,rule", "default Insert menu is missing its formatting and insertion tools")
+    }).join(",") === "insertMonth,rule,link,table", "default Insert menu is missing its insertion tools")
     require(editor.tools.menuTools("insertMonth").map(function(tool) {
       return tool.toolId
     }).join(",") === "currentMonth,nextMonth,customMonth", "Insert month does not contain the calendar tools in order")
-    require(editor.tools.topLevelTools.length === editor.tools.tools.length - 12,
-            "default layout should keep secondary tools inside Insert")
+    require(editor.tools.topLevelTools.length === editor.tools.tools.length - 7,
+            "default layout should keep insertion tools inside Insert")
     editor.toolbarLayout = [[{ dropdown: "insert", items: [] }]]
     var insert = keys.findChild(editor, "editingTool-insert")
     require(insert && insert.visible && !insert.enabled, "empty Insert should be visible and disabled")
@@ -1670,6 +1696,288 @@ Window {
     require(savedMarkdown() === source, "Backspace deleted a read-only table")
   }
 
+  function checkboxBackspace() {
+    var body = keys.findChild(editor, "noteBody")
+    for (var checked of [false, true]) {
+      for (var mode of ["empty", "text", "cleared", "nested"]) {
+        var content = mode === "empty" || mode === "nested" ? "\u00a0" : "word"
+        var item = '<ul><li class="' + (checked ? "checked" : "unchecked") + '">' + content + '</li></ul>'
+        if (mode === "nested") {
+          item = '<table border="1"><tr><td>' + item + '</td></tr></table>'
+        }
+        load({ html: '<table border="1"><tr><td>' + item
+          + '</td><td><ul><li class="unchecked">Keep</li></ul></td></tr></table>' })
+        require(editor.checkBoxes.length === 2, "fixture did not show both checkboxes")
+        var target = editor.checkBoxes[0].position
+        editor.setCursorPosition(target)
+        if (mode === "cleared") {
+          body.select(target, target + content.length)
+          keys.keyClick(Qt.Key_Delete)
+          require(editor.checkBoxes.length === 2, "deleting the text removed its checkbox")
+        }
+        var original = editor.documentHtml()
+        var originalText = editor.plainText()
+        var originalCells = cells()
+        keys.keyClick(Qt.Key_Backspace)
+        require(editor.blockInfoAt(target).kind !== "list", "Backspace did not remove list membership")
+        require(editor.checkBoxes.length === 1 && editor.checkBoxes[0].position === editor.plainText().indexOf("Keep"),
+                "Backspace left a stray checkbox on the paragraph: " + mode)
+        require(editor.plainText() === originalText && cells() === originalCells,
+                "removing the checkbox changed cell contents or structure")
+        var removed = editor.documentHtml()
+        editor.undo()
+        require(editor.documentHtml() === original && editor.checkBoxes.length === 2
+                && editor.checkBoxes[0].checked === checked, "undo did not restore the checkbox and its state")
+        editor.redo()
+        require(editor.documentHtml() === removed && editor.checkBoxes.length === 1, "redo left a stray checkbox")
+        editor.setCursorPosition(target)
+        keys.keyClick(Qt.Key_Backspace)
+        require(editor.checkBoxes.length === 1, "removing the remaining indent moved a checkbox onto the cell border")
+        var saved = savedMarkdown()
+        load({ source: saved })
+        require(editor.checkBoxes.length === 1 && savedMarkdown() === saved,
+                "removed checkbox reappeared after saving")
+      }
+    }
+  }
+
+  function clickListTool(id) {
+    var button = keys.findChild(editor, "editingTool-" + id)
+    require(button && button.visible && button.enabled, id + " button is unavailable")
+    // Leaving a list restores the heading menu and can move the list group.
+    keys.waitForRendering(button)
+    keys.mouseClick(button)
+  }
+
+  function listToolTargeting(id) {
+    var prefix = id === "todo" ? "- [ ] " : (id === "ol" ? "1. " : "- ")
+    var sources = ["", "Above\n", "| Header |\n|---|\n| Cell |\n\nAfter\n"]
+    for (var source of sources) {
+      load({ source: source })
+      editor.setCursorPosition(editor.plainText().length)
+      if (source) {
+        keys.keyClick(Qt.Key_Return)
+      }
+      var position = editor.cursorPosition()
+      var original = editor.documentHtml()
+      clickListTool(id)
+      keys.tryVerify(function() { return editor.blockInfoAt(position).kind === "list" }, 3000)
+      require(editor.blockInfoAt(position).kind === "list", "list missed the empty paragraph after " + source)
+      require(editor.cursorPosition() === position, "list moved the caret")
+      var styled = editor.documentHtml()
+      editor.undo()
+      require(editor.documentHtml() === original, "one undo did not restore the empty paragraph")
+      editor.redo()
+      require(editor.documentHtml() === styled, "redo did not restore the list")
+      typeText("Target")
+      require(savedMarkdown() === source + (source ? "\n" : "") + prefix + "Target\n",
+              "list changed a preceding block: " + savedMarkdown())
+    }
+  }
+
+  function listToolSelections(id) {
+    var prefix = id === "todo" ? "- [ ] " : (id === "ol" ? "1. " : "- ")
+    for (var backwards of [false, true]) {
+      load({ source: "First\n\nSecond\n\nThird\n" })
+      var body = keys.findChild(editor, "noteBody")
+      var end = editor.plainText().indexOf("Third")
+      body.select(backwards ? end : 0, backwards ? 0 : end)
+      clickListTool(id)
+      var expected = prefix + "First\n" + (id === "ol" ? "2. " : prefix) + "Second\n\nThird\n"
+      require(savedMarkdown() === expected, "selection included the next paragraph or lost numbering: " + savedMarkdown())
+      require(body.selectionStart === 0 && body.selectionEnd === end && body.cursorPosition === (backwards ? 0 : end),
+              "list changed the selection")
+      clickListTool(id)
+      require(savedMarkdown() === "First\n\nSecond\n\nThird\n", "second click did not remove selected markers")
+    }
+    load({ source: "- [x] Checked\n- Bullet\n\nPlain\n" })
+    selectText(editor.plainText())
+    clickListTool(id)
+    var saved = savedMarkdown()
+    var expectedMixed = id === "ol" ? "1. Checked\n2. Bullet\n3. Plain\n"
+      : (id === "todo" ? "- [x] Checked\n- [ ] Bullet\n- [ ] Plain\n" : "- Checked\n- Bullet\n- Plain\n")
+    require(saved === expectedMixed, "mixed selection did not become one consistent list: " + saved)
+  }
+
+  function listToolTables(id) {
+    var sources = [
+      "| Header | Neighbour |\n|---|---|\n| Target | untouched |\n",
+      "| Header | Neighbour |\n|---|---|\n|  | untouched |\n",
+      "<table><tr><td><p>Outer</p><table><tr><td><p>Target</p></td><td><p>inner neighbour</p></td></tr></table>"
+        + "<p>After</p></td><td><p>untouched</p></td></tr></table>\n"
+    ]
+    for (var source of sources) {
+      load({ source: source })
+      var text = editor.plainText()
+      var target = text.indexOf("Target")
+      if (target < 0) {
+        target = editor.cellStart(2)
+      }
+      editor.setCursorPosition(target)
+      var original = editor.documentHtml()
+      var originalCells = cells()
+      clickListTool(id)
+      keys.tryVerify(function() { return editor.blockInfoAt(target).kind === "list" }, 3000)
+      require(editor.blockInfoAt(target).kind === "list", "list did not format the table cell")
+      require(editor.blockInfoAt(editor.plainText().indexOf("untouched")).kind !== "list", "list changed a neighbouring cell")
+      require(editor.plainText().replace(/\u00a0/g, "") === text.replace(/\u00a0/g, "") && cells() === originalCells,
+              "list changed table content or structure: " + JSON.stringify([text, editor.plainText()]))
+      var saved = savedMarkdown()
+      require(saved.indexOf("<li") >= 0, "saving flattened the table list: " + saved)
+      var styled = editor.documentHtml()
+      editor.undo()
+      require(editor.documentHtml() === original, "table list did not undo in one step")
+      editor.redo()
+      require(editor.documentHtml() === styled, "table list did not redo")
+      load({ source: saved })
+      require(savedMarkdown() === saved, "table list changed on reload")
+      target = editor.plainText().indexOf("Target")
+      if (target < 0) {
+        target = editor.cellStart(2)
+      }
+      editor.setCursorPosition(target)
+      require(editor.blockInfoAt(target).kind === "list", "reload lost the table list")
+      clickListTool(id)
+      require(editor.blockInfoAt(target).kind !== "list", "second click did not remove the table list")
+    }
+  }
+
+  function listToolTyping(id) {
+    var sources = ["First\n", "| Header |\n|---|\n| First |\n"]
+    for (var source of sources) {
+      load({ source: source })
+      var first = editor.plainText().indexOf("First")
+      editor.setCursorPosition(first + 5)
+      clickListTool(id)
+      keys.keyClick(Qt.Key_Return)
+      typeText("Second")
+      require(editor.blockInfoAt(editor.cursorPosition()).kind === "list", "Enter did not continue the list")
+      var second = editor.plainText().indexOf("Second")
+      require(second > first, "typing landed above the first item")
+      keys.keyClick(Qt.Key_Return)
+      var position = editor.cursorPosition()
+      var before = editor.documentHtml()
+      keys.keyClick(Qt.Key_Return)
+      require(editor.blockInfoAt(editor.cursorPosition()).kind !== "list", "second Enter did not leave the list")
+      require(editor.cursorPosition() === position, "leaving the list moved to another cell or paragraph")
+      editor.undo()
+      require(editor.documentHtml() === before, "leaving the list did not undo in one step")
+      editor.redo()
+      typeText("After")
+      var saved = savedMarkdown()
+      load({ source: saved })
+      require(savedMarkdown() === saved, "continued list changed on save/reload")
+      require(editor.blockInfoAt(editor.plainText().indexOf("First")).kind === "list"
+              && editor.blockInfoAt(editor.plainText().indexOf("Second")).kind === "list"
+              && editor.blockInfoAt(editor.plainText().indexOf("After")).kind !== "list",
+              "Enter lost the list or continued past its end")
+      require(cells() === (source.indexOf("|") === 0 ? 2 : 0), "leaving the list appended a table row")
+    }
+  }
+
+  function listToolBoundaries(id) {
+    var prefix = id === "todo" ? "- [ ] " : (id === "ol" ? "1. " : "- ")
+    var sources = ["Above\n\nTarget\n\nBelow\n", "| Header |\n|---|\n| Cell |\n\nTarget\n\nBelow\n"]
+    for (var source of sources) {
+      for (var offset of [0, 3, 6]) {
+        load({ source: source })
+        editor.setCursorPosition(editor.plainText().indexOf("Target") + offset)
+        clickListTool(id)
+        require(savedMarkdown() === source.replace("Target", prefix + "Target"),
+                "list missed a paragraph boundary: " + savedMarkdown())
+      }
+    }
+
+    load({ source: "First\n\n```\ncode\n```\n\nLast\n" })
+    selectText(editor.plainText())
+    clickListTool(id)
+    require(savedMarkdown() === prefix + "First\n\n```\ncode\n```\n\n" + prefix + "Last\n",
+            "list changed a code block: " + savedMarkdown())
+
+    load({ source: "| A | B |\n|---|---|\n| One | Two |\n" })
+    var body = keys.findChild(editor, "noteBody")
+    body.select(editor.plainText().indexOf("One"), editor.plainText().indexOf("Two") + 3)
+    clickListTool(id)
+    require(editor.blockInfoAt(editor.plainText().indexOf("One")).kind === "list"
+            && editor.blockInfoAt(editor.plainText().indexOf("Two")).kind === "list"
+            && editor.blockInfoAt(editor.plainText().indexOf("A")).kind !== "list",
+            "selection did not format exactly the selected cells")
+    var saved = savedMarkdown()
+    load({ source: saved })
+    require(savedMarkdown() === saved && cells() === 4, "lists in adjacent cells changed on reload")
+    if (id === "ol") {
+      require((saved.match(/<ol>/g) || []).length === 2, "numbering continued into a neighbouring cell")
+    }
+
+    load({ source: "| A | B |\n|---|---|\n| One | Two |\n" })
+    body.select(editor.plainText().indexOf("A"), editor.plainText().indexOf("One") + 3)
+    clickListTool(id)
+    require(editor.blockInfoAt(editor.plainText().indexOf("A")).kind === "list"
+            && editor.blockInfoAt(editor.plainText().indexOf("One")).kind === "list"
+            && editor.blockInfoAt(editor.plainText().indexOf("B")).kind !== "list"
+            && editor.blockInfoAt(editor.plainText().indexOf("Two")).kind !== "list",
+            "column selection changed cells outside the selected rectangle")
+  }
+
+  function listToolBackspace(id) {
+    var body = keys.findChild(editor, "noteBody")
+    var sources = [
+      { source: "Target\n" },
+      { source: "| Header | Neighbour |\n|---|---|\n| Target | untouched |\n" },
+      { source: "| Header | Neighbour |\n|---|---|\n|  | untouched |\n", cell: 2 },
+      { source: "| Header |\n|---|\n| Cell |\n\nTarget\n" },
+      { source: "<table><tr><td><p>Outer</p><table><tr><td><p>Target</p></td></tr></table></td>"
+          + "<td><p>untouched</p></td></tr></table>\n" },
+      { source: '<table border="1"><tr><td></td><td></td></tr><tr><td></td><td></td></tr></table>\n', cell: 3 }
+    ]
+    for (var fixture of sources) {
+      load(fixture)
+      var target = fixture.cell === undefined ? editor.plainText().indexOf("Target") : editor.cellStart(fixture.cell)
+      editor.setCursorPosition(target)
+      var paragraphX = body.positionToRectangle(target).x
+      clickListTool(id)
+      var cell = editor.tableContext()
+      var original = editor.documentHtml()
+      var text = editor.plainText()
+      var listX = body.positionToRectangle(target).x
+      require(listX > paragraphX, "list did not indent the paragraph")
+      keys.keyClick(Qt.Key_Backspace)
+      require(editor.blockInfoAt(target).kind !== "list", "Backspace did not remove the list marker")
+      require(Math.abs(body.positionToRectangle(target).x - paragraphX) < 0.1,
+              "Backspace left the list's padding: " + body.positionToRectangle(target).x + " instead of " + paragraphX)
+      require(editor.plainText() === text && editor.cursorPosition() === target,
+              "removing the marker changed the cell or moved the caret")
+      require(JSON.stringify(editor.tableContext()) === JSON.stringify(cell), "Backspace moved the caret to another cell")
+      var removed = editor.documentHtml()
+      keys.keyClick(Qt.Key_X)
+      require(editor.plainText() === text.slice(0, target) + "x" + text.slice(target),
+              "typing after removing the marker left its paragraph")
+      editor.undo()
+      require(editor.documentHtml() === removed, "undo typing changed the paragraph indentation")
+      editor.undo()
+      require(editor.documentHtml() === original && Math.abs(body.positionToRectangle(target).x - listX) < 0.1,
+              "one undo did not restore the marker and indentation")
+      editor.redo()
+      require(editor.documentHtml() === removed && Math.abs(body.positionToRectangle(target).x - paragraphX) < 0.1,
+              "redo did not remove the marker and indentation together")
+    }
+    load({ source: "Target\n" })
+    editor.setCursorPosition(0)
+    clickListTool(id)
+    var listed = editor.documentHtml()
+    editor.readOnly = true
+    keys.keyClick(Qt.Key_Backspace)
+    require(editor.documentHtml() === listed, "Backspace removed a read-only list marker")
+    editor.readOnly = false
+    editor.setCursorPosition(3)
+    keys.keyClick(Qt.Key_Backspace)
+    require(editor.plainText() === "Taget" && editor.blockInfoAt(0).kind === "list",
+            "Backspace within an item removed its marker")
+    body.select(0, body.length)
+    keys.keyClick(Qt.Key_Backspace)
+    require(editor.blockInfoAt(0).kind === "list", "Backspace on selected text removed its marker")
+  }
+
   function modularToolCases() {
     var table = "| A | B |\n|---|---|\n| one | two |\n"
     var cases = [
@@ -1707,8 +2015,19 @@ Window {
         test.checked("modular " + cases[i].id + " saves and undoes", false, error.message)
       }
     }
+    for (var id of ["todo", "ul", "ol"]) {
+      for (var check of [listToolTargeting, listToolSelections, listToolTables, listToolTyping, listToolBoundaries, listToolBackspace]) {
+        try {
+          check(id)
+          test.checked(id + " " + check.name, true, "")
+        } catch (error) {
+          test.checked(id + " " + check.name, false, error.message)
+        }
+      }
+    }
     var behavior = [
       { name: "notebook controls and list refreshes remain usable", run: notebookChrome },
+      { name: "note wheel and scrollbar dragging preserve editing and respect content bounds", run: noteScrolling },
       { name: "Right after inserting blocks leaves an empty line through typing and undo", run: insertedBlockLanding },
       { name: "text color palette applies, resets, saves, undoes and rejects stale contexts", run: textColorTool },
       { name: "tools enforce provider and document permissions on every entry point", run: toolPermissions },
@@ -1729,7 +2048,8 @@ Window {
       { name: "double Enter adds a row to the innermost table and undoes", run: nestedTableEnter },
       { name: "tables and calendars insert into empty cells and reload without extra content", run: nestedTableEmptyCell },
       { name: "Backspace after a table removes it, preserving neighbours and undo", run: tableBackspace },
-      { name: "table Backspace respects cell boundaries, text selections and read-only notes", run: tableBackspaceBoundaries }
+      { name: "table Backspace respects cell boundaries, text selections and read-only notes", run: tableBackspaceBoundaries },
+      { name: "Backspace removes table checkboxes without stray markers and restores their state on undo", run: checkboxBackspace }
     ]
     for (var j = 0; j < behavior.length; j++) {
       try {

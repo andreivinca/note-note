@@ -1,6 +1,6 @@
 """Structured table cells stored as semantic HTML inside Markdown.
 
-Pipe tables cannot hold another table. Only those richer tables use this
+Pipe tables cannot hold lists or another table. Only those richer tables use this
 representation; normal tables retain their existing Markdown syntax. HTML
 is parsed into the same AST as Markdown, never passed through to the editor.
 """
@@ -21,8 +21,9 @@ def rows(node):
             yield from rows(child)
 
 
-def nested(node):
-    return any(child.tag == "table" or nested(child) for child in node.children)
+def structured(node):
+    """Pipe cells cannot represent lists or inner tables."""
+    return any(child.tag in {"table", "ul", "ol"} or structured(child) for child in node.children)
 
 
 def parse_table(source):

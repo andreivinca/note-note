@@ -197,6 +197,24 @@ that way the note comes back blank, so a toolbar action sees a plain empty line
 and re-adds the style that is already there — the button looks dead. This is
 the one place `text` is the right answer (`NoteEditor.documentHtml`).
 
+**A checkbox marker belongs to a list item.** Backspace at an item's start
+can remove its list membership while retaining the block format's checked or
+unchecked flag. The native inspector reports no marker for these ordinary
+paragraphs, matching Qt's painter and HTML export. Reading the flag alone left
+a stray checkbox behind; removing the paragraph's remaining indent then moved
+that decoration onto the table cell border.
+
+Qt also converts a removed item's list indent to a paragraph indent, requiring
+a second Backspace to reach the normal text position. The editor handles
+Backspace at a list item's start through the native helper, removing membership,
+marker and indent in one undo step. Text selections and Backspace within an item
+retain their ordinary deletion behavior.
+
+**Use Qt's native caret.** Qt owns its painting, blinking and placement. A
+custom cursor delegate could remain at its old coordinates after native list
+formatting shrank a table column (measured on 6.11.2). The editor leaves
+`cursorDelegate` unset and has no separate caret theme token or geometry sync.
+
 **No Markdown is a real answer, not a failed conversion.** A note holding one
 blank line — a typed space, or the U+00A0 an empty item carries — converts to
 the empty string, because a trailing blank line belongs to no block and is

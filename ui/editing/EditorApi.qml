@@ -267,6 +267,23 @@ QtObject {
     })
   }
 
+  function toggleList(style) {
+    if (!writable || host.toggleList(style)) {
+      return
+    }
+    if (host.tableContext() || inTable) {
+      report("Build the native text helper to format lists in table cells")
+      return
+    }
+    // Compatibility with shell installations without the native helper.
+    transformBlocks(function(line) {
+      var matches = style === "todo" ? /\[[ xX]\]/.test(line.prefix)
+        : (style === "ol" ? /^\d+[.)][ \t]/.test(line.prefix) : /^[-*+][ \t](?!\[)/.test(line.prefix))
+      var prefix = style === "todo" ? "- [ ] " : (style === "ol" ? "1. " : "- ")
+      return line.indent + (matches ? "" : prefix) + (line.content || Dialect.EMPTY_ITEM)
+    }, { list: true })
+  }
+
   function blockParts(line) {
     var m = /^([ \t]*)((?:#{1,6}[ \t]+)|(?:[-*+][ \t]+(?:\[[ xX]\][ \t]+)?)|(?:\d+[.)][ \t]+)|(?:>[ \t]+))?([\s\S]*)$/.exec(line)
     var indent = m[1] || "", prefix = m[2] || "", content = m[3] || ""
