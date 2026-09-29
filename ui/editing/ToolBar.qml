@@ -18,6 +18,27 @@ Item {
     toolFlow.buttonHeight + 2 * (groupPadding + Style.spacing.sm))
   readonly property var editor: registry.editor
   readonly property bool panelOpen: registry.panelOpen
+  readonly property var visibleGroupIndexes: {
+    var visible = []
+    var groups = registry.toolbarGroups
+    for (var i = 0; i < groups.length; i++) {
+      if (groups[i].tools.some(function(tool) {
+        return registry.isVisible(tool)
+      })) {
+        visible.push(i)
+      }
+    }
+    return visible
+  }
+  readonly property int lastVisibleGroupIndex: visibleGroupIndexes.length > 0
+    ? visibleGroupIndexes[visibleGroupIndexes.length - 1] : -1
+  readonly property bool lastGroupAlignsRight: {
+    var group = registry.toolbarGroups[lastVisibleGroupIndex]
+    return group ? group.tools.length === 1 && group.tools[0].isMenu : false
+  }
+  // The final menu sits apart from the tool groups, so it has no divider before it.
+  readonly property int separatorLimitIndex: lastGroupAlignsRight && visibleGroupIndexes.length > 1
+    ? visibleGroupIndexes[visibleGroupIndexes.length - 2] : lastVisibleGroupIndex
   height: visible ? Math.max(rowHeight, strip.implicitHeight) + Style.spacing.hairline : 0
 
   AppUi.ChromePopupStyle {
@@ -51,7 +72,7 @@ Item {
       id: toolFlow
       visible: bar.toolsVisible
       width: parent.width - parent.leftPadding - parent.rightPadding
-      spacing: strip.padding
+      spacing: Style.spacing.lg
       // All groups share the tallest button's height, including text-only
       // dropdowns whose labels are shorter than the icon glyphs.
       readonly property real buttonHeight: {
@@ -79,8 +100,8 @@ Item {
           buttonHeight: toolFlow.buttonHeight
           panelPadding: bar.groupPadding
           panelOpen: bar.panelOpen
-          separatorVisible: index < bar.registry.toolbarGroups.length - 1
-          alignRight: !separatorVisible && tools.length === 1 && tools[0].isMenu
+          separatorVisible: index < bar.separatorLimitIndex
+          alignRight: index === bar.lastVisibleGroupIndex && bar.lastGroupAlignsRight
           precedingWidth: {
             var used = 0
             for (var i = 0; i < toolFlow.children.length; i++) {

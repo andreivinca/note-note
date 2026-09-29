@@ -48,7 +48,8 @@ Rectangle {
 
   Rectangle {
     visible: group.separatorVisible
-    anchors.right: parent.right
+    // Center the divider in the Flow gap between this group and the next.
+    x: group.width + group.toolbarFlow.spacing / 2 - width / 2
     y: group.panelPadding + (group.buttonHeight - height) / 2
     width: Style.spacing.hairline
     height: Style.space(18)
