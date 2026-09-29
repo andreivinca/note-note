@@ -1864,6 +1864,9 @@ Item {
         ListWheel { flick: flick }
         QQC.ScrollBar.vertical: QQC.ScrollBar {
           objectName: "noteScrollBar"
+          // Shown exactly while the note is longer than its frame.
+          policy: QQC.ScrollBar.AlwaysOn
+          visible: size < 1
         }
 
         function ensureVisible(r) {
