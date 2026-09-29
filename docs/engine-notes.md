@@ -332,6 +332,13 @@ mirrors the dialect constant). A link around the image changes nothing —
 `<li><a…><img …/></a>` is mispainted identically (measured offscreen, same
 rows) — so the writer's guard looks through an anchor too.
 
+**A line containing an image adds 8px to its natural height.** The 130% used
+for prose adds 30% of the image's drawn height below it: a 577px image gains
+173px of empty space. Qt's line-distance format adds exactly 8px to any block
+containing an image, including images inside links, lists and table cells.
+The native normalizer applies the same rule when a block is edited or pasted;
+image insertion states it directly for hosts without the native inspector.
+
 **Qt cannot paste its own lists.** The copy serialises the selection with a
 `<!--StartFragment-->` comment *inside* the first `<li>`, and on that comment
 Qt's HTML parser fails to rebuild the `QTextList`: every pasted list arrived

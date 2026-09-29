@@ -55,6 +55,16 @@ bool neighbourIsCode(const QTextBlock &block)
     return block.isValid() && NoteNoteDialect::isCodeBlock(block.blockFormat());
 }
 
+bool containsImage(const QTextBlock &block)
+{
+    for (auto it = block.begin(); !it.atEnd(); ++it) {
+        if (it.fragment().charFormat().isImageFormat()) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // The image file's own size, from the resource the document already
 // loaded to paint it (the document caches these, so this is a lookup,
 // not a read). Empty while a resource has not loaded — `images()` then
@@ -576,18 +586,21 @@ void TextBlocks::normalizeListMargins()
 
 void TextBlocks::normalizeLineHeights()
 {
-    constexpr qreal percent = NoteNoteDialect::LINE_HEIGHT_PCT;
     QTextDocument *doc = m_document ? m_document->textDocument() : nullptr;
     if (!doc) {
         return;
     }
     for (QTextBlock block = doc->begin(); block.isValid(); block = block.next()) {
+        const bool image = containsImage(block);
+        const int type = image ? QTextBlockFormat::LineDistanceHeight
+                               : QTextBlockFormat::ProportionalHeight;
+        const qreal height = image ? NoteNoteDialect::IMAGE_LINE_GAP_PX
+                                   : NoteNoteDialect::LINE_HEIGHT_PCT;
         QTextBlockFormat format = block.blockFormat();
-        if (format.lineHeightType() == QTextBlockFormat::ProportionalHeight
-            && qFuzzyCompare(format.lineHeight(), percent)) {
+        if (format.lineHeightType() == type && qFuzzyCompare(format.lineHeight(), height)) {
             continue;
         }
-        format.setLineHeight(percent, QTextBlockFormat::ProportionalHeight);
+        format.setLineHeight(height, type);
         QTextCursor cursor(block);
         cursor.joinPreviousEditBlock();
         cursor.setBlockFormat(format);

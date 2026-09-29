@@ -14,8 +14,9 @@ namespace NoteNoteDialect {
 // A quote is the pair of margins at or past this; an indent sets the left
 // one only.
 constexpr qreal QUOTE_PX = 40;
-// Every block's line height, in percent of the font's.
+// Prose line height, and the fixed distance beyond an image line's height.
 constexpr qreal LINE_HEIGHT_PCT = 130;
+constexpr qreal IMAGE_LINE_GAP_PX = 8;
 // The clearance a code block's first and last lines carry outside the slab.
 constexpr qreal CODE_MARGIN_PX = 20;
 // Markdown has no empty paragraph: a blank line is a paragraph holding this.

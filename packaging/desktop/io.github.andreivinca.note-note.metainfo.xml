@@ -34,6 +34,12 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.0.29" date="2026-09-29">
+      <description>
+        <p>Images now have a small, consistent gap before the following text,
+        regardless of their size.</p>
+      </description>
+    </release>
     <release version="1.0.28" date="2026-09-29">
       <description>
         <p>The editing toolbar offers only the tools that apply where the caret

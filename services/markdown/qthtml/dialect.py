@@ -120,15 +120,17 @@ CODE_MARGIN_PX = 20
 # background padding. A table's border already bounds its visible surface.
 TABLE_MARGIN_PX = 12
 
-# How tall a line is drawn: Qt's proportional line height, a little air over
-# the font's natural line (130% of it is about 1.5 lines per font size — the
-# spacing prose editors set). Display only, like the quote's ink: `writer`
-# states it on every block because Qt keeps the value per block — one stated
-# on <body> does not reach list items (measured on 6.11) — and `reader`
-# never reads it, so it lives in the document alone. Mirrored by
-# `normalizeLineHeights` in cpp/textblocks.h, which gives it to blocks born
-# outside `writer` (typing into a note opened empty, a paste from outside).
+# How tall a line is drawn: prose gets a little air over the font's natural
+# line. A line holding an image gets a fixed 8px beyond its natural height;
+# proportional 130% would add 30% of the image's height below it. Qt's
+# LineDistanceHeight expresses that fixed distance directly. Display only,
+# like the quote's ink: `writer` states it on every block because Qt keeps the
+# value per block (one stated on <body> does not reach list items), and
+# `reader` never reads it.
+# `normalizeLineHeights` in cpp/textblocks.h applies the same rule to blocks
+# born outside `writer` (typing into an empty note or pasting from outside).
 LINE_HEIGHT_PCT = 130
+IMAGE_LINE_GAP_PX = 8
 
 
 # Qt's writer brackets its output with these; on the way back *in* they make

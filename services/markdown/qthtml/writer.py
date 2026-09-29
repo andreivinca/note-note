@@ -13,9 +13,11 @@ from .siblings import parse, textcolor
 from .imagesize import local_path, width_of
 
 RULE = "<hr />"
-# Stated on every block (dialect.LINE_HEIGHT_PCT): Qt keeps the value per
-# block and hands it back untouched, so the form is a fixpoint.
+# Stated on every block: Qt keeps the value per block and hands it back
+# untouched, so the form is a fixpoint.
 LINE_HEIGHT = "line-height:%d%%;" % dialect.LINE_HEIGHT_PCT
+IMAGE_LINE_HEIGHT = ("line-height:%d; -qt-line-height-type:line-distance;"
+                     % dialect.IMAGE_LINE_GAP_PX)
 # An empty block, drawn one line high. It cannot be `<p></p>` (Qt drops a
 # block with nothing in it) and it must not be `<p><br /></p>`: the break
 # opens a *second* line inside the block, so every deliberate blank line
@@ -61,6 +63,20 @@ def first_block_kind(tokens):
             return first_block_kind(token.get("children"))
         return token["type"]
     return ""
+
+
+def contains_image(tokens):
+    for token in tokens or []:
+        if token["type"] == "image" or contains_image(token.get("children")):
+            return True
+    return False
+
+
+def line_height(tokens):
+    """Add a fixed distance to an image line, including when a link or
+    another inline style wraps it. Proportional prose height would add 30%
+    of a large image's height below the image."""
+    return IMAGE_LINE_HEIGHT if contains_image(tokens) else LINE_HEIGHT
 
 
 class _Renderer:
@@ -112,21 +128,23 @@ class _Renderer:
 
     def heading(self, token):
         level = min(max(token.get("attrs", {}).get("level", 1), 1), 6)
+        children = token.get("children")
         span = 'font-size:%s; font-weight:%d;' % (dialect.HEADING_FONT_SIZE[level], dialect.BOLD_WEIGHT)
         if level in dialect.HEADING_VARIANT:
             span += ' font-variant:%s;' % dialect.HEADING_VARIANT[level]
         # Inside a heading the author's bold is written heavier, so that it
         # survives a document where the heading itself is already bold.
         return '<h%d style="%s"><span style="%s">%s</span></h%d>' % (
-            level, LINE_HEIGHT, span, self.inline(token.get("children"), heavy=True), level)
+            level, line_height(children), span, self.inline(children, heavy=True), level)
 
     def paragraph(self, token, indent, quote):
-        body = self.inline(token.get("children"))
+        children = token.get("children")
+        body = self.inline(children)
         # The filler keeps an empty paragraph alive in Qt, with its block
         # format intact: an empty quote is still a place to type a quote.
         if body.strip() in ("", dialect.BLANK_PARAGRAPH):
             body = dialect.BLANK_PARAGRAPH
-        return "<p%s>%s</p>" % (self.block_style(indent, quote), body)
+        return "<p%s>%s</p>" % (self.block_style(indent, quote, children), body)
 
     def code(self, token, indent):
         """Qt has no <pre>: a code block is consecutive monospace paragraphs
@@ -163,7 +181,7 @@ class _Renderer:
                           _html.escape(line, quote=False) or dialect.EMPTY_CODE_LINE))
         return out
 
-    def block_style(self, indent, quote):
+    def block_style(self, indent, quote, children):
         # Vertical margins are stated on every paragraph, and stated as zero:
         # a block typed into a fresh note carries none, and a bare <p> takes
         # Qt's default 12px — so the first block tool's rebuild used to
@@ -173,17 +191,18 @@ class _Renderer:
         # already keeps (BLANK_PARAGRAPH). Same rule the line-height follows:
         # state the form, or Qt's default drifts the typed and the re-rendered
         # note apart.
+        height = line_height(children)
         if quote:
             # Zeroed also so neighbouring quote paragraphs read as one
             # quote — the bar the editor draws over them (NoteEditor, quote
             # bars) spans the run without a gap.
             return (' style="margin-top:0px; margin-bottom:0px;'
                     ' margin-left:%dpx; margin-right:%dpx; %s"'
-                    % (dialect.QUOTE_PX, dialect.QUOTE_PX, LINE_HEIGHT))
+                    % (dialect.QUOTE_PX, dialect.QUOTE_PX, height))
         if indent > 0:
             return (' style="margin-top:0px; margin-bottom:0px; margin-left:%dpx; %s"'
-                    % (indent * dialect.INDENT_PX, LINE_HEIGHT))
-        return ' style="margin-top:0px; margin-bottom:0px; %s"' % LINE_HEIGHT
+                    % (indent * dialect.INDENT_PX, height))
+        return ' style="margin-top:0px; margin-bottom:0px; %s"' % height
 
     # ---- lists ----------------------------------------------------------
 
@@ -199,8 +218,10 @@ class _Renderer:
         is_task = token["type"] == "task_list_item"
         children = list(token.get("children") or [])
         body = ""
+        body_children = []
         if children and children[0]["type"] in ("block_text", "paragraph"):
-            body = self.inline(children.pop(0).get("children")).strip()
+            body_children = children.pop(0).get("children") or []
+            body = self.inline(body_children).strip()
         if not body:
             body = dialect.EMPTY_ITEM        # Qt drops an item with no content
         if OPENS_WITH_IMAGE.match(body):
@@ -209,7 +230,7 @@ class _Renderer:
         # blocks stay in source order, including code and further paragraphs.
         continuation = "".join(self.blocks(children, indent, quote))
         css = ' class="%s"' % dialect.CHECK_CLASS[bool(checked)] if is_task else ""
-        return '<li%s style="%s">%s%s</li>' % (css, LINE_HEIGHT, body, continuation)
+        return '<li%s style="%s">%s%s</li>' % (css, line_height(body_children), body, continuation)
 
     # ---- tables ---------------------------------------------------------
 
@@ -241,7 +262,8 @@ class _Renderer:
             if body != BLANK:
                 return body
             return '<p style="%s"></p>' % LINE_HEIGHT
-        return '<p style="%s">%s</p>' % (LINE_HEIGHT, self.inline(cell.get("children")))
+        children = cell.get("children")
+        return '<p style="%s">%s</p>' % (line_height(children), self.inline(children))
 
     # ---- inline ---------------------------------------------------------
 

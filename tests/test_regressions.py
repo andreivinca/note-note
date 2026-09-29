@@ -397,7 +397,8 @@ class Content(unittest.TestCase):
 
     def test_document_dialect_agrees_across_adapters(self):
         js = (ROOT / "ui/Dialect.js").read_text()
-        for name in ("QUOTE_PX", "CODE_PAD_PX", "MAX_IMAGE_DISPLAY", "LINE_HEIGHT_PCT"):
+        for name in ("QUOTE_PX", "CODE_PAD_PX", "MAX_IMAGE_DISPLAY", "LINE_HEIGHT_PCT",
+                     "IMAGE_LINE_GAP_PX"):
             match = re.search(r"var " + name + r" = (\d+)", js)
             self.assertIsNotNone(match, name)
             self.assertEqual(int(match[1]), getattr(dialect, name), name)
@@ -406,7 +407,7 @@ class Content(unittest.TestCase):
             self.assertIsNotNone(match, name)
             self.assertEqual(json.loads(match[1]), getattr(dialect, name), name)
         native = (ROOT / "cpp/dialect.h").read_text()
-        for name in ("QUOTE_PX", "LINE_HEIGHT_PCT", "CODE_MARGIN_PX"):
+        for name in ("QUOTE_PX", "LINE_HEIGHT_PCT", "IMAGE_LINE_GAP_PX", "CODE_MARGIN_PX"):
             self.assertEqual(int(re.search(r"constexpr qreal " + name + r" = (\d+);", native)[1]), getattr(dialect, name), name)
         self.assertEqual(chr(int(re.search(r"BLANK_PARAGRAPH = QChar\(0x([0-9a-f]+)\)", native)[1], 16)), dialect.BLANK_PARAGRAPH)
         self.assertEqual(re.search(r'MONO_FAMILY = QStringLiteral\("([^"]*)"\)', native)[1], dialect.MONO_FAMILY)

@@ -597,9 +597,13 @@ Item {
     var at = area.cursorPosition
     // On its own line: a picture is a block of its own in every backend, and
     // the save can only leave it untouched if the text is not wrapped around
-    // it (plugins/org.note-note.onenote/onenote_md.py).
+    // it (plugins/org.note-note.onenote/onenote_md.py). Its line uses the
+    // image-height rule that the converter and native normalizer also use.
+    var source = "file://" + encodeURI(path).replace(/"/g, "%22")
+    var paragraph = '<p style="line-height:' + Dialect.IMAGE_LINE_GAP_PX
+                  + '; -qt-line-height-type:line-distance;"><img src="' + source + '" alt="" /></p>'
     atomic(function() {
-      area.insert(at, '<p><img src="file://' + encodeURI(path).replace(/"/g, "%22") + '" alt="" /></p>')
+      area.insert(at, paragraph)
       guardImageAt(at)
     })
     // fitImageAt stays outside: its width write joins the closed block

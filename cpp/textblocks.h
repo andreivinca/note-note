@@ -186,9 +186,9 @@ public:
     // edit for undo and never reaches the note: the reader ignores margins.
     Q_INVOKABLE void normalizeListMargins();
 
-    // The dialect states its line height on every block it writes
-    // (qthtml/writer.py), but a block born outside the writer — the first
-    // block of a note opened empty, or blocks a paste brings in from
+    // The dialect states prose line height and an image line's fixed distance
+    // on every block it writes (qthtml/writer.py), but a block born outside
+    // the writer — the first block of a note opened empty, or a paste from
     // another program — carries Qt's default instead, and drifts from the
     // form a re-render would give it. This restores that form, the same
     // way normalizeListMargins does: format-only, joined to the edit that

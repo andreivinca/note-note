@@ -84,6 +84,12 @@ Window {
     }
     return { outer: outer, inner: inner }
   }
+  function imageGap() {
+    var image = tb.images()[0]
+    var top = e.positionToRectangle(image.position).y
+    var following = e.positionToRectangle(image.position + 2).y
+    return following - top - image.height
+  }
   Timer { interval: 60; running: true; onTriggered: {
     var cases = %(cases)s
     for (var key in cases) {
@@ -115,6 +121,13 @@ Window {
       img.html = e.getFormattedText(0, e.length)
     }
     out.images = img
+    e.text = %(imagegaphtml)s
+    var spacing = { loaded: imageGap() }
+    e.text = %(importedimagehtml)s
+    spacing.imported = imageGap()
+    tb.normalizeLineHeights()
+    spacing.normalized = imageGap()
+    out.imageSpacing = spacing
     // The table-gap phase: Enter at the list's end bares a block Qt hides,
     // the filler must give the row back, and one undo must take the row and
     // its filler out together (textblocks.h, fillEmptyBlocksBeforeTables).
@@ -278,10 +291,16 @@ def main():
     png = os.path.join(png_dir, "shot.png")
     make_png(png, 800, 600)
     image_markdown = "![shot](file://%s)\n" % png
+    image_gap_html = to_html(image_markdown + "\nafter\n")
+    imported_image_html = image_gap_html.replace(
+        "line-height:%d; -qt-line-height-type:line-distance;" % dialect.IMAGE_LINE_GAP_PX,
+        "line-height:%d%%;" % dialect.LINE_HEIGHT_PCT, 1)
     script = QML_TEMPLATE % {"module": "file://" + MODULE,
                              "quotebars": "file://" + QUOTEBARS,
                              "cases": json.dumps(documents),
                              "imagehtml": json.dumps(to_html(image_markdown)),
+                             "imagegaphtml": json.dumps(image_gap_html),
+                             "importedimagehtml": json.dumps(imported_image_html),
                              "gaphtml": json.dumps(to_html(GAP_MARKDOWN)),
                              "codehtml": json.dumps(to_html(CODE_MARKDOWN))}
     with tempfile.NamedTemporaryFile("w", suffix=".qml", delete=False) as handle:
@@ -358,6 +377,17 @@ def main():
     image_failures = check_images(results.get("images") or {}, image_markdown, args.verbose)
     failures += image_failures
     print("  %s" % ("ok" if not image_failures else "%d failure(s)" % image_failures))
+
+    print("image spacing: loaded and imported blocks")
+    spacing = results.get("imageSpacing") or {}
+    spacing_ok = (abs(spacing.get("loaded", 999) - dialect.IMAGE_LINE_GAP_PX) < 2
+                  and spacing.get("imported", 0) > 100
+                  and abs(spacing.get("normalized", 999) - dialect.IMAGE_LINE_GAP_PX) < 2)
+    if not spacing_ok:
+        failures += 1
+        print("  FAIL  image spacing %r" % spacing)
+    else:
+        print("  ok")
 
     print("table gap: the filler under a list split above a table")
     gap_failures = check_table_gap(results.get("tableGap") or {}, args.verbose)
