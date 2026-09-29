@@ -62,7 +62,7 @@ class TextBlocks : public QObject
     // of another version at load.
     Q_PROPERTY(int version READ version CONSTANT)
     Q_PROPERTY(int contentRevision READ contentRevision NOTIFY contentChanged)
-    static constexpr int Version = 4;
+    static constexpr int Version = 5;
 
 public:
     Q_INVOKABLE int insertFormattedText(int from, int to, const QString &text, const QVariantMap &styles);
@@ -98,11 +98,18 @@ public:
     // states. These brackets make the strokes one transaction: each edit
     // between them, whoever makes it (the QML insert/remove and the
     // normalize joins alike), lands in a single undo step. It is the same
-    // QTextCursor edit block setImageWidth uses, document-global, so a
-    // throwaway cursor is enough. The depth guard keeps a stray end from
-    // underflowing Qt's counter — the QML side brackets in try/finally
-    // (NoteEditor.atomic), so depth here never outlives a tool.
-    Q_INVOKABLE void beginEditBlock(bool joinPrevious = false);
+    // QTextCursor edit block setImageWidth uses, document-global — but the
+    // cursor that opens it is where undo puts the caret back: Qt records
+    // its position with the transaction (QTextCursor::beginEditBlock). A
+    // throwaway cursor stood at 0, so undoing a paste sent the caret to the
+    // top of the note. `caret` is the editor's caret before the edit; a
+    // position the document does not have opens nothing. Joining the
+    // previous transaction records no caret: that one's stands. The depth
+    // guard keeps a stray end from underflowing Qt's counter — the QML side
+    // brackets in try/finally (NoteEditor.atomic), so depth here never
+    // outlives a tool.
+    Q_INVOKABLE void beginEditBlock(int caret);
+    Q_INVOKABLE void joinPreviousEditBlock();
     Q_INVOKABLE void endEditBlock();
 
     // Forward Delete across a paragraph boundary is one undo transaction,
@@ -216,6 +223,10 @@ signals:
     void linksChanged();
 
 private:
+    // Counts a bracket in; the outermost one first notes the first
+    // paragraph's character format, for endEditBlock to compare.
+    void enterEditBlock(QTextDocument *doc);
+
     TextLinks *m_links;
     int m_linkRevision = 0;
 

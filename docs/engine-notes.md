@@ -367,6 +367,27 @@ one transaction, one undo step, and the normalize passes that join the edit
 join the same step. QML alone cannot open an edit block, so without the
 built module undo degrades to walking the strokes again.
 
+**Open a transaction at the caret.** `QTextCursor::beginEditBlock()` records
+its cursor's position with the transaction, and undo puts the caret back
+there (a `CursorMoved` record; `appendUndoItem` and `undoRedo` in
+qtextdocument_p.cpp, 6.11.2). The bracket used to open on a throwaway
+`QTextCursor(doc)`, which stands at 0: undoing a rich or plain paste, a
+highlight, inline code, a colour or a list toggle sent the caret, and the
+view, to the note's top. A Markdown-rewriting block tool starts by removing
+from 0, so nothing was recorded and Qt put the caret after the restored text,
+at the note's end. `TextBlocks.beginEditBlock(caret)` now opens at the
+editor's caret, and `joinPreviousEditBlock()` records nothing, so the joined
+transaction keeps its own caret. The native list toggle and text colour open
+their own blocks on a cursor at 0, so the editor runs them inside `atomic()`
+as well; nested inside it, their blocks record nothing.
+
+**Ctrl+Y is not Redo on Linux.** Qt's `StandardKey.Redo` includes Ctrl+Y only
+under its Windows key scheme. The gtk3 and KDE themes, the Flatpak's included,
+map Redo to Ctrl+Shift+Z alone, so Ctrl+Y did nothing even though the shortcut
+layer reserves it. The offscreen suites run the generic theme, which does map
+Ctrl+Y, and that hid the gap. The editor redoes on `Stroke.redoes()` as well
+(services/shortcuts/stroke.js): both reserved redo keys, on every desktop.
+
 Qt stores the first paragraph's character format outside its ordinary undo
 records: replacing the document with code and undoing can leave that paragraph
 monospace, including an empty note. The native edit brackets capture that

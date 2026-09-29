@@ -8,6 +8,7 @@ import "QuoteBars.js" as QuoteBars
 import "EditContext.js" as EditContext
 import "Dialect.js" as Dialect
 import "MarkdownBlocks.js" as MarkdownBlocks
+import "../services/shortcuts/stroke.js" as Stroke
 
 // The note pane: the formatting tools pinned across its top the way an IDE
 // pins a toolbar, then an editable title and the note on one sheet — plus
@@ -768,14 +769,24 @@ Item {
     return nativeBlocks.item.setTextColor(from, to, color)
   }
 
+  // The transaction opens at the caret: undo puts the caret back where
+  // the edit began, not at the top of the note (cpp/textblocks.h).
   function atomic(edit, joinPrevious) {
     var nb = nativeBlocks.item
     if (!nb) {
       edit()
       return
     }
-    nb.beginEditBlock(!!joinPrevious)
-    try { edit() } finally { nb.endEditBlock() }
+    if (joinPrevious) {
+      nb.joinPreviousEditBlock()
+    } else {
+      nb.beginEditBlock(area.cursorPosition)
+    }
+    try {
+      edit()
+    } finally {
+      nb.endEditBlock()
+    }
   }
 
   // Whether the native helper took the request. A host without it has the
@@ -785,7 +796,12 @@ Item {
       return false
     }
     var backwards = area.cursorPosition === area.selectionStart
-    var selection = nativeBlocks.item.toggleList(area.selectionStart, area.selectionEnd, style)
+    var selection = {}
+    // The toggle is one undo step on its own; the bracket gives that step
+    // the caret to come back to.
+    atomic(function() {
+      selection = nativeBlocks.item.toggleList(area.selectionStart, area.selectionEnd, style)
+    })
     if (selection.from !== undefined) {
       area.select(backwards ? selection.to : selection.from, backwards ? selection.from : selection.to)
       updateInList()
@@ -1943,7 +1959,7 @@ Item {
               event.accepted = true
               return
             }
-            if (event.matches(StandardKey.Redo)) {
+            if (event.matches(StandardKey.Redo) || Stroke.redoes(event)) {
               root.redo()
               event.accepted = true
               return

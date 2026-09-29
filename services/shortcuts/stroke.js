@@ -18,6 +18,10 @@ var names = {
 // transaction handler, and the clipboard keys are the text control's own.
 var reservedLabels = ["ctrl+a", "ctrl+c", "ctrl+x", "ctrl+v", "ctrl+shift+v", "ctrl+z", "ctrl+shift+z", "ctrl+y",
   "ctrl+insert", "shift+insert", "shift+delete"]
+// Both redo keys are reserved above, but Qt's StandardKey.Redo holds Ctrl+Y
+// only under its Windows key scheme: on a Linux desktop (the gtk3 or KDE
+// theme) Ctrl+Y did nothing at all. The editor redoes on either.
+var redoLabels = ["ctrl+shift+z", "ctrl+y"]
 
 // Qt reports Shift+Tab as Backtab, with the Shift flag or without it.
 function normalized(key, flags) {
@@ -105,6 +109,11 @@ function configurable(stroke) {
 
 function reserved(stroke) {
   return reservedLabels.indexOf(stroke.label) >= 0
+}
+
+function redoes(event) {
+  var stroke = fromQt(event.key, event.modifiers)
+  return !!stroke && redoLabels.indexOf(stroke.label) >= 0
 }
 
 function signature(event) {

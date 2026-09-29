@@ -48,7 +48,12 @@ QtObject {
       return true
     }
     clearPending()
-    var changed = host.setTextColor(range.from, range.to, color)
+    var changed = false
+    // The colour is one undo step on its own; the bracket gives that step
+    // the caret to come back to.
+    host.atomic(function() {
+      changed = host.setTextColor(range.from, range.to, color)
+    })
     if (changed) {
       host.edited()
     }

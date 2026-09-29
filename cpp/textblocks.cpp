@@ -325,21 +325,34 @@ void TextBlocks::setDocument(QQuickTextDocument *document)
     emit documentChanged();
 }
 
-void TextBlocks::beginEditBlock(bool joinPrevious)
+void TextBlocks::enterEditBlock(QTextDocument *doc)
+{
+    if (m_editDepth == 0) {
+        m_firstBlockCharFormat = doc->begin().charFormat();
+    }
+    ++m_editDepth;
+}
+
+void TextBlocks::beginEditBlock(int caret)
+{
+    QTextDocument *doc = m_document ? m_document->textDocument() : nullptr;
+    if (!doc || caret < 0 || caret >= doc->characterCount()) {
+        return;
+    }
+    QTextCursor cursor(doc);
+    cursor.setPosition(caret);
+    enterEditBlock(doc);
+    cursor.beginEditBlock();
+}
+
+void TextBlocks::joinPreviousEditBlock()
 {
     QTextDocument *doc = m_document ? m_document->textDocument() : nullptr;
     if (!doc) {
         return;
     }
-    if (m_editDepth == 0) {
-        m_firstBlockCharFormat = doc->begin().charFormat();
-    }
-    if (joinPrevious) {
-        QTextCursor(doc).joinPreviousEditBlock();
-    } else {
-        QTextCursor(doc).beginEditBlock();
-    }
-    ++m_editDepth;
+    enterEditBlock(doc);
+    QTextCursor(doc).joinPreviousEditBlock();
 }
 
 void TextBlocks::endEditBlock()

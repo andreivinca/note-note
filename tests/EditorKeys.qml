@@ -496,6 +496,51 @@ Window {
     require(read() === data.expected + "\nx\n", "the second Enter did not leave the pasted block whole: " + JSON.stringify(read()))
   }
 
+  // Type, paste, then undo both with the keyboard: each undo puts the
+  // caret back where its edit began — the paste's transaction used to
+  // record position 0, so the caret and the view jumped to the note's top —
+  // and redo replays both. Rich, several-paragraph and plain pastes alike.
+  function pasteHistory() {
+    var body = keys.findChild(editor, "noteBody")
+    var clips = [
+      { html: "<b>bold</b>", text: "bold" },
+      { html: "<p>one</p><p>two</p>", text: "one\ntwo" },
+      { plain: true, text: "plain" }
+    ]
+    for (var data of clips) {
+      editor.readOnly = true
+      load({ source: "First line\n\nSecond line\n\nThird line\n" })
+      editor.readOnly = false
+      var original = editor.documentHtml()
+      var start = editor.plainText().indexOf("Second line") + 11
+      editor.setCursorPosition(start)
+      keys.keyClick(Qt.Key_X)
+      keys.keyClick(Qt.Key_Y)
+      var typed = editor.documentHtml(), typedCaret = editor.cursorPosition()
+      clip.html = data.html || ""
+      clip.text = data.text
+      if (data.plain) {
+        editor.pastePlain()
+      } else {
+        editor.paste()
+      }
+      keys.tryVerify(function() { return editor.documentHtml() !== typed }, 3000)
+      var pasted = editor.documentHtml()
+      keys.keyClick(Qt.Key_Z, Qt.ControlModifier)
+      require(editor.documentHtml() === typed, "one undo did not take the paste back")
+      require(editor.cursorPosition() === typedCaret,
+              "undoing the paste moved the caret from " + typedCaret + " to " + editor.cursorPosition())
+      keys.keyClick(Qt.Key_Z, Qt.ControlModifier)
+      require(editor.documentHtml() === original, "the second undo did not take the typing back")
+      require(editor.cursorPosition() === start, "undoing the typing moved the caret to " + editor.cursorPosition())
+      keys.keyClick(Qt.Key_Z, Qt.ControlModifier | Qt.ShiftModifier)
+      require(editor.documentHtml() === typed && editor.cursorPosition() === typedCaret, "redo did not replay the typing")
+      keys.keyClick(Qt.Key_Z, Qt.ControlModifier | Qt.ShiftModifier)
+      require(editor.documentHtml() === pasted, "redo did not replay the paste")
+      require(!body.canRedo, "redo left part of the paste behind")
+    }
+  }
+
   // Deleting a code line's characters and typing again keeps it code: the
   // paragraph's own character format is monospace (qthtml/writer.code).
   function retypeCodeLine() {
@@ -985,6 +1030,38 @@ Window {
       load({ source: data.expected })
       require(editor.plainText().indexOf(data.plainText) >= 0, "reloading added characters to empty cells")
     }
+  }
+
+  // Undo puts the caret back where the tool ran. A tool's transaction used
+  // to open at position 0, so its undo sent the caret, and the view, to the
+  // note's top. The word sits below the top, selected forward so the caret
+  // stands at its end, where Qt's own format undo leaves it too.
+  function toolUndoCaret() {
+    var ids = ["bold", "italic", "underline", "strikeout", "highlight", "code", "textColor",
+               "h1", "h2", "h3", "ul", "ol", "todo", "indent", "quote", "codeblock", "rule", "table"]
+    var jumps = []
+    for (var id of ids) {
+      load({ source: "Above\n\nword\n\nBelow\n" })
+      editor.setCursorPosition(editor.plainText().indexOf("word"))
+      for (var i = 0; i < 4; i++) {
+        keys.keyClick(Qt.Key_Right, Qt.ShiftModifier)
+      }
+      editor.updateInTable()
+      editor.updateInList()
+      var before = editor.documentHtml(), caret = editor.cursorPosition()
+      if (id === "textColor") {
+        require(editor.tools.find(id).editor.setTextColor("#3dadff"), "the colour did not apply")
+      } else {
+        require(editor.tool(id), id + " was not executable")
+      }
+      keys.tryVerify(function() { return editor.documentHtml() !== before }, 3000)
+      editor.undo()
+      require(editor.documentHtml() === before, id + ": one undo did not restore the note")
+      if (editor.cursorPosition() !== caret) {
+        jumps.push(id + ":" + caret + "->" + editor.cursorPosition())
+      }
+    }
+    require(jumps.length === 0, jumps.join(" "))
   }
 
   function savedMarkdown() {
@@ -2466,6 +2543,7 @@ Window {
       }
     }
     var behavior = [
+      { name: "undoing a tool puts the caret back where the tool ran", run: toolUndoCaret },
       { name: "Quote starts on empty paragraphs, saves, reloads, toggles and undoes", run: quoteToolEmptyParagraphs },
       { name: "Quote preserves paragraph boundaries in both toggle directions", run: quoteToolParagraphs },
       { name: "Quote transforms the current paragraph, including text typed below tables", run: function() { blockToolTargeting("quote") } },
@@ -2660,6 +2738,12 @@ Window {
       } catch (error) {
         test.checked(pastes[p].name, false, error.message)
       }
+    }
+    try {
+      pasteHistory()
+      test.checked("undoing a paste puts the caret back where it began, and redo replays it", true, "")
+    } catch (error) {
+      test.checked("undoing a paste puts the caret back where it began, and redo replays it", false, error.message)
     }
     try {
       retypeCodeLine()

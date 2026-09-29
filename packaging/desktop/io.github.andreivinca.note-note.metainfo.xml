@@ -34,6 +34,13 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.0.24" date="2026-09-29">
+      <description>
+        <p>Undo puts the cursor back where the edit began: undoing a paste, a
+        highlight, a color, a list or a block tool no longer jumps to the top
+        or the end of the note. Ctrl+Y now redoes on Linux desktops too.</p>
+      </description>
+    </release>
     <release version="1.0.23" date="2026-09-29">
       <description>
         <p>Fix undo moving the cursor back toward a table after editing text

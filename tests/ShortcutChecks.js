@@ -76,6 +76,11 @@ function run(verify) {
   changed = compile([], [], tools)
   verify(match(changed, "Ctrl+N", "editor") === "app/newNote" && !label(changed, "tool/bold"), "tools cannot displace app defaults")
   verify(!!Resolve.validateOverrides([{ command: "app/newNote", keys: ["Ctrl+V"] }]), "native paste is reserved")
+  // Whatever Qt's key scheme on the desktop: Ctrl+Y is not Redo under gtk3 or KDE.
+  verify(Stroke.redoes({ key: Qt.Key_Y, modifiers: Qt.ControlModifier }), "Ctrl+Y redoes on every desktop")
+  verify(Stroke.redoes({ key: Qt.Key_Z, modifiers: Qt.ControlModifier | Qt.ShiftModifier }), "Ctrl+Shift+Z redoes")
+  verify(!Stroke.redoes({ key: Qt.Key_Z, modifiers: Qt.ControlModifier }), "Ctrl+Z does not redo")
+  verify(!Stroke.redoes({ key: Qt.Key_Y, modifiers: Qt.ControlModifier | Qt.ShiftModifier }), "Ctrl+Shift+Y does not redo")
   var invalidKeys = ["a", "Shift+A", "Ctrl+Ctrl+A", "Ctrl+", "constructor+N", "Ctrl+constructor", "Ctrl+F36"]
   invalidKeys.forEach(function(key) {
     verify(!!Resolve.validateOverrides([{ command: "app/newNote", keys: [key] }]), "reject invalid shortcut " + key)

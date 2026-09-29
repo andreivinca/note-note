@@ -189,6 +189,12 @@ Table history checks follow the note session's read-only loading sequence,
 then type, Backspace and Delete below filled, empty, adjacent and nested tables.
 They verify the exact text and caret through repeated keyboard and API
 Undo/Redo, with no load-time edit signals or extra history entries.
+Paste history checks type below the top of a note, then paste rich,
+several-paragraph and plain text. Each keyboard Undo must put the caret back
+where its edit began, and Redo replays both edits. Every tool is also applied
+to a word below the top and undone, and the caret must come back to the word
+rather than the note's top or end. Ctrl+Y and Ctrl+Shift+Z are checked as redo
+keys independently of Qt's desktop key scheme (tests/ShortcutChecks.js).
 Right-arrow checks cover empty and multiline code blocks and rules, including
 repeated Right, typing into the empty landing paragraph, and undo/redo.
 Delete checks cover empty headings and blank fillers before ordered, bullet
