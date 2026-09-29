@@ -238,7 +238,7 @@ Item {
 | `canReorder` | bool | rows can be dragged within a section; `setOrder()` persists it |
 | `canCreateSection` | bool | `createSection()` works; the provider offers the action in `footerActions` |
 | `canImages` | bool | pasted pictures can be stored (default false). The editor writes `![](file:///…)` into the body and `save()` must carry it to the backend, keeping any `{width=N}` marker |
-| `tools` | list | formatting tools the backend can store: any of `bold italic underline strikeout highlight textColor code h1 h2 h3 p ul ol todo indent outdent quote codeblock rule link currentMonth nextMonth customMonth table`. Omitted = all (when `markdown`); `[]` = no toolbar. Never offer a construct the backend would flatten |
+| `tools` | list | formatting capabilities the backend can store: any of `bold italic underline strikeout highlight textColor code h1 h2 h3 p ul ol todo indent outdent quote codeblock rule link table` (`table` also covers the calendar tools), or another capability a package's tool names. Omitted = all (when `markdown`); `[]` = no toolbar. Never offer a construct the backend would flatten |
 | `microsoftScopes`, `microsoftClientId` | list, string | only for a Microsoft Graph backend (see below); otherwise `[]` and `""` |
 | `sections` | list | the tabs, below |
 | `footerActions` | list | optional buttons shown before any tab exists (such as creating the first notebook) |

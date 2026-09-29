@@ -1,6 +1,6 @@
 import QtQuick
-import "../editing"
-import "../editing/Calendar.js" as Calendar
+import "../../ui/editing"
+import "Calendar.js" as Calendar
 
 Tool {
   toolId: "nextMonth"

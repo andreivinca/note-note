@@ -47,7 +47,28 @@ class Catalog(unittest.TestCase):
                                    "open-settings": "openSettings", "toggle-sidebar": "toggleList", "delete-note": "deleteNote"})
         self.assertFalse([item for item in result["commands"] if item["workspaceAction"] and "url" in item],
                          "a workspace action is the host's to run; it ships no handler")
+        self.assertEqual([(item["packageId"], item["id"]) for item in result["tools"]],
+                         [("org.note-note.calendar", tool) for tool in
+                          ("insertMonth", "currentMonth", "nextMonth", "customMonth")])
+        self.assertTrue(all(item["builtin"] and item["url"].endswith(".qml") for item in result["tools"]))
+        self.assertFalse(list((ROOT / "ui/tools").glob("*Month.qml")), "the calendar is its package's to supply")
         self.assertFalse((ROOT / "providers").exists())
+
+    def test_tools_are_named_by_their_action_id(self):
+        path = self.package("greeting")
+        value = json.loads((path / "plugin.json").read_text())
+        accepted = manifest.validate(value, path)["tools"][0]
+        self.assertEqual((accepted["id"], accepted["localId"]), ("insertHello", "insertHello"),
+                         "toolbar settings, shortcuts and editorTool name a tool unqualified")
+        self.assertTrue(accepted["url"].endswith("/InsertHello.qml"))
+        tool = value["contributes"]["tools"][0]
+        for changes in ({"id": "insert-hello"}, {"id": "InsertHello"}, {"id": "a" * 65}, {"id": None},
+                        {"path": None}, {"path": "../InsertHello.qml"}):
+            value["contributes"]["tools"] = [dict(tool, **changes)]
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                manifest.validate(value, path)
+        value["contributes"] = {"tools": [tool]}
+        self.assertTrue(manifest.validate(value, path)["executable"], "a tool is code the user must enable")
 
     def test_workspace_action_reference_validation(self):
         path = self.package("greeting")
@@ -99,9 +120,11 @@ class Catalog(unittest.TestCase):
         result = manifest.discover(self.request)
         self.assertEqual(len(result["themes"]), 1)
         self.assertEqual(result["commands"], [])
+        self.assertEqual(result["tools"], [])
         self.request["settings"] = {"plugins": {"org.example.greeting": {"enabled": True}}}
         result = manifest.discover(self.request)
         self.assertEqual(len(result["commands"]), 1)
+        self.assertEqual([item["id"] for item in result["tools"]], ["insertHello"])
         descriptor = result["commands"][0]
         self.assertIn("Hello!", packagefiles.read_resource(descriptor["root"], "greetings.json"))
 

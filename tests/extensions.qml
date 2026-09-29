@@ -100,6 +100,27 @@ Window {
       }
     }
 
+    // Tools packages contribute: the calendar's, shipped with the
+    // application, and the example's, written against NoteNote.Extensions.
+    function checkPackageTools(editor) {
+      compare(editor.tools.errors.join("; "), "")
+      compare(editor.tools.menuTools("insertMonth").map(function(tool) { return tool.toolId }).join(),
+              "currentMonth,nextMonth,customMonth", "the default layout places the calendar package's tools")
+      var hello = editor.tools.find("insertHello")
+      verify(hello !== null, "the example package's tool is loaded")
+      compare(hello.shortcutLabel, "ctrl+alt+h")
+      verify(findChild(workspace, "editingTool-insertHello").visible, "a tool no layout names has a toolbar button")
+      var before = editor.plainText()
+      editor.focusEditor()
+      editor.setCursorPosition(0)
+      keyClick(Qt.Key_H, Qt.ControlModifier | Qt.AltModifier)
+      compare(editor.plainText(), "Hello" + before)
+      editor.undo()
+      compare(editor.plainText(), before, "a package's tool edits in one undo step")
+      workspace.flushSave()
+      tryVerify(function() { return !workspace.dirty && !workspace.saveInFlight(workspace.currentPath) }, 10000)
+    }
+
     function checkShortcutRebinding(editor) {
       var provider = workspace.providerById("local"), collapsed = workspace.listCollapsed
       var noteCount = provider.notes.length, originalPath = workspace.currentPath
@@ -322,6 +343,7 @@ Window {
       compare(Object.keys(workspace.themes.colors).length, Object.keys(Tokens.specification).length)
       tryVerify(function() { return workspace.providersLoaded && workspace.themes.settled && !workspace.settings.busy }, 10000)
       compare(workspace.catalog.commands.length, 7)
+      compare(workspace.catalog.tools.length, 5)
       compare(workspace.catalog.problemSummary, "")
       var spec = Tokens.specification, resolvedSoFar = {}
       Object.keys(spec).forEach(function(key) {
@@ -352,6 +374,7 @@ Window {
       tryVerify(function() { return !!workspace.currentPath && !workspace.loadingNote }, 10000)
       var editor = findChild(workspace, "noteEditor")
       verify(editor.canColorText)
+      checkPackageTools(editor)
       checkShortcutRebinding(editor)
       var area = editor.tools.editor.textArea
       verify(!workspace.dirty, "clean before selection")

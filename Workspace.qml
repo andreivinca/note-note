@@ -2637,6 +2637,7 @@ Item {
               return (p && p.tools !== undefined) ? p.tools : null
             }
             toolbarLayout: root.config.editor.toolbar
+            toolContributions: pluginCatalog.ready ? pluginCatalog.tools : null
             modifiedText: {
               for (var i = 0; i < root.rows.length; i++) {
                 var row = root.rows[i]

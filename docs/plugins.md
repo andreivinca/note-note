@@ -17,7 +17,8 @@ from the repository root's Omarchy `manifest.json`.
     "commands": [{"id": "hello", "title": "Hello", "handler": "Hello.qml"}],
     "keybindings": [{"command": "hello", "key": "Ctrl+Alt+H", "context": "notes"}],
     "themes": [{"id": "blue", "path": "blue.json"}],
-    "providers": [{"id": "example", "path": "Provider.qml", "order": 500}]
+    "providers": [{"id": "example", "path": "Provider.qml", "order": 500}],
+    "tools": [{"id": "insertStamp", "path": "InsertStamp.qml"}]
   }
 }
 ```
@@ -26,7 +27,8 @@ A command names a `handler` or a `workspaceAction`, one of the two
 ([commands](commands.md)). A theme's name is the one its file states. A
 provider's optional `order` (0 to 9999, 1000 when left out) says where its tabs
 stand among the others while the settings name no order of their own; lower
-comes first.
+comes first. A tool is an editing-toolbar action with its menu entries,
+shortcut and panel ([editing tools](editing-tools.md#tools-in-a-package)).
 
 Use only the kinds the package actually supplies. API and manifest versions are
 integers; package versions are `major.minor.patch` without leading zeroes. Package
@@ -34,6 +36,10 @@ IDs are dot-separated lowercase identifiers; local IDs use lowercase letters,
 digits, and hyphens and start with a letter. `org.note-note.*` and `user.themes`
 are reserved. A provider's manifest ID must match its QML `id`; it remains the
 prefix of note and notebook identities rather than becoming a qualified ID.
+A tool's manifest ID is its action ID, a lowercase letter followed by up to 63
+letters and digits (`insertStamp`), and must match its QML `toolId`. It is not
+qualified either: toolbar settings, `tool/<id>` shortcut overrides and
+`editorTool <id>` name tools the same wherever they come from.
 
 ## Writing a package with an AI assistant
 
@@ -43,12 +49,13 @@ shows. It summarizes this document, [themes](themes.md), [commands](commands.md)
 and [providers](providers.md), and its `scripts/check.py` runs `manifest.py`
 over the user's folders. When one of those contracts changes, change the
 skill's reference for it in the same commit: authors' assistants read the
-skill, not these documents.
+skill, not these documents. Editing tools are summarized there from
+[editing tools](editing-tools.md).
 
 ## Enabling trusted code
 
-Data-only theme packages load by default. New packages containing commands or
-providers start disabled. After reviewing their code, enable one in Settings:
+Data-only theme packages load by default. New packages containing commands,
+providers or tools start disabled. After reviewing their code, enable one in Settings:
 
 ```json
 "plugins": {
@@ -74,7 +81,10 @@ publishes descriptors. It never executes a command to obtain its title. Invalid
 packages produce diagnostics without disabling unrelated packages. Duplicate
 external package IDs reject every claimant. Built-in provider IDs are reserved;
 ambiguous external provider IDs also reject every claimant, each named in its
-own diagnostic.
+own diagnostic. Tool IDs are settled when the editor loads its tools, among the
+application's own and every package's: a tool the application ships, in
+`ui/tools/` or a built-in package, keeps its ID against a user package, and any
+other shared ID rejects every claimant. Its reasons are in the log.
 
 What the application ships is read first, so nothing installed beside it can
 use up its share of a limit: a package that would cross one is left out, with
@@ -94,8 +104,9 @@ directory descriptors with no-follow flags and byte/deadline limits. Limits are
 8 MiB catalog input, and 32 JSON levels. Process transport also bounds output and
 time. QML's own loader is trusted executable code, outside these data-read rules.
 
-The stable `NoteNote.Extensions 1.0` import is registered in each host. External
-commands need no repository-relative imports. Providers retain the injected
+The stable `NoteNote.Extensions 1.0` import is registered in each host. It
+provides `Command` for command handlers and `Tool` for editing tools, so
+external packages need no repository-relative imports. Providers retain the injected
 `host` and `services` contract documented in [providers](providers.md).
 Mutable plugin data belongs under `services.platform.stateDir/plugins/<id>` or
 `cacheDir/plugins/<id>`; notes and recovery drafts must never live in the package
@@ -104,7 +115,8 @@ or a disposable cache. Existing provider state/cache/account paths are unchanged
 ## Migration and removal
 
 The four built-in providers now each have a package, including private scripts,
-logos and tests. There is no top-level provider implementation directory or
+logos and tests. The calendar tools under **Insert → Insert month** are the
+`org.note-note.calendar` package's. There is no top-level provider implementation directory or
 second built-in discovery list. Existing provider IDs and stored data are unchanged.
 
 The legacy external provider locations remain a compatibility adapter for the
@@ -116,7 +128,7 @@ activation defaults during this window. Built-in ID shadowing is now rejected.
 
 To remove a user package, first quit every host using it, then remove its whole
 folder and restart. Hiding the Omarchy overlay does not unload its code. A removed
-package leaves no registered themes/commands/providers/keybindings on restart; a missing
+package leaves no registered themes/commands/providers/tools/keybindings on restart; a missing
 selected theme falls back to System without changing saved settings. Removal
 preserves notes, recovery data, credentials, and config. There is no hot-unload
 or removal manager: do not delete resources beneath accepted provider writes.

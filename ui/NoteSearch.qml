@@ -29,13 +29,13 @@ Item {
     id: searchField
     anchors.fill: parent
     placeholderText: "Search"
+    iconText: "󰍉"
     accent: root.accent
     font.family: root.fontFamily
     onTextEdited: root.filterEdited(text)
     rightPadding: root.filterText.length > 0
       ? clearSearchButton.width + Style.spacing.xs
       : searchKeycap.width + (searchField.height - searchKeycap.height) / 2 + Style.spacing.xs
-    leftPadding: searchGlyph.width + Style.spacing.md + Style.spacing.xs
 
     Rectangle {
       id: searchKeycap
@@ -61,22 +61,6 @@ Item {
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
       }
-    }
-
-    // The magnifier says what the field is for, and stays while you
-    // type — dimmed the standard way, a fade toward any background.
-    Text {
-      id: searchGlyph
-      textFormat: Text.PlainText
-      anchors.left: parent.left
-      // In step with the taller field: the magnifier keeps its
-      // distance from the rounded edge (leftPadding above follows).
-      anchors.leftMargin: Style.spacing.md
-      anchors.verticalCenter: parent.verticalCenter
-      text: "󰍉"
-      color: Util.alpha(root.foreground, 0.55)
-      font.family: Style.fontFamily
-      font.pixelSize: Style.font.iconSmall
     }
 
     Button {

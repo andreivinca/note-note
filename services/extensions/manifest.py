@@ -27,7 +27,7 @@ ACTION_ID = re.compile(r"[a-z][a-zA-Z0-9]{0,63}\Z")
 VERSION = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
 PROTECTED = "org.note-note.appearance"
 LOOSE_THEMES = "user.themes"
-KINDS = ("commands", "themes", "providers", "keybindings")
+KINDS = ("commands", "themes", "providers", "tools", "keybindings")
 # Where a provider's tabs stand among the others when the settings name no
 # order of their own; lower comes first.
 DEFAULT_ORDER = 1000
@@ -87,7 +87,18 @@ def provider(package, item, local_id):
     return descriptor
 
 
-BUILDERS = {"commands": command, "themes": theme, "providers": provider}
+def tool(package, item, local_id):
+    descriptor = owned(package, local_id, label(item.get("path"), "tool path", 512))
+    # A tool keeps the action ID that toolbar settings, shortcuts and
+    # `editorTool` call it by; its QML toolId must be the same.
+    descriptor["id"] = local_id
+    return descriptor
+
+
+BUILDERS = {"commands": command, "themes": theme, "providers": provider, "tools": tool}
+# How each kind's IDs are spelled: a tool's is an action ID, like `bold` or
+# `currentMonth`; everything else's a local ID.
+IDENTIFIERS = {"tools": ACTION_ID}
 
 
 def listed(contributions, kind):
@@ -103,7 +114,7 @@ def contributed(package, contributions, kind):
     seen = set()
     result = []
     for item in listed(contributions, kind):
-        local_id = identifier(item.get("id"), LOCAL_ID, "contribution ID")
+        local_id = identifier(item.get("id"), IDENTIFIERS.get(kind, LOCAL_ID), "contribution ID")
         if local_id in seen:
             raise ValueError("duplicate " + kind + " ID: " + local_id)
         seen.add(local_id)
@@ -137,7 +148,7 @@ def validate(value, root, builtin=False):
         package[kind] = contributed(package, contributions, kind)
     commands = {item["localId"] for item in package["commands"]}
     package["keybindings"] = [keybinding(package, item, commands) for item in listed(contributions, "keybindings")]
-    package["executable"] = bool(package["commands"] or package["providers"])
+    package["executable"] = bool(package["commands"] or package["providers"] or package["tools"])
     return package
 
 

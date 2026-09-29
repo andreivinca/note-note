@@ -1671,6 +1671,7 @@ Item {
 
   readonly property alias tools: toolRegistry
   property alias toolDirectory: toolRegistry.directory
+  property alias toolContributions: toolRegistry.contributions
   property alias toolbarLayout: toolRegistry.layout
   readonly property real toolbarHeight: toolStrip.height
   readonly property real toolbarRowHeight: toolStrip.rowHeight

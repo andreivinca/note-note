@@ -84,9 +84,10 @@ That is the whole API. There is no access to the open note, the editor,
 providers, the clipboard or the network through it. QML itself can reach
 further (`XMLHttpRequest`, `Qt.openUrlExternally`), but that is code the user
 has to review and trust: keep a command to the context unless the user asks
-for more, and bound anything it reads. When the user wants something the API
-cannot do — such as inserting text into the note — say so rather than
-reaching into the application's internals.
+for more, and bound anything it reads. Inserting or formatting text in the
+note is a tool's job, not a command's: see [tools.md](tools.md). When the user
+wants something neither can do, say so rather than reaching into the
+application's internals.
 
 ### The picker
 

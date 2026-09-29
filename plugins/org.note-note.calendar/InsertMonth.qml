@@ -1,5 +1,5 @@
 import QtQuick
-import "../editing"
+import "../../ui/editing"
 
 Tool {
   toolId: "insertMonth"

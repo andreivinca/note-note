@@ -4,7 +4,8 @@ import "../services/platform"
 import "../design"
 import "../ui" as Ui
 import "../ui/editing/ToolbarSettings.js" as ToolbarSettings
-import "../ui/editing/Calendar.js" as Calendar
+import "../plugins/org.note-note.calendar/Calendar.js" as Calendar
+import "../services/extensions" as Extensions
 import "../services/markdown" as Markdown
 import "../services/notes" as Notes
 import "../services/shortcuts" as Shortcuts
@@ -40,6 +41,9 @@ Window {
     id: editorBindings
     tools: editor.tools.actions
   }
+  // The built-in packages, found as the workspace finds them: the calendar
+  // tools are the calendar package's.
+  Extensions.PluginCatalog { id: plugins }
   Ui.NoteEditor {
     id: editor
     keybindings: editorBindings
@@ -50,6 +54,7 @@ Window {
     clipboard: clip
     noteFontFamily: noteFont.name
     toolDirectory: Platform.env("NOTE_NOTE_TEST_TOOLS") || Qt.resolvedUrl("../ui/tools")
+    toolContributions: plugins.ready ? plugins.tools : null
     onLinkOpenRequested: function(url) { test.openedLinks.push(url) }
     onStatusRequested: function(text) { test.statusMessages.push(text) }
     onEdited: test.editSignals++
@@ -1261,20 +1266,40 @@ Window {
 
   function toolRegistryValidation() {
     var original = editor.toolDirectory
+    var contributed = editor.toolContributions
+    var packaged = Platform.env("NOTE_NOTE_TEST_PLUGIN_TOOLS")
+    function contribution(id, file, builtin) {
+      return { id: id, url: packaged + "/" + file + ".qml", builtin: builtin }
+    }
     try {
       editor.toolDirectory = Platform.env("NOTE_NOTE_TEST_INVALID_TOOLS")
+      editor.toolContributions = [
+        contribution("external", "External", false),
+        contribution("okay", "Claim", false),
+        contribution("other", "Renamed", false),
+        contribution("packaged", "Packaged", true),
+        contribution("packaged", "PackagedAgain", false)
+      ]
       keys.tryVerify(function() { return editor.tools.find("okay") !== null }, 3000)
-      require(editor.tools.ready && editor.tools.tools.length === 3,
+      require(editor.tools.ready && editor.tools.tools.length === 5,
               "invalid definitions prevented a valid tool from loading")
-      require(editor.tools.errors.length === 4, "invalid tool diagnostics were incomplete: " + editor.tools.errors)
+      require(editor.tools.errors.length === 7, "invalid tool diagnostics were incomplete: " + editor.tools.errors)
       require(editor.tools.find("duplicate") === null, "a duplicate id won by discovery order")
+      require(editor.tools.find("external") !== null, "a package's tool did not load")
+      require(editor.tools.find("okay").label === "Okay", "a package took the application's tool id")
+      require(editor.tools.find("packaged").label === "Packaged", "a package took a built-in package's tool id")
+      require(editor.tools.find("other") === null && editor.tools.find("renamed") === null,
+              "a tool loaded under an id its manifest does not give it")
       require(editor.tools.find("reserved").shortcutLabel === "", "a tool took an app shortcut")
       require(editor.tools.find("undo").shortcutLabel === "", "a tool took the editor's undo shortcut")
       require(editor.keybindings.diagnostics.length === 2, "shortcut conflicts were not reported")
       require(editor.tools.find("menuShortcut") === null, "a dropdown took an executable shortcut")
     } finally {
       editor.toolDirectory = original
-      keys.tryVerify(function() { return editor.tools.find("greeting") !== null }, 3000)
+      editor.toolContributions = contributed
+      keys.tryVerify(function() {
+        return editor.tools.find("greeting") !== null && editor.tools.find("currentMonth") !== null
+      }, 3000)
     }
     require(editor.tools.errors.length === 0, "reloading a valid directory retained old diagnostics")
   }
@@ -1721,21 +1746,24 @@ Window {
     var year = keys.findChild(toolPopup("customMonth").contentItem, "customMonthYear")
     var month = keys.findChild(toolPopup("customMonth").contentItem, "customMonthMonth")
     var insert = keys.findChild(toolPopup("customMonth").contentItem, "insertCustomMonth")
+    var notice = keys.findChild(toolPopup("customMonth").contentItem, "toolFormNotice")
+    var hint = notice.text
     keys.tryVerify(function() { return year.activeFocus }, 3000)
     keys.keyClick(Qt.Key_Backspace)
     require(!tool.valid && !insert.enabled && !tool.submit() && tool.panelOpen,
             "an empty year was inserted or closed the picker")
+    require(notice.text === "Enter a year from 1 to 9999.", "the footer did not say why the year is refused")
     typeText("0")
     require(!tool.valid && !insert.enabled, "year zero was accepted")
     year.selectAll()
     typeText("2024")
+    require(notice.text === hint, "the footer kept the error for a valid year")
     keys.keyClick(Qt.Key_Escape)
     require(!tool.panelOpen && savedMarkdown() === source, "Escape did not cancel without editing")
     editor.tool("customMonth")
-    var cancel = keys.findChild(toolPopup("customMonth").contentItem, "cancelCustomMonth")
-    keys.waitForRendering(cancel)
-    keys.mouseClick(cancel, cancel.width / 2, cancel.height / 2)
-    require(!tool.panelOpen && savedMarkdown() === source, "Cancel changed the document")
+    keys.tryVerify(function() { return year.activeFocus }, 3000)
+    keys.mouseClick(editor, editor.width / 2, editor.height - 30)
+    require(!tool.panelOpen && savedMarkdown() === source, "an outside click did not cancel without editing")
     editor.tool("customMonth")
     keys.tryVerify(function() { return year.activeFocus }, 3000)
     editor.setCursorPosition(3)
@@ -2605,7 +2633,8 @@ Window {
   }
 
   function run() {
-    keys.tryVerify(function() { return editor.tools.ready }, 3000)
+    plugins.load({})
+    keys.tryVerify(function() { return editor.tools.ready }, 10000)
     require(editor.tools.ready && editor.tools.errors.length === 0, "editing tools did not load: " + editor.tools.errors.join("; "))
     modularToolCases()
     if (Platform.env("NOTE_NOTE_TEST_TOOLS_ONLY")) {

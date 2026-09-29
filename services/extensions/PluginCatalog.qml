@@ -8,6 +8,7 @@ Item {
   property var keybindings: []
   property var themes: []
   property var providers: []
+  property var tools: []
   property var diagnostics: []
   // What went wrong, as opposed to what is merely switched off.
   readonly property var problems: diagnostics.filter(function(diagnostic) {
@@ -40,6 +41,7 @@ Item {
       catalog.keybindings = result.keybindings || []
       catalog.themes = result.themes || []
       catalog.providers = result.providers || []
+      catalog.tools = result.tools || []
       catalog.diagnostics = result.error ? [{ stage: "discovery", level: "error", message: result.error }]
         : result.diagnostics || []
       catalog.diagnostics.forEach(function(diagnostic) {

@@ -51,7 +51,7 @@ and manual script environment overrides.
 | `canReorder`        | bool   | rows may be dragged within a section; `setOrder()` persists |
 | `canCreateSection`  | bool   | `createSection()` is supported; the provider supplies its creation action in `footerActions` |
 | `canImages`         | bool   | a pasted picture can be stored: the editor writes it into the note as `![](file:///…)` and `save()` must carry it to the backend. False (the default) makes ctrl+v say so rather than swallow the paste. An image may carry a display width the author set with the editor's corner handle, written as `![alt](src){width=N}` — a provider stores it with the image if the backend can, and must at least round-trip the marker |
-| `tools`             | list   | optional: formatting-toolbar tool ids the backend can store — every `toolId` under `ui/tools/` (`bold italic underline strikeout highlight textColor code h1 h2 h3 p ul ol todo indent outdent quote codeblock rule link currentMonth nextMonth customMonth`), plus `table` for the table tools; omitted = all (when `markdown`), `[]` = no toolbar. State it: a construct the backend flattens must not be offered, and a save holding one must fail rather than lose it |
+| `tools`             | list   | optional: formatting-toolbar capabilities the backend can store — the `toolId`s under `ui/tools/` (`bold italic underline strikeout highlight textColor code h1 h2 h3 p ul ol todo indent outdent quote codeblock rule link`), plus `table` for the table and calendar tools, and any other capability a package's tool names; omitted = all (when `markdown`), `[]` = no toolbar. State it: a construct the backend flattens must not be offered, and a save holding one must fail rather than lose it |
 | `microsoftScopes`   | list   | Graph scopes the provider asks for when it creates its own Microsoft account |
 | `microsoftClientId` | string | the provider's own Microsoft app registration — the application (client) id of an Entra public client that allows personal and work accounts — that its Microsoft account signs in through. Every provider brings its own; none is shared |
 | `logo`              | url    | optional: a mark shown at the head of every one of this provider's tabs, and beside the header title while one of them is open |
@@ -63,11 +63,12 @@ and manual script environment overrides.
 selection fills follow Omarchy’s theme. `color` remains accepted as provider
 metadata for existing integrations.
 
-The editor discovers its tools from `ui/tools/`; see the
+The editor discovers its tools from `ui/tools/` and plugin packages; see the
 [editing-tool contract](editing-tools.md) to add one. The `tools`
 capabilities govern toolbar buttons, menu entries, shortcuts and IPC actions.
-Table row/column actions and `currentMonth` share the `table` capability;
-providers that support tables automatically support calendar insertion.
+Table row/column actions and the calendar package's tools share the `table`
+capability; providers that support tables automatically support calendar
+insertion.
 Nested tables use semantic HTML table blocks within the Markdown body, with
 block content in their cells. The common Markdown parser exposes these as
 table tokens whose cells have `attrs.block: true`; their children are block

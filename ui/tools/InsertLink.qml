@@ -48,7 +48,6 @@ Tool {
       id: form
       action: tool
       submitButton.objectName: "insertLink"
-      cancelButton.objectName: "cancelLink"
       onSubmitted: tool.submit()
       Keys.onEscapePressed: tool.cancel()
 
@@ -60,51 +59,33 @@ Tool {
         }
       }
 
-      Column {
+      AppUi.ChromeTextField {
+        id: textField
+        objectName: "linkText"
         width: parent.width
-        spacing: Style.spacing.sm
-        Text {
-          text: "Text"
-          color: Util.alpha(form.foreground, 0.7)
-          font.family: form.fontFamily
-          font.pixelSize: Style.font.bodySmall
-        }
-        AppUi.ChromeTextField {
-          id: textField
-          objectName: "linkText"
-          width: parent.width
-          text: tool.linkText
-          placeholderText: "Link text"
-          Accessible.name: "Link text"
-          accent: tool.editor.accent
-          font.family: form.fontFamily
-          onTextEdited: tool.linkText = text
-          Keys.onReturnPressed: tool.submit()
-          Keys.onEnterPressed: tool.submit()
-        }
+        text: tool.linkText
+        iconText: "󰦨"
+        placeholderText: "Link text"
+        Accessible.name: "Link text"
+        accent: tool.editor.accent
+        font.family: form.fontFamily
+        onTextEdited: tool.linkText = text
+        Keys.onReturnPressed: tool.submit()
+        Keys.onEnterPressed: tool.submit()
       }
-      Column {
+      AppUi.ChromeTextField {
+        id: urlField
+        objectName: "linkUrl"
         width: parent.width
-        spacing: Style.spacing.sm
-        Text {
-          text: "URL"
-          color: Util.alpha(form.foreground, 0.7)
-          font.family: form.fontFamily
-          font.pixelSize: Style.font.bodySmall
-        }
-        AppUi.ChromeTextField {
-          id: urlField
-          objectName: "linkUrl"
-          width: parent.width
-          text: tool.linkUrl
-          placeholderText: "https://…"
-          Accessible.name: "Link URL"
-          accent: tool.editor.accent
-          font.family: form.fontFamily
-          onTextEdited: tool.linkUrl = text
-          Keys.onReturnPressed: tool.submit()
-          Keys.onEnterPressed: tool.submit()
-        }
+        text: tool.linkUrl
+        iconText: "󰖟"
+        placeholderText: "https://…"
+        Accessible.name: "Link URL"
+        accent: tool.editor.accent
+        font.family: form.fontFamily
+        onTextEdited: tool.linkUrl = text
+        Keys.onReturnPressed: tool.submit()
+        Keys.onEnterPressed: tool.submit()
       }
     }
   }

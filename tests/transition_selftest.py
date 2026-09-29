@@ -41,6 +41,20 @@ def main():
         for name, properties in definitions.items():
             (invalid_tools / (name + ".qml")).write_text(
                 'import QtQuick\nimport "../editing"\nTool {\n  ' + properties + '\n}\n')
+        # What packages contribute beside that directory; the test gives
+        # each its manifest ID and whether the application ships it.
+        plugin_tools = tool_ui / "plugin-tools"
+        plugin_tools.mkdir()
+        contributions = {
+            "External": 'toolId: "external"; label: "External"',
+            "Claim": 'toolId: "okay"; label: "Claimed"',
+            "Renamed": 'toolId: "renamed"; label: "Renamed"',
+            "Packaged": 'toolId: "packaged"; label: "Packaged"',
+            "PackagedAgain": 'toolId: "packaged"; label: "Packaged again"',
+        }
+        for name, properties in contributions.items():
+            (plugin_tools / (name + ".qml")).write_text(
+                'import QtQuick\nimport "../editing"\nTool {\n  ' + properties + '\n}\n')
         shell = Path(os.environ.get("OMARCHY_PATH", "/usr/share/omarchy")) / "shell"
         for name in (() if standalone else ("Commons", "Ui", "Services")):
             if (shell / name).is_dir():
@@ -92,6 +106,7 @@ def main():
                    NOTE_NOTE_TEST_ONENOTE_SCRIPT=str(work / "onenote_stub.py"),
                    NOTE_NOTE_TEST_TOOLS=(tool_ui / "tools").as_uri(),
                    NOTE_NOTE_TEST_INVALID_TOOLS=invalid_tools.as_uri(),
+                   NOTE_NOTE_TEST_PLUGIN_TOOLS=plugin_tools.as_uri(),
                    NOTE_NOTE_TEST_TOOLS_ONLY="1" if "--tools" in sys.argv else "",
                    NOTE_NOTE_TEST_STANDALONE="1" if standalone else "",
                    QT_QUICK_BACKEND="software",

@@ -1,2 +1,3 @@
 module NoteNote.Extensions
 Command 1.0 Command.qml
+Tool 1.0 Tool.qml

@@ -34,6 +34,16 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.0.26" date="2026-09-29">
+      <description>
+        <p>Plugins can add editing-toolbar tools that insert or format text in
+        the note; the Insert month tools now come from the built-in calendar
+        plugin. Tool popups such as Insert link and Insert custom month are
+        lighter: a small header, fields without labels above them, and a
+        footer with the key hint beside one Insert button. Escape or a click
+        outside cancels.</p>
+      </description>
+    </release>
     <release version="1.0.25" date="2026-09-29">
       <description>
         <p>The note's scrollbar stays visible whenever the note is longer than

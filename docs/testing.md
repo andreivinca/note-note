@@ -62,7 +62,8 @@ omarchy plugin enable io.github.andreivinca.note-note
 - **Python changed** → nothing; the next call picks it up. That includes the
   editor's converters, which run as a process per conversion.
 - Always lint first: `qmllint -I /usr/share/omarchy/shell Workspace.qml design/*.qml design/controls/*.qml hosts/omarchy/*.qml ui/*.qml ui/statusbar/*.qml
-  ui/editing/*.qml ui/tools/*.qml plugins/*/Provider.qml plugins/org.note-note.onenote/SearchCache.qml services/*/*.qml`, and `python3 -m py_compile` the
+  ui/editing/*.qml ui/tools/*.qml plugins/*/Provider.qml plugins/org.note-note.onenote/SearchCache.qml
+  plugins/org.note-note.calendar/*.qml services/*/*.qml`, and `python3 -m py_compile` the
   scripts. For Python there is also `uvx ruff check .`, configured in
   `pyproject.toml` — it needs nothing installed and it is narrowed to the
   rules that catch defects (a stale import, an unused local) rather than to

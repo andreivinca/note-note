@@ -847,3 +847,19 @@ without rewriting document formats. QTextDocument.contentsChange distinguishes
 content edits from TextEdit display notifications. Custom themes and commands
 require the native helper in Omarchy; the script editor remains System-only.
 See [themes](themes.md), [commands](commands.md), and [plugins](plugins.md).
+
+## 2026-09-29: editing tools in packages
+
+Tools are the catalog's fifth kind. A tool keeps its unqualified action ID:
+toolbar layouts, `tool/<id>` overrides and `editorTool` already name tools that
+way, so the calendar tools moved into `org.note-note.calendar` without a
+settings migration. The editor's tool registry, not discovery, settles which
+tool owns an ID, because only it sees the application's own tools and every
+tool's options. As with providers, what the application ships keeps its IDs
+against a user package, and among equals nobody wins. The registry loads once
+the catalog has answered, and only after its folder model has listed the
+directory it names, since that model keeps the previous listing, still Ready,
+for a moment after its folder changes. External tools import `Tool` from
+`NoteNote.Extensions`; the calendar, like the built-in providers, uses relative
+imports, so it keeps working in Omarchy without the native helper that module
+needs there. See [editing tools](editing-tools.md#tools-in-a-package).

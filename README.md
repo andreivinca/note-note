@@ -38,7 +38,8 @@ colors. Theme changes preserve notes, undo history and authored colors.
 ## Writing plugins
 
 A plugin package can add color themes, command-palette commands with their
-shortcuts, and providers that bring notes from a new backend. To have an AI
+shortcuts, editing-toolbar tools that insert or format text in the note, and
+providers that bring notes from a new backend. To have an AI
 assistant write one, give it the
 [`note-note-plugin` skill](skills/note-note-plugin/SKILL.md): it teaches the
 manifest, each kind's contract and the safety rules, and it checks a package
@@ -50,8 +51,9 @@ mkdir -p ~/.claude/skills
 cp -r omarchy-note-note/skills/note-note-plugin ~/.claude/skills/
 ```
 
-Then ask for what you want: *"Make me a Note Note theme in Nord colors"* or
-*"Write a Note Note provider for my Nextcloud notes"*. Other assistants that
+Then ask for what you want: *"Make me a Note Note theme in Nord colors"*,
+*"Add a Note Note toolbar button that inserts today's date"* or *"Write a Note
+Note provider for my Nextcloud notes"*. Other assistants that
 read `SKILL.md` folders take the same directory. Packages with code start
 disabled until you have read and enabled them; see [plugin packages](docs/plugins.md).
 
@@ -156,7 +158,8 @@ setting on first run.
   Insert. Dropdowns can contain other dropdown objects to create submenus.
   Unlisted tools appear at the end. **Insert → Insert month** contains
   `currentMonth`, `nextMonth` (insert immediately), then `customMonth`
-  (choose a month and year first).
+  (choose a month and year first), from the built-in calendar plugin
+  (`org.note-note.calendar`).
   All three use the OS locale's week start and labels for providers that support
   tables. Layout changes apply on Save;
   see [the layout examples and tool IDs](docs/editing-tools.md#arrange-the-toolbar).

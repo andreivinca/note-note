@@ -86,6 +86,9 @@ def report(catalog):
     for item in catalog["themes"]:
         if not item["builtin"]:
             lines.append("theme       " + item["id"])
+    for item in catalog["tools"]:
+        if not item["builtin"]:
+            lines.append("tool        " + item["id"] + " (" + item["packageId"] + ")")
     for item in catalog["providers"]:
         if not item["builtin"]:
             lines.append("provider    " + item["id"] + " (" + item["packageId"] + ")")

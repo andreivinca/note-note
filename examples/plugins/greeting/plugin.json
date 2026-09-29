@@ -22,6 +22,12 @@
         "key": "Ctrl+Alt+G",
         "context": "notes"
       }
+    ],
+    "tools": [
+      {
+        "id": "insertHello",
+        "path": "InsertHello.qml"
+      }
     ]
   }
 }

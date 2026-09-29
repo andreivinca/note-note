@@ -1,7 +1,8 @@
 # Editing tools
 
-Each editing tool lives in one QML file in `ui/tools/`. The editor discovers
-these files when it starts. Adding a tool does not require changing
+Each editing tool lives in one QML file: the application's own in `ui/tools/`,
+the others in plugin packages ([tools in a package](#tools-in-a-package)). The
+editor discovers both when it starts. Adding a tool does not require changing
 `Workspace.qml`, `NoteEditor.qml`, the toolbar model, or the shortcut table.
 Restart the app after adding or editing a file.
 
@@ -24,7 +25,7 @@ custom layouts keep their chosen placement.
 The default layout puts table and link insertion under **Insert** and shows row and
 column actions in their own toolbar group while the caret is inside a table.
 Text color, highlight and inline code stay on the toolbar. Insert also contains
-the separator, with calendar tools under **Insert → Insert month**:
+the separator, with the calendar package's tools under **Insert → Insert month**:
 
 ```json
 "editor": {
@@ -146,7 +147,8 @@ uses the document's ordinary foreground. Build with `sh cpp/build.sh`.
 
 ## Calendar tools
 
-`InsertMonth.qml` supplies the `insertMonth` submenu. `InsertCurrentMonth.qml`
+The built-in `org.note-note.calendar` package, in `plugins/org.note-note.calendar/`,
+supplies the calendar tools. `InsertMonth.qml` supplies the `insertMonth` submenu. `InsertCurrentMonth.qml`
 supplies `currentMonth`, its first default item. It inserts a month-and-year
 label and a seven-column calendar table,
 with one row per week and empty cells outside the month. The month comes
@@ -163,7 +165,7 @@ day one so dates at the end of a month cannot skip a shorter month.
 It opens a popup with a localized month dropdown and a year field (1–9999),
 initially set to the current month and year. Insert or Enter in the year field
 confirms; Cancel, Escape or clicking outside dismisses it without editing.
-All three tools use `ui/editing/Calendar.js`, including Gregorian leap-year rules
+All three tools use the package's `Calendar.js`, including Gregorian leap-year rules
 and years 1–99.
 
 These tools use the existing `table` capability, so they are available automatically
@@ -181,11 +183,14 @@ existing Insert dropdown, replace their entries with
 `{ "dropdown": "insertMonth", "items": ["currentMonth", "nextMonth", "customMonth"] }`,
 retaining the other entries and removing any direct entries for these tools.
 As with all tools, omitting a tool from a custom layout puts it in the final
-toolbar group.
+toolbar group. `"plugins": {"org.note-note.calendar": {"enabled": false}}` in
+Settings removes the four tools on the next start; layouts keep naming them,
+without empty buttons, for when the package is enabled again.
 
 ## Add a tool
 
-For example, save this as `ui/tools/InsertGreeting.qml`:
+An application tool goes in `ui/tools/`. For example, save this as
+`ui/tools/InsertGreeting.qml`:
 
 ```qml
 import QtQuick
@@ -210,6 +215,57 @@ Its button initially appears in the final group. To put it in Insert, add
 The example uses HTML already supported by the document converters. A tool
 that introduces new document syntax also needs converter support and, where
 applicable, provider support so its content survives saving and reloading.
+
+## Tools in a package
+
+A [plugin package](plugins.md) contributes tools under `tools` in its
+manifest. Each entry names the tool's action ID and its QML file:
+
+```json
+"contributes": {
+  "tools": [{"id": "insertStamp", "path": "InsertStamp.qml"}]
+}
+```
+
+The file's root is the same `Tool`, imported from the application's public
+module instead of its source tree:
+
+```qml
+import NoteNote.Extensions 1.0
+
+Tool {
+  toolId: "insertStamp"
+  label: "Insert date stamp"
+  icon: "+"
+  shortcutKey: Qt.Key_D
+  shortcutModifiers: Qt.ControlModifier | Qt.AltModifier
+
+  function execute() {
+    editor.insertHtml(editor.escapeHtml(new Date().toLocaleDateString()))
+  }
+}
+```
+
+The contract, the `editor` it is given and everything below apply unchanged:
+the registry places a package's tool in the toolbar, its menus, the shortcut
+table and help exactly as it does the application's. `toolId` must be the
+manifest's `id`; `options` keep their own IDs. IDs share one namespace, so pick
+distinctive ones: a tool the application ships, in `ui/tools/` or a built-in
+package, keeps its ID against a user package's, and any other shared ID
+rejects every claimant, with the reason in the log. A tool is executable code,
+so a user package holding one starts disabled until it is enabled in Settings.
+
+`capability` defaults to the tool's ID. A provider that lists its `tools`
+offers only what it lists, so a tool that writes an existing construct names
+that construct: the calendar tools write tables and require `table`. The
+[example package](../examples/plugins/greeting) contributes `insertHello`
+beside its command.
+
+Built-in packages in `plugins/` ship with the application and, like its
+providers, may import its source tree by relative path: the calendar tools use
+`ToolForm`, `ChromeTextField` and `ChromeDropdown` from `ui/`. `NoteNote.Extensions`
+provides `Tool` itself; a package outside the application builds its panel from
+Qt Quick's own controls.
 
 ## Tool properties
 
@@ -238,9 +294,15 @@ Input tools call `openPanel()` from `execute()` after setting their initial
 values. This captures the insertion context and opens their `panel` component.
 Popup panels can provide `focusInput()` to focus and select their initial input
 once the popup is open.
-`ToolForm.qml` supplies the shared form title, spacing and action buttons. Form
-fields use `ChromeTextField` and `ChromeDropdown`, which share the search field's
-theme colors, borders, corner radius and height through `ChromeControlStyle`.
+`ToolForm.qml` supplies the shared popover: the tool's icon and label as a
+header, the spacing between fields, and a footer with the key hint and the one
+Insert button. There is no Cancel button; Escape or a click outside cancels, as
+for every popup. Set the form's `message` to say what blocks submitting, such
+as an invalid value; it replaces the key hint until cleared. Form fields use
+`ChromeTextField` and `ChromeDropdown`, which share the search field's theme
+colors, borders, corner radius and height through `ChromeControlStyle`. Fields
+carry no labels above them: a placeholder, and for a text field an `iconText`
+glyph at its leading edge, say what each one is for.
 On confirmation, validate the form and call `submitPanel(function() { ... })`
 with the edit. It rechecks availability, provider support and the captured
 context, closes the panel, then applies the edit and restores editor focus.
@@ -310,16 +372,21 @@ and dropdown order, omitted tools, moving actions without losing shortcuts,
 settings validation, backward-compatible defaults and failed settings saves.
 Submenu checks cover nested settings, pointer and keyboard navigation, outside
 clicks, empty groups, and dismissal when permissions or the layout change.
-Calendar checks cover Sunday, Monday and Saturday week starts, localized
+Calendar checks load the calendar package through the plugin catalog, as the
+workspace does, and cover Sunday, Monday and Saturday week starts, localized
 labels, four-to-six-week months, leap-year rules, year boundaries, table
-capabilities, menu insertion, saving/reloading and undo/redo.
+capabilities, menu insertion, saving/reloading and undo/redo. Package checks
+cover a manifest ID that differs from the `toolId`, and user packages claiming
+IDs the application or a built-in package already uses. `tests/extensions_selftest.py`
+loads the example package's tool through `NoteNote.Extensions` in both hosts,
+then runs it from its shortcut and undoes it.
 Nested-table checks cover empty and populated cells, three table levels,
 inner and outer row/column changes, double Enter, caret placement and undo.
 
 Lint changes with:
 
 ```bash
-qmllint -I /usr/share/omarchy/shell ui/editing/*.qml ui/tools/*.qml ui/NoteEditor.qml Workspace.qml hosts/omarchy/Notes.qml
+qmllint -I /usr/share/omarchy/shell ui/editing/*.qml ui/tools/*.qml plugins/org.note-note.calendar/*.qml ui/NoteEditor.qml Workspace.qml hosts/omarchy/Notes.qml
 ```
 
 `Ctrl+Shift+P` is reserved for the global command palette and cannot be claimed

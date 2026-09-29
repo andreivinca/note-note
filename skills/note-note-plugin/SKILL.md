@@ -1,12 +1,12 @@
 ---
 name: note-note-plugin
-description: Write, fix or review a plugin for the Note Note notes app (the Omarchy shell plugin and the standalone/Flatpak Qt app) — color themes, command-palette commands with their keyboard shortcuts, and note providers that bring notes from a new backend. Use whenever someone asks for a Note Note theme, command, shortcut or provider, writes or debugs a Note Note plugin.json, or works under ~/.config/notenote/plugins/ or ~/.config/notenote/themes/.
+description: Write, fix or review a plugin for the Note Note notes app (the Omarchy shell plugin and the standalone/Flatpak Qt app) — color themes, command-palette commands with their keyboard shortcuts, editing-toolbar tools that act on the open note, and note providers that bring notes from a new backend. Use whenever someone asks for a Note Note theme, command, shortcut, toolbar tool or provider, writes or debugs a Note Note plugin.json, or works under ~/.config/notenote/plugins/ or ~/.config/notenote/themes/.
 ---
 
 # Writing Note Note plugins
 
 Note Note loads plugin **packages**: one folder holding a `plugin.json`
-manifest and the files it names. A package contributes any mix of four kinds,
+manifest and the files it names. A package contributes any mix of five kinds,
 and nothing else — any other key under `contributes` rejects the whole manifest.
 
 | Kind | What it adds | Code | Read |
@@ -14,6 +14,7 @@ and nothing else — any other key under `contributes` rejects the whole manifes
 | `themes` | A color palette, chosen with Ctrl+Shift+P → Color Theme | none, JSON only | [references/themes.md](references/themes.md) |
 | `commands` | An entry in the command palette (Ctrl+Shift+P) | a QML handler, or none when it names a built-in workspace action | [references/commands.md](references/commands.md) |
 | `keybindings` | Default shortcuts for the package's **own** commands | none | [references/commands.md](references/commands.md#keybindings) |
+| `tools` | An editing-toolbar button or menu entry that acts on the open note, with an optional shortcut and input panel | a QML `Tool` | [references/tools.md](references/tools.md) |
 | `providers` | A note backend: sidebar tabs whose notes it lists, loads, saves and deletes | a QML item, plus any scripts it runs | [references/providers.md](references/providers.md) |
 
 Pick by what the user wants:
@@ -23,11 +24,13 @@ Pick by what the user wants:
 - **"Do X from the palette / on a shortcut"** → a command, with a keybinding if
   it deserves a default key. Check first that the command API can do X: it can
   show messages and pickers, run a workspace action, read the package's own
-  files, and preview or save a theme — it cannot edit the open note yet.
+  files, and preview or save a theme — it cannot edit the open note.
+- **"Insert or format something in the note"** → a tool: a toolbar button or
+  menu entry, with a shortcut if it deserves one.
 - **"Show my notes from Y"** → a provider.
 
-Editing-toolbar tools and status-bar controls are built into the application;
-they are not plugin kinds. Say so instead of inventing a contribution for them.
+Status-bar controls are built into the application; they are not a plugin
+kind. Say so instead of inventing a contribution for them.
 
 Read the reference for the kind you are writing before writing it. The rules
 below apply to every package.
@@ -57,6 +60,7 @@ loader refuses symlinks, so copy a package into place rather than linking it.
     "themes": [{"id": "nord", "path": "nord.json"}],
     "commands": [{"id": "snippet", "title": "Show a Snippet", "category": "Nord", "handler": "Snippet.qml"}],
     "keybindings": [{"command": "snippet", "key": "Ctrl+Alt+S", "context": "notes"}],
+    "tools": [{"id": "insertNordStamp", "path": "InsertStamp.qml"}],
     "providers": [{"id": "nord-notes", "path": "Provider.qml", "order": 500}]
   }
 }
@@ -71,11 +75,13 @@ Use only the kinds the package actually supplies. The validator enforces:
   `user.themes` are reserved.
 - `name` is a non-empty display string, at most 256 characters.
 - `version` is `major.minor.patch` with no leading zeroes (`1.0.0`, not `1.00.0`).
-- `contributes` is a non-empty object whose keys are among the four kinds,
+- `contributes` is a non-empty object whose keys are among the five kinds,
   each a list of at most 128 objects.
 - Every contribution `id` (and a keybinding's `command`) is a local ID —
   a lowercase letter, then lowercase letters, digits and hyphens — unique
-  within its kind. The app qualifies it as `<package-id>/<local-id>`.
+  within its kind. The app qualifies it as `<package-id>/<local-id>`. A tool's
+  `id` is the exception: an action ID like `insertStamp`, used unqualified
+  (see the tools reference).
 - Every `path`/`handler` is relative, inside the package, and names a regular
   file: no leading `/`, no `..`, no `\`, no `:` (so no URLs), no symlinks.
 - Size limits: manifest 64 KiB, each theme or JSON resource 256 KiB, 128
@@ -87,8 +93,8 @@ other packages still load.
 ## Trust, enabling and restarting
 
 - A package holding only themes is data and loads by default.
-- A package with `commands` or `providers` runs code with the user's full
-  privileges — there is no sandbox. It starts **disabled**. The user enables
+- A package with `commands`, `tools` or `providers` runs code with the user's
+  full privileges — there is no sandbox. It starts **disabled**. The user enables
   it after reading it, in `config.json`:
 
   ```json
@@ -117,7 +123,8 @@ other packages still load.
 6. Look for diagnostics in the app: the status line at startup, the foot of
    the command palette, the Key bindings page for shortcuts, the Color Theme
    picker's message for theme files, and the log (Omarchy:
-   `journalctl --user -b | grep "note-note plugins"`; standalone: its stderr).
+   `journalctl --user -b | grep -e "note-note plugins" -e "Editing tool skipped"`;
+   standalone: its stderr).
 
 ## Checking a package
 
@@ -135,10 +142,11 @@ python3 <this skill>/scripts/check.py --app ~/src/note-note             # an app
 It exits non-zero when anything is refused. A disabled package with a valid
 manifest is reported as a note, not an error; use `--enable` to list its
 contributions and catch provider ID clashes. It does not check the colors
-inside a theme file: follow the rules in the themes reference, then open the
+inside a theme file, nor load a tool's QML — a tool's ID clashes and QML
+errors show in the log when the app starts: follow the rules in the themes reference, then open the
 Color Theme picker, which names any theme it could not load and why.
 
-## Code rules (commands and providers)
+## Code rules (commands, tools and providers)
 
 - Portable code imports only `QtQuick`, `QtQuick.Controls`, `QtQml` and
   `NoteNote.Extensions 1.0`. Importing `Quickshell` or `qs.*` ties the package
@@ -160,8 +168,10 @@ Built-in packages live in `plugins/org.note-note.*/` in the source tree. They
 are enabled by default, may use repository-relative imports and the shared
 `services/providers/LaneProvider.qml` base, and have tests described in
 `docs/testing.md`. When a checkout is at hand, its `docs/plugins.md`,
-`docs/themes.md`, `docs/commands.md`, `docs/providers.md` and
-`services/extensions/manifest.py` are the authority; the references here
-summarize them. Complete examples: `examples/plugins/colors` (theme),
-`examples/plugins/greeting` (command + keybinding), `examples/hello`
-(provider), also at https://github.com/andreivinca/omarchy-note-note.
+`docs/themes.md`, `docs/commands.md`, `docs/providers.md`,
+`docs/editing-tools.md` and `services/extensions/manifest.py` are the
+authority; the references here summarize them. Complete examples:
+`examples/plugins/colors` (theme), `examples/plugins/greeting` (command +
+keybinding + tool), `plugins/org.note-note.calendar` (tools with a menu and a
+panel, using the built-ins' relative imports), `examples/hello` (provider),
+also at https://github.com/andreivinca/omarchy-note-note.

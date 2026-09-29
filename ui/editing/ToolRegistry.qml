@@ -7,9 +7,17 @@ Item {
   id: registry
   required property var editor
   required property var keybindings
+  // The application's own tools, one QML file each.
   property url directory: Qt.resolvedUrl("../tools")
+  // The tools plugin packages contribute (services/extensions/manifest.py),
+  // or null while the plugin catalog is still being read: the registry
+  // loads once it knows every tool.
+  property var contributions: []
   property var layout: ToolbarSettings.defaults()
   readonly property alias ready: registryState.ready
+  // Whether the tools on hand are the ones the sources name now.
+  readonly property bool upToDate: registryState.ready && registryState.loadedDirectory === directory
+    && registryState.loadedContributions === contributions
   readonly property alias errors: registryState.errors
   readonly property alias tools: registryState.tools
   readonly property bool panelOpen: actions.some(function(tool) {
@@ -43,17 +51,23 @@ Item {
       closePanels()
     }
   }
+  onContributionsChanged: reload.restart()
 
   QtObject {
     id: registryState
     property bool ready: false
     property url loadedDirectory: ""
+    property var loadedContributions: null
     property var errors: []
     property var tools: []
   }
 
   FolderListModel {
     id: files
+    // The directory the rows are of. `folder` changes at once, while the
+    // model goes on listing the previous one, still Ready, until it has
+    // read the new one and turns Ready again.
+    property url listed: ""
     folder: registry.directory
     nameFilters: ["*.qml"]
     showDirs: false
@@ -61,6 +75,7 @@ Item {
     sortField: FolderListModel.Name
     onStatusChanged: {
       if (status === FolderListModel.Ready) {
+        listed = folder
         reload.restart()
       }
     }
@@ -71,7 +86,7 @@ Item {
     id: reload
     interval: 0
     onTriggered: {
-      if (files.status === FolderListModel.Ready) {
+      if (files.status === FolderListModel.Ready && files.listed === registry.directory && registry.contributions) {
         registry.loadTools()
       }
     }
@@ -81,12 +96,72 @@ Item {
     return [tool].concat(Array.from(tool.options))
   }
 
-  function definitionError(tool, counts) {
+  // Every file a tool comes from: the application's directory first, then
+  // the packages'. `id` is the one a manifest gives the tool, if any.
+  function sources() {
+    var result = []
+    for (var i = 0; i < files.count; i++) {
+      result.push({ url: files.get(i, "fileUrl"), builtin: true, id: "" })
+    }
+    return result.concat(contributions.map(function(descriptor) {
+      return { url: descriptor.url, builtin: descriptor.builtin, id: descriptor.id }
+    }))
+  }
+
+  // One tool made from its file, or null with the reason in diagnostics.
+  function create(source, diagnostics) {
+    var component = Qt.createComponent(source.url, Component.PreferSynchronous)
+    if (component.status !== Component.Ready) {
+      diagnostics.push(String(source.url) + ": " + component.errorString())
+      component.destroy()
+      return null
+    }
+    var tool = component.createObject(registry, { editor: registry.editor })
+    component.destroy()
+    var reason = ""
+    if (!tool || tool.apiVersion !== 1 || !tool.toolId || !tool.label || !tool.options
+        || typeof tool.execute !== "function") {
+      reason = "expected an editing Tool with an id and label"
+    } else if (source.id && tool.toolId !== source.id) {
+      reason = "its toolId is not " + source.id + ", the ID its manifest gives it"
+    }
+    if (reason) {
+      diagnostics.push(String(source.url) + ": " + reason)
+      if (tool) {
+        tool.destroy()
+      }
+      return null
+    }
+    return { tool: tool, builtin: source.builtin }
+  }
+
+  // How many tools claim each action ID: all of them, and the application's
+  // own, its built-in packages included.
+  function claims(candidates) {
+    var result = Object.create(null)
+    candidates.forEach(function(candidate) {
+      definitions(candidate.tool).forEach(function(definition) {
+        var claim = result[definition.toolId] || (result[definition.toolId] = { all: 0, builtin: 0 })
+        claim.all++
+        if (candidate.builtin) {
+          claim.builtin++
+        }
+      })
+    })
+    return result
+  }
+
+  function definitionError(tool, claim, builtin) {
     if (tool.apiVersion !== 1 || !tool.toolId || !tool.label || typeof tool.execute !== "function") {
       return "expected an editing Tool with an id and label"
     }
-    if (counts[tool.toolId] > 1) {
+    // The application's tools keep their IDs against a package's; among
+    // equals nobody wins.
+    if (builtin && claim.builtin > 1) {
       return "duplicate tool id"
+    }
+    if (!builtin && claim.all > 1) {
+      return "duplicate or reserved tool id"
     }
     if (tool.shortcutKey && (tool.isMenu || !Stroke.fromQt(tool.shortcutKey, tool.shortcutModifiers))) {
       return "a shortcut needs a supported key and an executable tool"
@@ -95,69 +170,50 @@ Item {
   }
 
   function loadTools() {
-    // Discover once per directory. Updating source files takes effect on app
-    // restart; do not destroy tool instances underneath pending conversions.
-    if (registryState.ready && registryState.loadedDirectory === directory) {
+    // Discover once per set of sources. Updating source files takes effect
+    // on app restart; do not destroy tool instances underneath pending
+    // conversions.
+    if (upToDate) {
       return
     }
     registry.closePanels()
     var previous = registryState.tools
     registryState.tools = []
     registryState.ready = false
-    var candidates = []
     var diagnostics = []
-    var counts = Object.create(null)
-    for (var i = 0; i < files.count; i++) {
-      var url = files.get(i, "fileUrl")
-      var component = Qt.createComponent(url, Component.PreferSynchronous)
-      if (component.status !== Component.Ready) {
-        diagnostics.push(String(url) + ": " + component.errorString())
-        component.destroy()
-        continue
-      }
-      var tool = component.createObject(registry, { editor: registry.editor })
-      if (!tool || tool.apiVersion !== 1 || !tool.toolId || !tool.label || !tool.options
-          || typeof tool.execute !== "function") {
-        diagnostics.push(String(url) + ": expected an editing Tool with an id and label")
-        if (tool) {
-          tool.destroy()
-        }
-        component.destroy()
-        continue
-      }
-      component.destroy()
-      candidates.push(tool)
-      var entries = definitions(tool)
-      for (var e = 0; e < entries.length; e++) {
-        counts[entries[e].toolId] = (counts[entries[e].toolId] || 0) + 1
-      }
-    }
-    candidates.sort(function(a, b) {
-      return a.toolId.localeCompare(b.toolId)
+    var candidates = sources().map(function(source) {
+      return registry.create(source, diagnostics)
+    }).filter(function(candidate) {
+      return candidate !== null
     })
+    candidates.sort(function(a, b) {
+      return a.tool.toolId.localeCompare(b.tool.toolId)
+    })
+    var claimed = claims(candidates)
     var accepted = []
     for (var j = 0; j < candidates.length; j++) {
       var candidate = candidates[j]
       var reason = ""
-      var candidateEntries = definitions(candidate)
+      var candidateEntries = definitions(candidate.tool)
       for (var c = 0; !reason && c < candidateEntries.length; c++) {
         var definition = candidateEntries[c]
         reason = c > 0 && definition.isMenu ? "tool options must be executable"
-          : definitionError(definition, counts)
+          : definitionError(definition, claimed[definition.toolId], candidate.builtin)
       }
       if (reason) {
-        diagnostics.push(candidate.toolId + ": " + reason)
-        candidate.destroy()
+        diagnostics.push(candidate.tool.toolId + ": " + reason)
+        candidate.tool.destroy()
         continue
       }
       candidateEntries.forEach(function(entry) {
         entry.keybindings = Qt.binding(function() { return registry.keybindings })
       })
-      accepted.push(candidate)
+      accepted.push(candidate.tool)
     }
     registryState.errors = diagnostics
     registryState.tools = accepted
     registryState.loadedDirectory = directory
+    registryState.loadedContributions = contributions
     registryState.ready = true
     for (var k = 0; k < previous.length; k++) {
       previous[k].destroy()
@@ -206,8 +262,7 @@ Item {
   }
 
   function canExecute(tool) {
-    if (!ready || registryState.loadedDirectory !== directory
-        || !tool || tool.isMenu || !editor.writable || !isVisible(tool)) {
+    if (!upToDate || !tool || tool.isMenu || !editor.writable || !isVisible(tool)) {
       return false
     }
     return true
