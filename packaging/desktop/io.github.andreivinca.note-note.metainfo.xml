@@ -34,6 +34,12 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.0.27" date="2026-09-29">
+      <description>
+        <p>The note's scrollbar sits just beside the note instead of over its
+        right edge, so it no longer covers text or code blocks.</p>
+      </description>
+    </release>
     <release version="1.0.26" date="2026-09-29">
       <description>
         <p>Plugins can add editing-toolbar tools that insert or format text in

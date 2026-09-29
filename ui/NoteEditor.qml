@@ -1865,9 +1865,18 @@ Item {
         ListWheel { flick: flick }
         QQC.ScrollBar.vertical: QQC.ScrollBar {
           objectName: "noteScrollBar"
+          // Set just beside the sheet, level with the body, so the thumb
+          // never lies over the note's text or code slabs.
+          parent: root
+          x: sheet.x + sheet.width + Style.spacing.xs
+          y: sheet.y + flick.y
+          height: flick.height
           // Shown exactly while the note is longer than its frame.
           policy: QQC.ScrollBar.AlwaysOn
-          visible: size < 1
+          visible: flick.visible && size < 1
+
+          // Outside the Flickable the wheel no longer reaches its handler.
+          ListWheel { flick: flick }
         }
 
         function ensureVisible(r) {

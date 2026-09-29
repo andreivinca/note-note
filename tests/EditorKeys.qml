@@ -620,6 +620,9 @@ Window {
     var bar = keys.findChild(editor, "noteScrollBar")
     keys.waitForRendering(body)
     require(bar && bar.visible && bar.interactive && bar.size < 1, "long note has no usable scrollbar")
+    var gap = bar.mapToItem(null, 0, 0).x - body.mapToItem(null, body.width, 0).x
+    require(gap >= 0, "the scrollbar lies over the note's body")
+    require(gap < bar.width, "the scrollbar is not beside the note's body")
     var original = editor.documentHtml()
     var caret = editor.cursorPosition()
     keys.mouseWheel(body, body.width / 2, 30, 0, -120)
