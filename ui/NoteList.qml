@@ -179,7 +179,7 @@ Item {
       id: notebookHeader
       width: parent.width
       height: root.headerHeight
-      color: Style.chromeSurface(root.background, root.foreground)
+      color: panel.fill
       HeaderLabel {
         id: countLabel
         objectName: "notebookHeaderCount"

@@ -27,7 +27,7 @@ var recipes = {
   input: function(surface, foreground) { return Qt.tint(surface, alpha(foreground, 0.08)) },
   inputBorder: function(surface, foreground) { return Qt.tint(surface, alpha(foreground, 0.18)) },
   placeholder: function(foreground) { return alpha(foreground, 0.45) },
-  sidebar: function(background, foreground) { return Qt.tint(background, alpha(foreground, 0.018)) },
+  sidebar: function(background, foreground) { return Qt.tint(background, alpha(foreground, 0.05)) },
   titlebar: function(background) { return Qt.darker(background, 1.12) },
   textSelection: function(accent) { return alpha(accent, 0.35) },
   link: function(foreground, accent) { return Qt.tint(foreground, alpha(accent, 0.65)) },

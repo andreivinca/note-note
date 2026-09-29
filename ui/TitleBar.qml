@@ -47,7 +47,6 @@ Item {
 
   height: tabStrip.implicitHeight + tabStrip.verticalInset * 2
 
-  // Match the mockup's darker tab strip while retaining the theme's hue.
   // The background and overflow fades share this fill.
   readonly property color fill: Color.token("titlebar.background")
 
