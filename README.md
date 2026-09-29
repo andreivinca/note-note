@@ -14,7 +14,7 @@ draft kept on this device. See [merge behavior and limits](lib/notemerge/README.
 
 **[Install plugin](#install)** · **[Standalone app](#standalone-app)** · **[Update](#update)** · **[Shortcut](#shortcut)** ·
 **[Removal](#removal)** · **[Settings](#settings)** ·
-**[Notebooks](#notebooks)** · **[Providers](#providers)** · **[Keys](#keys)**
+**[Notebooks](#notebooks)** · **[Providers](#providers)** · **[Writing plugins](#writing-plugins)** · **[Keys](#keys)**
 
 ## Themes and commands
 
@@ -34,6 +34,26 @@ The standalone app includes the native display helper. Omarchy commands and
 custom themes require `sh cpp/build.sh` in the plugin folder followed by a
 shell restart. Without it the existing editor remains available with System
 colors. Theme changes preserve notes, undo history and authored colors.
+
+## Writing plugins
+
+A plugin package can add color themes, command-palette commands with their
+shortcuts, and providers that bring notes from a new backend. To have an AI
+assistant write one, give it the
+[`note-note-plugin` skill](skills/note-note-plugin/SKILL.md): it teaches the
+manifest, each kind's contract and the safety rules, and it checks a package
+with the app's own validator. For Claude Code:
+
+```bash
+git clone --depth 1 https://github.com/andreivinca/omarchy-note-note.git
+mkdir -p ~/.claude/skills
+cp -r omarchy-note-note/skills/note-note-plugin ~/.claude/skills/
+```
+
+Then ask for what you want: *"Make me a Note Note theme in Nord colors"* or
+*"Write a Note Note provider for my Nextcloud notes"*. Other assistants that
+read `SKILL.md` folders take the same directory. Packages with code start
+disabled until you have read and enabled them; see [plugin packages](docs/plugins.md).
 
 ## Install
 

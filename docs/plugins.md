@@ -35,6 +35,16 @@ digits, and hyphens and start with a letter. `org.note-note.*` and `user.themes`
 are reserved. A provider's manifest ID must match its QML `id`; it remains the
 prefix of note and notebook identities rather than becoming a qualified ID.
 
+## Writing a package with an AI assistant
+
+[`skills/note-note-plugin/`](../skills/note-note-plugin/SKILL.md) is a skill
+for plugin authors' assistants, installed as the [README](../README.md#writing-plugins)
+shows. It summarizes this document, [themes](themes.md), [commands](commands.md)
+and [providers](providers.md), and its `scripts/check.py` runs `manifest.py`
+over the user's folders. When one of those contracts changes, change the
+skill's reference for it in the same commit: authors' assistants read the
+skill, not these documents.
+
 ## Enabling trusted code
 
 Data-only theme packages load by default. New packages containing commands or
