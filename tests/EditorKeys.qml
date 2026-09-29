@@ -558,56 +558,88 @@ Window {
     require(read() === "```\nx\n```\n", "retyped text left the code block: " + JSON.stringify(read()))
   }
 
-  // Inside a code block the inline tools type their Markdown: the marker
-  // pair around the selection, and the same tool again takes it off; with
-  // the caret alone the pair goes in and typing lands between; the link
-  // bar types the link's Markdown. A selection reaching across the block
-  // from the prose around it is refused, the document untouched.
-  function formatInCode() {
-    var source = "before\n\n```\ncode\n```\n\nafter\n"
-    load({ source: source })
+  function toolButtonShown(id) {
+    var button = keys.findChild(editor, "editingTool-" + id)
+    return !!button && button.visible
+  }
+
+  function insertMenuIds() {
+    return editor.tools.menuTools("insert").map(function(tool) {
+      return tool.toolId
+    })
+  }
+
+  // Inside a code block the tools that would style its text or restyle its
+  // lines stand down: hidden on the toolbar, and refused by command and
+  // shortcut even straight after the caret moves in, before the toolbar
+  // has caught up. Code block (which takes the block off) and the
+  // insertions, which land after the block, stay. A selection reaching
+  // across the block from the prose around it is refused with the reason.
+  function toolsInCode() {
+    load({ source: "before\n\n```\ncode\n```\n\nafter\n" })
     var original = editor.documentHtml()
     var code = editor.plainText().indexOf("code")
-    var selectCode = function() {
-      editor.setCursorPosition(code + 4)
-      for (var i = 0; i < 4; i++) {
-        keys.keyClick(Qt.Key_Left, Qt.ShiftModifier)
-      }
+    var hidden = ["bold", "italic", "underline", "strikeout", "textColor", "highlight", "code", "link",
+                  "h1", "h2", "h3", "p", "ul", "ol", "todo", "outdent", "indent", "quote"]
+    test.statusMessages = []
+    for (var id of hidden) {
+      editor.setCursorPosition(code + 2)
+      require(!editor.tool(id), id + " ran inside a code block")
     }
-    var wrapped = function(marker) { return source.replace("code", marker + "code" + marker) }
-    selectCode()
-    editor.tool("bold")
-    require(read() === wrapped("**"), "bold did not type its stars: " + JSON.stringify(read()))
-    editor.tool("bold")
-    require(read() === source, "bold again did not take the stars off: " + JSON.stringify(read()))
-    editor.tool("highlight")
-    require(read() === wrapped("=="), "highlight did not type its marks: " + JSON.stringify(read()))
-    editor.tool("highlight")
-    editor.tool("code")
-    require(read() === wrapped("`"), "inline code did not type its backticks: " + JSON.stringify(read()))
-    editor.tool("code")
-    require(editor.documentHtml() === original, "the toggles did not leave the block as it was")
-    editor.setCursorPosition(code + 4)
-    editor.tool("italic")
-    keys.keyClick(Qt.Key_X)
-    require(read() === source.replace("code", "code*x*"), "typing did not land between the pair: " + JSON.stringify(read()))
-    editor.setCursorPosition(editor.plainText().length)
-    for (var i = 0; i < editor.plainText().length; i++) {
-      keys.keyClick(Qt.Key_Left, Qt.ShiftModifier)
+    require(editor.documentHtml() === original, "a hidden tool changed the code block")
+    require(test.statusMessages.length === 0, "a hidden tool reported: " + test.statusMessages.join(" | "))
+    for (var button of ["heading", "bold", "italic", "underline", "strikeout", "textColor", "highlight", "code",
+                        "ul", "ol", "todo", "outdent", "indent", "quote"]) {
+      keys.tryVerify(function() { return !toolButtonShown(button) }, 1000)
+      require(!toolButtonShown(button), button + " was offered in a code block")
     }
-    var across = editor.documentHtml()
-    editor.tool("bold")
-    editor.tool("highlight")
-    editor.tool("code")
-    editor.tool("link")
+    require(toolButtonShown("codeblock"), "the code block toggle was hidden inside a code block")
+    var inserts = insertMenuIds()
+    require(inserts.indexOf("link") < 0 && inserts.indexOf("rule") >= 0 && inserts.indexOf("table") >= 0,
+            "the Insert menu inside a code block offered " + inserts.join(","))
+
+    selectText("code")
+    keys.keyClick(Qt.Key_H, Qt.ControlModifier | Qt.ShiftModifier)
+    require(editor.documentHtml() === original, "the highlight shortcut marked the code")
+
+    keys.findChild(editor, "noteBody").select(0, editor.plainText().length)
+    for (var inline of ["bold", "highlight", "code", "link"]) {
+      editor.tool(inline)
+    }
     require(!editor.tools.find("link").panelOpen, "the link bar opened on a selection across the block")
-    require(editor.documentHtml() === across, "a tool changed a selection across the block")
-    load({ source: source })
-    selectCode()
-    editor.tool("link")
-    require(editor.tools.find("link").panelOpen, "the link bar did not open inside the code block")
-    editor.tools.find("link").submit()
-    require(read() === source.replace("code", "[code](https://)"), "the link bar did not type the link: " + JSON.stringify(read()))
+    require(editor.documentHtml() === original, "a tool changed a selection across the block")
+    require(test.statusMessages.length === 4 && test.statusMessages.every(function(message) {
+      return message === "Select text outside the code block"
+    }), "a selection across the block was refused without the reason: " + test.statusMessages.join(" | "))
+
+    editor.setCursorPosition(editor.plainText().indexOf("after"))
+    keys.tryVerify(function() { return toolButtonShown("highlight") }, 1000)
+    require(toolButtonShown("highlight") && toolButtonShown("quote") && insertMenuIds().indexOf("link") >= 0,
+            "leaving the code block did not bring the tools back")
+  }
+
+  // In a table cell the block styles that cannot reach a table's lines —
+  // heading, indent, outdent, quote and code block — stand down; inline
+  // formatting, lists, the table's own actions and insertions stay.
+  function toolsInTable() {
+    load({ source: "| Header |\n|---|\n| Cell |\n\nAfter\n" })
+    var original = editor.documentHtml()
+    var cell = editor.plainText().indexOf("Cell") + 2
+    for (var id of ["h1", "h2", "h3", "p", "indent", "outdent", "quote", "codeblock"]) {
+      editor.setCursorPosition(cell)
+      require(!editor.tool(id), id + " ran inside a table")
+    }
+    require(editor.documentHtml() === original, "a hidden tool changed the table")
+    for (var hidden of ["heading", "indent", "outdent", "quote", "codeblock"]) {
+      keys.tryVerify(function() { return !toolButtonShown(hidden) }, 1000)
+      require(!toolButtonShown(hidden), hidden + " was offered in a table")
+    }
+    for (var shown of ["bold", "highlight", "ul", "addRow"]) {
+      require(toolButtonShown(shown), shown + " was hidden in a table")
+    }
+    var inserts = insertMenuIds()
+    require(inserts.indexOf("link") >= 0 && inserts.indexOf("rule") >= 0 && inserts.indexOf("table") >= 0,
+            "the Insert menu inside a table offered " + inserts.join(","))
   }
 
   function noteScrolling() {
@@ -1991,6 +2023,8 @@ Window {
 
   function clickEditingTool(id) {
     var button = keys.findChild(editor, "editingTool-" + id)
+    // The toolbar follows the caret's context on a timer.
+    keys.tryVerify(function() { return button && button.visible && button.enabled }, 1000)
     require(button && button.visible && button.enabled, id + " button is unavailable")
     // Leaving a list restores the heading menu and can move the list group.
     keys.waitForRendering(button)
@@ -2341,11 +2375,15 @@ Window {
     require(savedMarkdown() === "Plain\n", "Enter did not leave a quote containing only an empty line")
   }
 
+  // With the caret in a table or a code block Quote is hidden; a selection
+  // that holds only such lines and ends at the next paragraph's start
+  // still offers it, and gets the reason instead of an edit.
   function quoteUnavailable() {
-    var sources = ["| Header |\n|---|\n| Target |\n", "```\nTarget\n```\n"]
+    var body = keys.findChild(editor, "noteBody")
+    var sources = ["| Header |\n|---|\n| Target |\n\nAfter\n", "```\nTarget\n```\n\nAfter\n"]
     for (var source of sources) {
       load({ source: source })
-      editor.setCursorPosition(editor.plainText().indexOf("Target"))
+      body.select(editor.plainText().indexOf("Target"), editor.plainText().indexOf("After"))
       test.statusMessages = []
       clickEditingTool("quote")
       keys.tryVerify(function() { return test.statusMessages.length > 0 }, 3000)
@@ -2580,7 +2618,9 @@ Window {
       { name: "Quote preserves paragraph boundaries in both toggle directions", run: quoteToolParagraphs },
       { name: "Quote transforms the current paragraph, including text typed below tables", run: function() { blockToolTargeting("quote") } },
       { name: "Enter continues a quote and leaves its empty last line with undo", run: quoteEnter },
-      { name: "Quote explains unsupported table and code block contexts", run: quoteUnavailable },
+      { name: "Quote explains a selection holding only table or code lines", run: quoteUnavailable },
+      { name: "a code block hides the tools that would style or restyle its lines", run: toolsInCode },
+      { name: "a table cell hides the block styles that cannot reach its lines", run: toolsInTable },
       { name: "Quote works on empty paragraphs and text below tables without the native helper", run: function() { blockToolWithoutHelper("quote") } },
       { name: "Code block transforms the current paragraph, including text typed below tables", run: function() { blockToolTargeting("codeblock") } },
       { name: "Code block transforms empty paragraphs, saves, reloads, toggles and undoes", run: codeBlockEmptyParagraphs },
@@ -2783,12 +2823,6 @@ Window {
       test.checked("retyping an emptied code line keeps it code", true, "")
     } catch (error) {
       test.checked("retyping an emptied code line keeps it code", false, error.message)
-    }
-    try {
-      formatInCode()
-      test.checked("the inline tools type their Markdown inside a code block", true, "")
-    } catch (error) {
-      test.checked("the inline tools type their Markdown inside a code block", false, error.message)
     }
     try {
       releasedAtTop()

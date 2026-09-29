@@ -1,6 +1,5 @@
 import QtQuick
 import "../editing"
-import "../Dialect.js" as Dialect
 
 Tool {
   id: tool
@@ -8,10 +7,11 @@ Tool {
   checked: editor.bold
   label: "Bold"
   icon: "󰉤"
+  available: !editor.inCode
   shortcutKey: Qt.Key_B
   shortcutModifiers: Qt.ControlModifier
 
   function execute() {
-    editor.toggleFont("bold", Dialect.INLINE_MARKERS.bold)
+    editor.toggleFont("bold")
   }
 }

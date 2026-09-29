@@ -7,11 +7,9 @@ Tool {
   toolId: "code"
   label: "Inline code"
   icon: "󰅴"
+  available: !editor.inCode
 
   function execute() {
-    if (!editor.acceptsInline() || editor.markedInCode(Dialect.INLINE_MARKERS.code)) {
-      return
-    }
     var range = editor.selection()
     if (range.from === range.to) {
       return

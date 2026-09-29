@@ -323,8 +323,7 @@ Item {
   function showTop() {
     area.cursorPosition = 0
     flick.contentY = 0
-    updateInList()
-    updateInTable()
+    updateContext()
   }
 
   // Qt moves the caret to the document's end whenever a TextEdit's
@@ -505,12 +504,10 @@ Item {
   // inline-code scrap in it. Inside a code block every paste is therefore
   // the plain paste, and there it puts the text in the way typing would
   // (typeInCode). The inline tools — bold, italic, underline, strikeout,
-  // highlight, inline code, the link — type their Markdown there instead
-  // (typeMarker): the marker pair around the selection, shown as the
-  // characters they are, which is what the fence holds on disk. A
-  // selection reaching into or across a block is the one thing no tool
-  // takes (refusedAcrossCode): a style over a block's lines would give
-  // them the prose font, which ends the block.
+  // text color, highlight, inline code, the link — stand down inside a
+  // code block (their `available`), and no inline formatting takes a
+  // selection reaching into or across one (refusesInline): a style over a
+  // block's lines would give them the prose font, which ends the block.
 
   // The code blocks of the document, as character spans — the runs the
   // slabs are drawn from, by whichever reader is built. One run is one
@@ -548,13 +545,16 @@ Item {
     })
   }
 
-  // A selection reaching into or across a code block, which no inline
-  // tool takes; the status line says to pick a side.
-  function refusedAcrossCode() {
-    if (selectionInCode() || !selectionTouchesCode()) {
+  // The caret or selection is on a code line, which takes no inline
+  // formatting. Inside one block the tools are already hidden; a selection
+  // reaching across a block's edge is told to stay outside it.
+  function refusesInline() {
+    if (!selectionTouchesCode()) {
       return false
     }
-    root.statusRequested("Select inside the code block, or outside it")
+    if (!selectionInCode()) {
+      root.statusRequested("Select text outside the code block")
+    }
     return true
   }
 
@@ -588,40 +588,6 @@ Item {
     area.cursorPosition = end
     root.edited()
     return end
-  }
-
-  // Inside a code block an inline tool types its Markdown: the marker pair
-  // around the selection, which stays selected so the tool again takes the
-  // pair off; with nothing selected the pair goes in and the caret between,
-  // for what is typed next.
-  function typeMarker(marker) {
-    var from = Math.min(area.selectionStart, area.selectionEnd)
-    var to = Math.max(area.selectionStart, area.selectionEnd)
-    var text = area.getText(from, to)
-    var wrapped = text.length >= marker.length * 2
-        && text.substring(0, marker.length) === marker
-        && text.substring(text.length - marker.length) === marker
-    var out = wrapped ? text.substring(marker.length, text.length - marker.length) : marker + text + marker
-    var end = typeInCode(from, to, out)
-    if (end < 0) {
-      return
-    }
-    if (from === to) {
-      area.cursorPosition = from + marker.length
-    } else {
-      area.select(from, end)
-    }
-  }
-
-  // The way in for an inline tool with a marker (Dialect.INLINE_MARKERS):
-  // typed inside a code block, and true; false outside one, where the
-  // tool's own work follows.
-  function markedInCode(marker) {
-    if (!selectionInCode()) {
-      return false
-    }
-    typeMarker(marker)
-    return true
   }
 
   function insertImage(path) {
@@ -914,8 +880,17 @@ Item {
   property bool inTable: false
   readonly property string cellSep: "\uFDD0"
   readonly property string tableEnd: "\uFDD1"
-  Timer { id: inTableTimer; interval: 120; onTriggered: { root.updateInTable(); root.updateInList() } }
+  Timer { id: inTableTimer; interval: 120; onTriggered: root.updateContext() }
   function scheduleInTable() { inTableTimer.restart() }
+
+  // The caret's context — table, list, code — that decides which tools
+  // are offered. It follows the caret on the timer above; a tool about to
+  // run reads it at once, so a shortcut pressed straight after a caret
+  // move is checked against where the caret is now.
+  function updateContext() {
+    updateInTable()
+    updateInList()
+  }
   function updateInTable() {
     var cell = root.tableContext()
     if (cell !== null) {

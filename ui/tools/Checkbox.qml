@@ -6,6 +6,7 @@ Tool {
   toolId: "todo"
   label: "Checkbox"
   icon: "󰄵"
+  available: !editor.inCode
   shortcutKey: Qt.Key_1
   shortcutModifiers: Qt.ControlModifier
 

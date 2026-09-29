@@ -34,7 +34,7 @@ QtObject {
   readonly property bool canColorText: host.canColorText
 
   function setTextColor(color) {
-    if (!canColorText || !acceptsInline() || selectionInCode()) {
+    if (!canColorText || !acceptsInline()) {
       return false
     }
     var range = selection()
@@ -62,6 +62,11 @@ QtObject {
 
   function supports(capability) {
     return enabledTools === null || enabledTools.indexOf(capability) >= 0
+  }
+
+  // Brings inTable, inList and inCode up to the caret before a tool runs.
+  function updateContext() {
+    host.updateContext()
   }
 
   function selection() {
@@ -137,8 +142,10 @@ QtObject {
     host.insertSnippet(markdown, true)
   }
 
+  // Code lines take no inline formatting, and no HTML: text put in as HTML
+  // loses the code font, which ends the block (docs/engine-notes.md).
   function acceptsInline() {
-    return writable && !host.refusedAcrossCode()
+    return writable && !host.refusesInline()
   }
 
   function selectionInCode(includeFinalBreak) {
@@ -149,13 +156,12 @@ QtObject {
     return host.typeInCode(from, to, text)
   }
 
-  function markedInCode(marker) {
-    return host.markedInCode(marker)
-  }
-
   // Insert after the selection before removing it, preserving list and
   // paragraph formats. Undo takes both strokes back together.
   function replaceInline(html, keepSelection) {
+    if (!acceptsInline()) {
+      return
+    }
     var range = selection()
     host.atomic(function() {
       textArea.insert(range.to, Dialect.documentHtml(html))
@@ -168,6 +174,9 @@ QtObject {
   }
 
   function insertHtml(html) {
+    if (!acceptsInline()) {
+      return
+    }
     var range = selection()
     host.atomic(function() {
       if (range.from !== range.to) {
@@ -417,11 +426,11 @@ QtObject {
     pendingCursor = -1
   }
 
-  function toggleFont(kind, marker) {
+  function toggleFont(kind) {
     if (!(kind === "bold" || kind === "italic" || kind === "underline" || kind === "strikeout")) {
       return
     }
-    if (!acceptsInline() || markedInCode(marker)) {
+    if (!acceptsInline()) {
       return
     }
     var f = textArea.cursorSelection.font

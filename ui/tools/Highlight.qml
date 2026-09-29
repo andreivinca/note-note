@@ -7,13 +7,11 @@ Tool {
   toolId: "highlight"
   label: "Highlight"
   icon: "󰙒"
+  available: !editor.inCode
   shortcutKey: Qt.Key_H
   shortcutModifiers: Qt.ControlModifier | Qt.ShiftModifier
 
   function execute() {
-    if (!editor.acceptsInline() || editor.markedInCode(Dialect.INLINE_MARKERS.highlight)) {
-      return
-    }
     var range = editor.selection()
     if (range.from === range.to) {
       return

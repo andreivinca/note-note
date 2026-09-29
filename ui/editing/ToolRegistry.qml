@@ -269,6 +269,7 @@ Item {
   }
 
   function execute(id) {
+    editor.updateContext()
     var tool = find(id)
     if (!canExecute(tool)) {
       return false

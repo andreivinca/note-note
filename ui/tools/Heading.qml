@@ -7,7 +7,7 @@ Tool {
   label: "Heading"
   icon: "󰉿"
   toolbarLabelVisible: false
-  available: !editor.inList
+  available: !editor.inList && !editor.inTable && !editor.inCode
 
   function apply(level) {
     editor.transformBlocks(function(line) {

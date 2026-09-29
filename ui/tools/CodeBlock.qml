@@ -7,6 +7,7 @@ Tool {
   toolId: "codeblock"
   label: "Code block"
   icon: "󰅩"
+  available: !editor.inTable
 
   function execute() {
     if (editor.selectionInCode(true)) {

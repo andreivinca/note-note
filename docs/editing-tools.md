@@ -86,6 +86,25 @@ can be implemented as one tool file and then placed inside Insert through
 settings. The Insert tool only provides the dropdown; each item generates
 its own content.
 
+## Where tools are offered
+
+A tool is offered only where it can act on the text at the caret. Elsewhere
+its button and menu row hide, and its shortcut and `editorTool <id>` do
+nothing. The caret's context is read again as an action runs, so a shortcut
+pressed straight after the caret moves is judged on where the caret is now.
+
+| Caret in | Hidden | Still offered |
+| --- | --- | --- |
+| A code block | Heading, bold, italic, underline, strikethrough, text color, highlight, inline code, link, lists, indent, outdent, quote | Code block, which takes the block off; horizontal rule, table and calendar tools, which land after the block |
+| A table cell | Heading, indent, outdent, quote, code block | Inline formatting, lists, link, row and column actions; table and calendar tools, which insert inside the cell; horizontal rule, which lands after the table |
+| A list item | Heading | Everything else |
+| Anywhere else | Row and column actions | Everything else |
+
+A code block shows its text as it is: Markdown typed there stays literal, so
+there is nothing for a style to apply. A selection reaching from the prose
+around a code block into it keeps the tools, and inline formatting refuses it
+with "Select text outside the code block" in the status bar.
+
 ## Lists
 
 Default shortcuts match OneNote for Windows: **Ctrl+1** for checkboxes,
@@ -121,7 +140,7 @@ one Heading dropdown at the first of those positions.
 
 The choices retain their `h1`, `h2`, `h3`, and `p` action IDs for IPC and
 provider capabilities. Only supported choices appear; the dropdown hides
-when none are supported or the caret is inside a list.
+when none are supported or the caret is inside a list, a table or a code block.
 
 ## Text color
 
@@ -200,6 +219,7 @@ Tool {
   toolId: "greeting"
   label: "Insert greeting"
   icon: "+"
+  available: !editor.inCode
   shortcutKey: Qt.Key_G
   shortcutModifiers: Qt.ControlModifier | Qt.ShiftModifier
 
@@ -210,6 +230,8 @@ Tool {
 ```
 
 Its button, tooltip, shortcut and keyboard-help entry come from this file.
+`available: !editor.inCode` hides it inside code blocks, whose text is
+literal; `insertHtml` is refused there.
 Its button initially appears in the final group. To put it in Insert, add
 `"greeting"` to the dropdown's `items` array in settings.
 The example uses HTML already supported by the document converters. A tool
@@ -237,6 +259,7 @@ Tool {
   toolId: "insertStamp"
   label: "Insert date stamp"
   icon: "+"
+  available: !editor.inCode
   shortcutKey: Qt.Key_D
   shortcutModifiers: Qt.ControlModifier | Qt.AltModifier
 
@@ -276,7 +299,7 @@ Qt Quick's own controls.
 | `toolbarLabelVisible` | Show the menu label on the toolbar button; defaults to true. Hiding it keeps the icon, dropdown arrow, menu labels and tooltip. |
 | `capability` | Provider capability required; defaults to `toolId`. All four table alteration tools require `table`. |
 | `checked` | Reactive pressed state for formatting buttons; false by default. |
-| `available` | Reactive context condition, such as `editor.inTable`. Controls both presentation and execution. |
+| `available` | Reactive context condition, such as `editor.inTable`. Controls both presentation and execution; execution reads the caret's context again first. |
 | `shortcutKey`, `shortcutModifiers` | Optional default key and modifiers. The central registry resolves conflicts and user overrides; `shortcutLabel` (read-only), tooltips, and help show its effective binding. |
 | `isMenu` | This entry opens a menu; automatically true when `options` are provided. |
 | `options` | Fixed executable `Tool` choices owned by this file, as in `Heading.qml`. They retain individual action IDs and capabilities but move together in the toolbar. Bind their `editor` and availability to the owning tool. |
@@ -329,13 +352,13 @@ an action's content, rules and UI belong in its tool file.
 
 | Operation/state | Use |
 | --- | --- |
-| `writable`, `inTable`, `inList`, `supports(capability)` | Document and provider availability. |
+| `writable`, `inTable`, `inList`, `inCode`, `supports(capability)` | Document and provider availability. `inCode` is the caret, or the whole selection, inside one code block. |
 | `selection()` | Selected `from`, `to`, `text` and inline `html`. Positions use Qt document offsets. |
 | `canColorText`, `setTextColor(color)` | Apply a hex foreground or clear it with an empty string; also supports pending typing. |
-| `toggleFont(kind, marker)` | Toggle a supported boolean font attribute, including pending formatting while typing and literal markers in code blocks. |
-| `acceptsInline()`, `markedInCode(marker)` | Reject selections crossing a code block; type literal paired markers when entirely inside one. |
-| `replaceInline(html, keepSelection)` | Replace selected formatting without breaking the containing list/paragraph; one undo step. |
-| `insertHtml(html)`, `escapeHtml(text)` | Replace the selection with HTML in one undo step, and escape literal text/attributes. |
+| `toggleFont(kind)` | Toggle a supported boolean font attribute, including pending formatting while typing. |
+| `acceptsInline()` | Whether the selection takes inline formatting or HTML: false on a code line, and for a selection crossing a code block's edge, which also reports why. |
+| `replaceInline(html, keepSelection)` | Replace selected formatting without breaking the containing list/paragraph; one undo step. Refused on a code line. |
+| `insertHtml(html)`, `escapeHtml(text)` | Replace the selection with HTML in one undo step, and escape literal text/attributes. `insertHtml` is refused on a code line. |
 | `insertSnippet(markdown)` | Insert after the current block, or on an empty paragraph, with a landing paragraph when needed. |
 | `insertTable(markdown)` | Insert table content at the caret inside a cell, or as a normal snippet outside tables. |
 | `transformBlocks(transform, options)` | Transform selected Markdown blocks. The callback receives `{ indent, prefix, content, isList }` and returns a line. `options.list` manages paragraph separators when toggling lists; `unchangedMessage` supplies optional feedback. |
@@ -372,6 +395,9 @@ and dropdown order, omitted tools, moving actions without losing shortcuts,
 settings validation, backward-compatible defaults and failed settings saves.
 Submenu checks cover nested settings, pointer and keyboard navigation, outside
 clicks, empty groups, and dismissal when permissions or the layout change.
+Availability checks cover code blocks and table cells: hidden buttons and
+menu rows, refused commands and shortcuts straight after the caret moves,
+and a selection crossing a code block's edge.
 Calendar checks load the calendar package through the plugin catalog, as the
 workspace does, and cover Sunday, Monday and Saturday week starts, localized
 labels, four-to-six-week months, leap-year rules, year boundaries, table

@@ -26,7 +26,7 @@ Tool {
   ]
 
   function execute() {
-    if (editor.acceptsInline() && !editor.selectionInCode()) {
+    if (editor.acceptsInline()) {
       openPanel()
     }
   }

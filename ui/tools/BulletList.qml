@@ -6,6 +6,7 @@ Tool {
   toolId: "ul"
   label: "Bullet list"
   icon: "󰉹"
+  available: !editor.inCode
   shortcutKey: Qt.Key_Period
   shortcutModifiers: Qt.ControlModifier
 

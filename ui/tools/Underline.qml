@@ -1,6 +1,5 @@
 import QtQuick
 import "../editing"
-import "../Dialect.js" as Dialect
 
 Tool {
   id: tool
@@ -8,10 +7,11 @@ Tool {
   checked: editor.underline
   label: "Underline"
   icon: "󰊇"
+  available: !editor.inCode
   shortcutKey: Qt.Key_U
   shortcutModifiers: Qt.ControlModifier
 
   function execute() {
-    editor.toggleFont("underline", Dialect.INLINE_MARKERS.underline)
+    editor.toggleFont("underline")
   }
 }

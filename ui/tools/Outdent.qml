@@ -6,6 +6,7 @@ Tool {
   toolId: "outdent"
   label: "Outdent"
   icon: "󰉵"
+  available: !editor.inTable && !editor.inCode
 
   function execute() {
     editor.transformBlocks(function(line) {

@@ -727,17 +727,37 @@ block. And the writer states the family on the code paragraph itself, not
 only on its span, so a line whose characters were all deleted and typed
 again stays code (engine-notes.md, typing into an emptied block).
 
-The inline tools follow the same rule by typing their Markdown there
-instead: inside a code block bold, italic, underline, strikeout, highlight
-and inline code put the dialect's marker pair around the selection
-(`Dialect.INLINE_MARKERS`, the reader's own table), shown as the characters
-they are — which is exactly what the fence holds on disk; the same tool
-again takes the pair off, a caret alone gets the pair with the caret
-between, and the link bar types `[text](url)`. A selection reaching into or
-across a block is the one thing no tool takes, and the status line says to
-pick a side: a style over a block's lines would give them the prose font,
-which ends the block. On disk the block was always literal — `*text*`
-inside a fence shows its stars — and now the tools say so on screen.
+The inline tools follow the same rule by standing down there: inside a code
+block bold, italic, underline, strikeout, text color, highlight, inline code
+and the link are hidden, and `EditorApi` refuses inline formatting and HTML
+on a code line, so a plugin's tool cannot break the block either.
+*Considered:* typing the dialect's marker pair around the selection — `**`,
+`==`, a backtick, and `[text](url)` for the link — which is what the fence
+holds on disk. *Rejected:* in use it read as a broken button: highlight on
+code wrote `==` around it rather than highlighting it. A fence's text is
+literal, so there is nothing for a style to mean, and markers are typed like
+any other characters. A selection reaching into or across a block is
+refused, and the status line says to select outside it: a style over a
+block's lines would give them the prose font, which ends the block.
+
+### A tool is offered only where it can act
+
+A tool that could do nothing at the caret, or something other than what its
+button says, is hidden there rather than shown and then refused. Each tool's
+`available` names the contexts it stands down in, from three flags the
+editor keeps for the caret: `inTable`, `inList` and `inCode`. Inside a code
+block that is every tool that styles text or restyles lines: the heading
+menu, the inline styles, text color, link, lists, indent, outdent and quote.
+The code block toggle stays to take the block off, and the insertions stay,
+landing after the block. In a table cell it is the block styles the Markdown
+cannot put on a table's lines — heading, indent, outdent, quote and code
+block — which used to answer a click with nothing or with a status message.
+In a list only the heading menu stands down, as before.
+
+The flags follow the caret on a 120 ms timer, which suits the toolbar but
+not a shortcut pressed straight after an arrow key. The registry reads the
+context again before it checks `available`, so every entry point — button,
+shortcut, `editorTool` — is judged on where the caret is now.
 
 ### A separator line is never an item
 

@@ -40,6 +40,7 @@ Tool {
   toolId: "insertStamp"
   label: "Insert date stamp"
   icon: "+"
+  available: !editor.inCode
   shortcutKey: Qt.Key_D
   shortcutModifiers: Qt.ControlModifier | Qt.AltModifier
 
@@ -54,6 +55,9 @@ Tool {
   the note is writable and the tool is available and supported.
 - `editor` is the only way into the note. Never reach past it to the text area
   or the workspace.
+- A code block's text is literal: `insertHtml` and `replaceInline` are refused
+  there, so a tool that writes text sets `available: !editor.inCode` and hides
+  inside one, as the app's own formatting tools do.
 
 | Property | Meaning |
 |---|---|
@@ -82,14 +86,14 @@ The most useful calls; everything is on `editor`.
 
 | Call | Does |
 |---|---|
-| `writable`, `inTable`, `inList` | state for `available` bindings |
+| `writable`, `inTable`, `inList`, `inCode` | state for `available` bindings; `inCode` is the caret, or the whole selection, inside one code block |
 | `supports(capability)` | whether the note's provider can store it |
 | `selection()` | `{ from, to, text, html }` of the current selection |
-| `insertHtml(html)` | replaces the selection with HTML, one undo step |
+| `insertHtml(html)` | replaces the selection with HTML, one undo step; refused on a code line |
 | `escapeHtml(text)` | makes text safe inside `insertHtml` |
 | `insertSnippet(markdown)` | inserts Markdown after the current block |
 | `insertTable(markdown)` | inserts a Markdown table, inside the current cell when there is one |
-| `replaceInline(html, keepSelection)` | reformats the selection in place, one undo step |
+| `replaceInline(html, keepSelection)` | reformats the selection in place, one undo step; refused on a code line |
 | `capture()`, `current(context)` | remember the note and selection, and check later that they still hold |
 | `focus()` | return focus to the note |
 | `report(message)` | a short message in the status bar |
@@ -113,6 +117,7 @@ Tool {
   toolId: "insertSigned"
   label: "Insert signature"
   icon: "+"
+  available: !editor.inCode
   panelPopup: true
   property string name: ""
 

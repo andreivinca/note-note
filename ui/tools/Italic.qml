@@ -1,6 +1,5 @@
 import QtQuick
 import "../editing"
-import "../Dialect.js" as Dialect
 
 Tool {
   id: tool
@@ -8,10 +7,11 @@ Tool {
   checked: editor.italic
   label: "Italic"
   icon: "󰉷"
+  available: !editor.inCode
   shortcutKey: Qt.Key_I
   shortcutModifiers: Qt.ControlModifier
 
   function execute() {
-    editor.toggleFont("italic", Dialect.INLINE_MARKERS.italic)
+    editor.toggleFont("italic")
   }
 }

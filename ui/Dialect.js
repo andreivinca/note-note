@@ -87,14 +87,6 @@ function withoutBackground(html, colour, keep) {
   })
 }
 
-// The inline tools' Markdown, by tool id — what a tool types inside a code
-// block, where the fence holds the characters literally (NoteEditor,
-// typeMarker). Mirrors reader.INLINE_MARKERS in
-// services/markdown/qthtml/reader.py, plus the code span's backtick
-// (services/markdown/mdtext.py, code_span).
-var INLINE_MARKERS = { bold: "**", italic: "*", underline: "_", strikeout: "~~", highlight: "==", code: "`" }
-
-
 function documentHtml(html) {
   return html.replace(/<!--(Start|End)Fragment-->/g, "")
     .replace(/<a\b([^>]*)>/gi, function(tag, attributes) {

@@ -8,6 +8,7 @@ Tool {
   toolId: "link"
   label: "Insert link"
   icon: "󰌹"
+  available: !editor.inCode
   panelPopup: true
   property string linkText: ""
   property string linkUrl: "https://"
@@ -33,13 +34,8 @@ Tool {
       return
     }
     submitPanel(function() {
-      var range = tool.editor.selection()
-      if (tool.editor.selectionInCode()) {
-        tool.editor.typeInCode(range.from, range.to, "[" + text + "](" + url + ")")
-      } else {
-        tool.editor.insertHtml('<a href="' + tool.editor.escapeHtml(url) + '" style="-qt-foreground:none;">'
-                               + tool.editor.escapeHtml(text) + "</a>")
-      }
+      tool.editor.insertHtml('<a href="' + tool.editor.escapeHtml(url) + '" style="-qt-foreground:none;">'
+                             + tool.editor.escapeHtml(text) + "</a>")
     })
   }
 

@@ -6,6 +6,7 @@ Tool {
   toolId: "indent"
   label: "Indent"
   icon: "󰉶"
+  available: !editor.inTable && !editor.inCode
 
   function execute() {
     editor.transformBlocks(function(line) {
