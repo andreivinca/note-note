@@ -34,6 +34,15 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.0.30" date="2026-09-30">
+      <description>
+        <p>OneNote discovers shared notebook links and resumes notebook and
+        page discovery after a restart or request-budget pause, keeping
+        capacity available for opening and saving notes. An unused local notes
+        folder starts with a Getting started note, and light themes have
+        clearer text and active tabs.</p>
+      </description>
+    </release>
     <release version="1.0.29" date="2026-09-29">
       <description>
         <p>Images now have a small, consistent gap before the following text,
