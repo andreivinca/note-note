@@ -412,7 +412,8 @@ class BoundaryTests(unittest.TestCase):
             stack.enter_context(patch.object(onenote, "has_section_order_scope", return_value=True))
             self.on_disk(stack, files)
             stack.enter_context(patch.object(onenote, "access_token", return_value="token"))
-            stack.enter_context(patch.object(onenote, "graph", return_value=(200, {"value": graph_sections})))
+            stack.enter_context(patch.object(onenote, "graph", return_value=(200, {"value": [
+                {"id": BOOK, "displayName": "Test", "sections": graph_sections, "sectionGroups": []}]})))
             http = stack.enter_context(patch.object(onenote, "http", return_value=(200, {"value": [
                 {"id": "z", "title": "Z first"}, {"id": "a", "title": "A second"}]})))
             arrange = stack.enter_context(patch.object(order, "arrange", side_effect=RuntimeError("secret-url")))

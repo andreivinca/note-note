@@ -47,7 +47,7 @@ Item {
   property bool pumping: false
   property bool pumpAgain: false
 
-  // enqueue(opts, start, settled) -> handle { cancel() }
+  // enqueue(opts, start, settled) -> handle { cancel(), promote() }
   //
   //   opts:     { key, mode: "append"|"replace"|"dedupe", priority: 0|1,
   //               owner, flush: bool, runWhenPaused: bool, label }
@@ -79,7 +79,15 @@ Item {
     // Not dispatched inline: `start` would then run before the caller's own
     // next statement, which is a surprise nobody writing a provider wants.
     Qt.callLater(root.pump)
-    return { cancel: function() { root.cancelHandle(job, waiter) } }
+    return {
+      cancel: function() { root.cancelHandle(job, waiter) },
+      promote: function() {
+        if (!answered && Scheduler.promoteJob(root.queue, job)) {
+          root.bump()
+          Qt.callLater(root.pump)
+        }
+      }
+    }
   }
 
   function pendingFor(owner, writesOnly) {
@@ -116,8 +124,11 @@ Item {
     }
     // A provider's closure can outlive the provider (destroyed mid-flight), and
     // a throwing callback must not wedge the lane for everybody else.
-    try { fn(result, info) }
-    catch (e) { console.warn("note-note: request queue callback threw:", e) }
+    try {
+      fn(result, info)
+    } catch (e) {
+      console.warn("note-note: request queue callback threw:", e)
+    }
   }
 
   // Every caller waiting on this job, answered once and then forgotten — so a

@@ -57,7 +57,7 @@ Item {
         textFormat: Text.PlainText
         anchors.centerIn: parent
         text: root.keybindings ? root.keybindings.label("app/search") : ""
-        color: Util.alpha(root.foreground, 0.6)
+        color: Style.secondaryText(root.foreground, 0.6)
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
       }

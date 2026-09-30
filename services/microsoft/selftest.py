@@ -316,7 +316,7 @@ def test_dead_grant_is_forgotten(verbose):
     failures += check("Graph was asked only once", len(endpoint.to("graph")) == 1,
                       "%d requests" % len(endpoint.to("graph")))
     if verbose:
-        print("  answered %r" % (answer,))
+        print("  raised %r" % (error,))
     print("a grant that will not refresh is deleted, not re-reported")
     print("  %d checks failed" % failures if failures else "  all green")
     return failures
@@ -376,7 +376,7 @@ def test_a_blip_during_a_forced_refresh_keeps_the_token(verbose):
                       msgraph.load_json(msgraph.TOKENS, {}).get("refresh_token") == "refresh-me",
                       "%r" % (msgraph.load_json(msgraph.TOKENS, {}),))
     if verbose:
-        print("  answered %r" % (answer,))
+        print("  raised %r" % (error,))
     print("a server blip during a forced refresh keeps the sign-in")
     print("  %d checks failed" % failures if failures else "  all green")
     return failures
@@ -519,6 +519,32 @@ def test_the_entry_point_answers_for_the_library(verbose):
     return failures
 
 
+def test_background_admission_leaves_foreground_available(verbose):
+    failures = 0
+    sign_in()
+    endpoint = Endpoint(graph=[(200, {"value": []}, headers())])
+    key = "graph-background-test"
+    before = msgraph.settings
+    msgraph.settings = msgraph.Settings(rate_key=key, rate_windows=[(60, 5), (3600, 7)])
+    msgraph.ratelimit._save(key, {"stamps": [time.time()] * 3, "holders": [], "cooldownUntil": 0})
+    try:
+        with scripted(endpoint):
+            try:
+                with msgraph.background_requests(reserve=2):
+                    msgraph.graph("GET", "/me")
+                failures += check("background Graph read defers at the reserve", False)
+            except msgraph.ratelimit.Deferred:
+                failures += check("deferred Graph read never touches HTTP", endpoint.calls == [])
+            failures += check("background scope is restored after deferral", msgraph.settings.background_reserve == 0)
+            status, response = msgraph.graph("GET", "/me")
+            failures += check("foreground Graph read still succeeds", status == 200 and response == {"value": []})
+    finally:
+        msgraph.settings = before
+    print("background Graph requests preserve foreground capacity")
+    print("  %d checks failed" % failures if failures else "  all green")
+    return failures
+
+
 def test_bounded_reader_holds_size_and_time(verbose):
     """One reader for every transport: it stops at the byte limit, and it
     stops at the deadline on a body that arrives a byte at a time — the
@@ -571,6 +597,7 @@ def main():
         total += test_optional_refresh_with_malformed_reply_or_omitted_scope(args.verbose)
         total += test_cache_session_and_inflight_refresh(args.verbose)
         total += test_the_entry_point_answers_for_the_library(args.verbose)
+        total += test_background_admission_leaves_foreground_available(args.verbose)
         total += test_bounded_reader_holds_size_and_time(args.verbose)
     finally:
         shutil.rmtree(WORK, ignore_errors=True)

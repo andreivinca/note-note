@@ -103,6 +103,9 @@ function enqueue(state, opts) {
   }
   if (at >= 0 && mode === "dedupe") {
     var existing = state.jobs[at]
+    // A section opened by the user can already be waiting as background
+    // discovery. Joining it also carries the caller's greater urgency.
+    existing.priority = Math.min(existing.priority, job.priority)
     if (opts.settled) {
       existing.settled.push(opts.settled)
     }
@@ -266,6 +269,14 @@ function cancelJob(state, job) {
     return false  // in flight: not preempted
   }
   state.jobs.splice(at, 1)
+  return true
+}
+
+function promoteJob(state, job) {
+  if (state.jobs.indexOf(job) < 0 || job.priority === 0) {
+    return false
+  }
+  job.priority = 0
   return true
 }
 

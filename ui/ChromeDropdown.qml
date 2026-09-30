@@ -37,7 +37,7 @@ Controls.Dropdown {
     text: "󰅀"
     font.family: Style.font.family
     font.pixelSize: Style.font.iconSmall
-    color: Util.alpha(control.foreground, 0.65)
+    color: Style.secondaryText(control.foreground, 0.65)
   }
   background: Rectangle {
     radius: controlStyle.radius

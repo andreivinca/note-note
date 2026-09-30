@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """OneNote provider (Notes.ReadWrite; Files.Read is optional for section order).
 
-  onenote.py list [--cached|--max-age S|--force] -> {"sections":[{id,name,notebook,notebookId,modified}],
+  onenote.py list [--cached|--max-age S|--force] [--incremental] -> {"sections":[{id,name,notebook,notebookId,modified}],
                                            "pages":[{id,sectionId,title,modified}]}
                                            --cached: cache only; --max-age S: cache if younger than S seconds;
                                            --force: fetch every section, ignoring the per-section timestamps
+                                           --incremental: return the tree before fetching page lists
+  onenote.py list-step <file|->       -> one page-list response for {"sectionId", "interactive"?}
   onenote.py page <id> [--check]        -> {"title","body"(markdown),"editable","view"}
   onenote.py update <id> <file>         -> reads {"title","body","view","resolution"?}
   onenote.py create <sectionId> <file>  -> {"ok":true,"page":{...}}
@@ -17,6 +19,7 @@
 """
 import html as _html
 import contextlib
+import fcntl
 import json, os, re, sys, time, urllib.parse, urllib.request, urllib.error, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -34,6 +37,7 @@ import onenote_md  # noqa: E402
 import onenote_patch  # noqa: E402
 from notemerge import MergeStore, StaleRemote, snapshot  # noqa: E402
 import search_index  # noqa: E402
+import notebook_inventory  # noqa: E402
 
 # OneNote's own Graph budget, shared with no other provider: a throttle here
 # parks OneNote and leaves Sticky Notes listing. Microsoft's delegated OneNote
@@ -53,6 +57,8 @@ ONENOTE_ORDER = os.path.join(CACHE_DIR, "note-note-onenote-order.json")
 ONENOTE_IMG_DIR = os.path.join(CACHE_DIR, "note-note-onenote-img")
 # This provider's limits: what it will read from Graph and keep around.
 MAX_SECTIONS = 500
+INVENTORY_VERSION = 2
+READ_ONLY_REASON = "This notebook is shared with you as read-only."
 MAX_PAGES = 3000
 MAX_LIST_BODY = 4 * 1024 * 1024   # one page of a listing
 SECTION_ORDER_VERSION = 3       # invalidates an order established before repeated numbers and several TOCs were accepted
@@ -118,7 +124,60 @@ def graph_err(res, status):
 CHECKPOINT_SECONDS = 1.5
 
 
-def section_pages_url(section_id):
+def cached_resource(collection, resource_id):
+    return next((value for value in (load_listing() or {}).get(collection, [])
+                 if value.get("id") == resource_id), {})
+
+
+def resource_read_only(collection, resource_id):
+    """Resolve a page or section's current notebook permission from the inventory."""
+    cache = load_listing() or {}
+
+    def find(kind, identifier):
+        return next((item for item in cache.get(kind, []) if item.get("id") == identifier), {})
+
+    resource = find(collection, resource_id)
+    if collection == "pages":
+        resource = find("sections", resource.get("sectionId"))
+    if collection in ("pages", "sections"):
+        resource = find("notebooks", resource.get("notebookId"))
+    return str(resource.get("userRole", "")).lower() in ("reader", "none")
+
+
+def require_writable(collection, resource_id):
+    if resource_read_only(collection, resource_id):
+        fail(READ_ONLY_REASON)
+
+
+def resource_url(collection, resource_id):
+    resource = cached_resource(collection, resource_id)
+    url = notebook_inventory.graph_url(resource.get("self"))
+    return url or "/me/onenote/%s/%s" % (collection, urllib.parse.quote(resource_id, safe=""))
+
+
+def page_content_url(page_id):
+    resource = cached_resource("pages", page_id)
+    url = notebook_inventory.graph_url(resource.get("contentUrl"))
+    return url or resource_url("pages", page_id) + "/content"
+
+
+def page_record(page, section):
+    result = {"id": page["id"], "title": page.get("title", "") or "",
+              "sectionId": section["id"], "modified": page.get("lastModifiedDateTime", "")}
+    endpoint = notebook_inventory.graph_url(page.get("self"))
+    if not endpoint:
+        section_url = notebook_inventory.graph_url(section.get("pagesUrl"))
+        if section_url and "/sections/" in section_url:
+            endpoint = section_url.split("/sections/", 1)[0] + "/pages/" + urllib.parse.quote(page["id"], safe="")
+    if endpoint:
+        result["self"] = endpoint
+    content = notebook_inventory.graph_url(page.get("contentUrl"))
+    if content:
+        result["contentUrl"] = content
+    return result
+
+
+def section_pages_url(section_id, pages_url=None):
     """The pages of one section, in the order the OneNote app shows them.
 
     `$orderby=order` is the order the user set by dragging page tabs, and the
@@ -130,8 +189,33 @@ def section_pages_url(section_id):
     and the provider walks it as given (Provider.qml, rebuild). Nothing here
     can re-sort it, because there is no key left to sort by.
     """
-    return ("/me/onenote/sections/%s/pages?$select=id,title,lastModifiedDateTime&$orderby=order&$top=100"
-            % urllib.parse.quote(section_id, safe=""))
+    if pages_url is None:
+        pages_url = cached_resource("sections", section_id).get("pagesUrl")
+    endpoint = notebook_inventory.graph_url(pages_url) or resource_url("sections", section_id) + "/pages"
+    return endpoint + "?$select=id,title,lastModifiedDateTime,self,contentUrl&$orderby=order&$top=100"
+
+
+def collect_section_pages(section, get):
+    """Follow a bounded section listing, validating every continuation."""
+    found = []
+    visited = set()
+    url = section_pages_url(section["id"], section.get("pagesUrl"))
+    while url and len(found) < MAX_PAGES and len(visited) < MAX_PAGES:
+        if url in visited:
+            return {"pages": found, "error": "Microsoft returned a repeated page listing link"}
+        visited.add(url)
+        status, response = get(url)
+        if status != 200:
+            return {"pages": found, "error": graph_err(response, status),
+                    "kind": "transient" if status in TRANSIENT_STATUSES else None}
+        found.extend(page_record(page, section) for page in response.get("value", []))
+        next_url = response.get("@odata.nextLink")
+        url = notebook_inventory.graph_url(next_url)
+        if next_url and not url:
+            return {"pages": found[:MAX_PAGES], "error": "Microsoft returned an invalid page listing link"}
+    if url or len(found) > MAX_PAGES:
+        return {"pages": found[:MAX_PAGES], "error": "The page listing limit was reached"}
+    return {"pages": found}
 
 
 def content_index():
@@ -154,6 +238,27 @@ def load_listing(default=None):
 
 def save_listing(cached):
     msgraph.save_for_session(ONENOTE_CACHE, cached)
+
+
+def invalidate_page_lists(cache, section_id=None):
+    """Invalidate responses begun before a mutation of this inventory."""
+    cache["pageRevision"] = uuid.uuid4().hex
+    cache["pageListSerial"] = cache.get("pageListSerial", 0) + 1
+    cache.pop("notebookProgress", None)
+    if section_id is not None:
+        cache.get("sectionProgress", {}).pop(section_id, None)
+
+
+@contextlib.contextmanager
+def listing_lock():
+    """Serialise cache updates, never network requests."""
+    os.makedirs(os.path.dirname(ONENOTE_CACHE), mode=0o700, exist_ok=True)
+    fd = os.open(ONENOTE_CACHE + ".lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
 
 
 def load_order():
@@ -206,8 +311,12 @@ def cmd_search_step(payload):
         out({"status": index.status()})
         return
     try:
-        status, html = graph_raw("GET", "/me/onenote/pages/" + urllib.parse.quote(ticket["id"], safe="")
-                                 + "/content", retry_policy=msgraph.RetryPolicy.NEVER)
+        with msgraph.background_requests():
+            status, html = graph_raw("GET", page_content_url(ticket["id"]), retry_policy=msgraph.RetryPolicy.NEVER)
+    except ratelimit.Deferred as deferred:
+        index.release(ticket)
+        out({"status": index.status(), "deferred": True, "retryAfter": deferred.retry_after})
+        return
     except (ratelimit.Throttled, msgraph.GraphError):
         index.failed(ticket)
         raise
@@ -331,20 +440,26 @@ class Listing:
     `lastModifiedDateTime` beside them. A listing cut short by a throttle
     keeps everything it fetched, and the next run picks up the tail.
 
-    **Diff by timestamp.** The single request that lists all sections already
-    says when each was last modified, so a re-listing fetches pages only for
+    **Diff by timestamp.** The notebook inventory includes each section's
+    last modification time, so a re-listing fetches pages only for
     the sections whose stamp moved (and ones it has never seen). A quiet
     account skips page requests entirely. `--force` — the
     Refresh row — ignores the stamps and fetches everything.
     """
 
-    def __init__(self, cache, sections):
+    def __init__(self, cache, sections, notebooks=None):
         self.sections = sections
+        self.notebooks = cache.get("notebooks", []) if notebooks is None else notebooks
         self.by_section = {}
         for pg in (cache.get("pages") or []):
             self.by_section.setdefault(pg.get("sectionId", ""), []).append(pg)
         seen = cache.get("sectionPages")
         self.seen = dict(seen) if isinstance(seen, dict) else {}
+        self.progress = dict(cache.get("sectionProgress") or {})
+        self.notebook_progress = cache.get("notebookProgress")
+        self.warnings = cache.get("listingWarnings", [])
+        self.revision = cache.get("pageRevision", "")
+        self.serial = cache.get("pageListSerial", 0)
         # `fetched` means "the whole account was listed", which is what
         # --max-age is measured against; a partial save must not start it.
         self.fetched = cache.get("fetched", 0) if isinstance(cache.get("fetched"), (int, float)) else 0
@@ -361,6 +476,16 @@ class Listing:
     def record(self, sct, pages):
         self.by_section[sct["id"]] = pages
         self.seen[sct["id"]] = {"modified": sct.get("modified", ""), "at": time.time()}
+        self.progress.pop(sct["id"], None)
+
+    def prepare_sections(self, force=False):
+        for section in self.sections:
+            sid = section["id"]
+            progress = self.progress.get(sid, {})
+            if force:
+                self.seen.pop(sid, None)
+            if force or progress.get("modified") != section.get("modified", ""):
+                self.progress.pop(sid, None)
 
     def pages(self):
         found = []
@@ -368,15 +493,68 @@ class Listing:
             found.extend(self.by_section.get(sct["id"], []))
         return found[:MAX_PAGES]
 
+    def complete(self):
+        return (not self.warnings and not self.notebook_progress and self.within_limits()
+                and all(not self.stale(section, False) for section in self.sections))
+
     def save(self, complete):
         live = set(sct["id"] for sct in self.sections)
         self.seen = dict((k, v) for k, v in self.seen.items() if k in live)
+        self.progress = {key: value for key, value in self.progress.items() if key in live}
+        complete = complete and self.complete()
         if complete:
             self.fetched = time.time()
-        save_listing({"sections": self.sections, "pages": self.pages(),
+        self.serial += 1
+        save_listing({"sections": self.sections, "notebooks": self.notebooks, "pages": self.pages(),
                       "sectionPages": self.seen, "fetched": self.fetched,
-                      "inventoryComplete": complete and self.within_limits()})
+                      "sectionProgress": self.progress, "listingWarnings": self.warnings,
+                      "notebookProgress": self.notebook_progress,
+                      "pageRevision": self.revision,
+                      "pageListSerial": self.serial,
+                      "inventoryVersion": INVENTORY_VERSION,
+                      "inventoryComplete": complete})
         self.last_write = time.monotonic()
+
+    def commit(self, complete):
+        """Checkpoint a full listing only while its cache snapshot is current."""
+        with listing_lock():
+            latest = load_listing() or {}
+            if (latest.get("pageRevision", "") != self.revision
+                    or latest.get("pageListSerial", 0) != self.serial):
+                raise msgraph.GraphError("The notebook inventory changed — retry the listing", kind="transient")
+            self.revision = uuid.uuid4().hex
+            self.save(complete)
+
+    def page_limit(self, section_id):
+        other_pages = sum(len(self.by_section.get(section["id"], []))
+                          for section in self.sections if section["id"] != section_id)
+        return max(0, MAX_PAGES - other_pages)
+
+    def pending(self):
+        # A full cache can still refresh its existing sections. A capped
+        # continuation stops until a refresh or changed section restarts it.
+        return [section["id"] for section in self.sections
+                if self.stale(section, False) and self.page_limit(section["id"]) > 0
+                and not self.progress.get(section["id"], {}).get("limited")]
+
+    def retain_pages(self, section_id, pages):
+        """Publish partial titles without treating absent pages as deletions."""
+        updated = {page["id"]: page for page in pages}
+        previous = self.by_section.get(section_id, [])
+        retained = [updated.get(page["id"], page) for page in previous]
+        seen = {page["id"] for page in previous}
+        retained.extend(page for page in pages if page["id"] not in seen)
+        self.by_section[section_id] = retained[:self.page_limit(section_id)]
+
+    def answer(self):
+        pending = self.pending()
+        retries = {sid: self.progress.get(sid, {}).get("retryAt", 0) for sid in pending}
+        return {"sections": remembered_order(self.sections, load_order()), "notebooks": self.notebooks,
+                "pages": self.pages(), "inventoryReady": True,
+                "inventoryComplete": self.complete(),
+                "pendingSections": pending, "sectionRetryAt": retries,
+                "pageListSerial": self.serial,
+                "listingWarnings": self.warnings}
 
     def within_limits(self):
         # Hitting either listing cap means we cannot claim complete coverage.
@@ -385,10 +563,16 @@ class Listing:
 
     def checkpoint(self):
         if time.monotonic() - self.last_write >= CHECKPOINT_SECONDS:
-            self.save(False)
+            self.commit(False)
 
 
-def cmd_onenote_list(cached, max_age=0, force=False):
+def retain_missing(current, previous):
+    """An incomplete inventory cannot establish that a cached item was removed."""
+    seen = {item["id"] for item in current}
+    return current + [item for item in previous if item["id"] not in seen]
+
+
+def cmd_onenote_list(cached, max_age=0, force=False, incremental=False):
     """The account's sections and pages. The custom section order is not
     established here: the listing answers in the order the last pass left
     (remembered_order) and says when a pass is due - after every network
@@ -396,32 +580,82 @@ def cmd_onenote_list(cached, max_age=0, force=False):
     the consent - and the provider runs `section-order` beside it."""
     c = load_listing()
     order = load_order()
-    if cached or (max_age and c and time.time() - c.get("fetched", 0) < max_age):
+    if cached or (max_age and c and c.get("inventoryVersion") == INVENTORY_VERSION
+                  and c.get("inventoryComplete") is True
+                  and time.time() - c.get("fetched", 0) < max_age):
         inventory_ready = c is not None
         c = c or {"sections": [], "pages": []}
         sections = c.get("sections", [])
-        out({"sections": remembered_order(sections, order), "pages": c.get("pages", []),
-             "cached": True, "inventoryReady": inventory_ready,
-             "inventoryComplete": c.get("inventoryComplete", False),
-             "sectionOrderPending": bool(sections) and not order_matches(order)})
+        answer = Listing(c, sections).answer() if inventory_ready else {}
+        answer.update(sections=remembered_order(sections, order), notebooks=c.get("notebooks", []),
+                      pages=c.get("pages", []), cached=True, inventoryReady=inventory_ready,
+                      inventoryComplete=c.get("inventoryComplete", False),
+                      sectionOrderPending=bool(sections) and not order_matches(order))
+        out(answer)
         return
-    sections = []
-    url = ("/me/onenote/sections?$select=id,displayName,lastModifiedDateTime,parentNotebook"
-           "&$expand=parentNotebook($select=id,displayName)&$top=100")
-    while url and len(sections) < MAX_SECTIONS:
-        status, res = graph("GET", url, max_bytes=MAX_LIST_BODY)
-        if status != 200:
-            fail(graph_err(res, status))
-        for sct in res.get("value", []):
-            sections.append({"id": sct["id"], "name": sct.get("displayName", ""),
-                             "notebook": (sct.get("parentNotebook") or {}).get("displayName", ""),
-                             "notebookId": (sct.get("parentNotebook") or {}).get("id", ""),
-                             "modified": sct.get("lastModifiedDateTime", "")})
-        url = res.get("@odata.nextLink")
-    sections = remembered_order(sections[:MAX_SECTIONS], order)
     cache = c if isinstance(c, dict) else {}
+    revision = cache.get("pageRevision", "")
+    discovery_progress = cache.get("notebookProgress") if incremental and not force else None
+    refresh_pages = force or bool(discovery_progress and discovery_progress.get("force"))
+
+    def checkpoint(progress):
+        with listing_lock():
+            latest = load_listing() or {}
+            if latest.get("pageRevision", "") != revision:
+                raise msgraph.GraphError("The notebook inventory changed — retry the listing", kind="transient")
+            progress["force"] = refresh_pages
+            latest["notebookProgress"] = progress
+            save_listing(latest)
+
+    try:
+        with msgraph.background_requests() if incremental else contextlib.nullcontext():
+            notebooks, sections, warnings = notebook_inventory.discover(
+                graph, MAX_SECTIONS, MAX_LIST_BODY,
+                progress=discovery_progress,
+                checkpoint=checkpoint if incremental else None)
+    except ratelimit.Deferred as deferred:
+        with listing_lock():
+            latest = load_listing() or {}
+            progress = latest.get("notebookProgress") or {}
+            sections = retain_missing(progress.get("sections", []), latest.get("sections", []))[:MAX_SECTIONS]
+            notebooks = retain_missing(progress.get("notebooks", []), latest.get("notebooks", []))[:MAX_SECTIONS]
+            listing = Listing(latest, sections, notebooks)
+            if progress.get("notebooks"):
+                listing.warnings = progress.get("warnings", []) + ["Notebook discovery is incomplete"]
+                if (sections != latest.get("sections", []) or notebooks != latest.get("notebooks", [])
+                        or listing.warnings != latest.get("listingWarnings", [])):
+                    listing.prepare_sections()
+                    listing.revision = uuid.uuid4().hex
+                    listing.save(False)
+            ready = latest.get("inventoryVersion") == INVENTORY_VERSION or bool(notebooks)
+            out(dict(listing.answer(), inventoryReady=ready, deferred=True, retryAfter=deferred.retry_after))
+        return
+    except notebook_inventory.DiscoveryError as error:
+        fail(graph_err(error.response, error.status),
+             kind="transient" if error.status in TRANSIENT_STATUSES else None)
+    if warnings:
+        notebooks = retain_missing(notebooks, cache.get("notebooks", []))[:MAX_SECTIONS]
+        sections = retain_missing(sections, cache.get("sections", []))
+    sections = remembered_order(sections[:MAX_SECTIONS], order)
+    if incremental:
+        with listing_lock():
+            latest = load_listing() or {}
+            if latest.get("pageRevision", "") != revision:
+                answer = Listing(latest, latest.get("sections", [])).answer()
+                out(dict(answer, deferred=True, retryAfter=0.1))
+                return
+            listing = Listing(latest, sections, notebooks)
+            listing.warnings = warnings
+            listing.notebook_progress = None
+            listing.revision = uuid.uuid4().hex
+            listing.prepare_sections(refresh_pages)
+            listing.save(listing.complete())
+            out(dict(listing.answer(), cached=False, sectionOrderPending=bool(sections)))
+        return
     token = access_token()
-    listing = Listing(cache, sections)
+    listing = Listing(cache, sections, notebooks)
+    listing.warnings = warnings
+    listing.notebook_progress = None
     todo = [sct for sct in sections if listing.stale(sct, force)]
 
     # Pages are listed per section: the account-wide /me/onenote/pages call
@@ -432,55 +666,135 @@ def cmd_onenote_list(cached, max_age=0, force=False):
 
     # All workers use the already-validated token snapshot. Optional ordering
     # cannot change it or impose a cooldown on this normal OneNote lane.
-    def section_pages(sct):
-        found = []
-        url = section_pages_url(sct["id"])
-        while url and len(found) < MAX_PAGES:
-            # A worker answers for its own section only: the classification
-            # is carried back, and the run below keeps what did arrive before
-            # it reports. A GraphError raised in here (a network error)
-            # reaches the run through its future and is kept the same way.
-            status, res = http("GET", url if url.startswith("http") else GRAPH + url, headers={
-                "Authorization": "Bearer " + token, "Accept": "application/json"},
-                max_bytes=MAX_LIST_BODY, retry_policy=msgraph.RetryPolicy.NEVER)
-            if status != 200:
-                return {"error": graph_err(res, status),
-                        "kind": "transient" if status in TRANSIENT_STATUSES else None}
-            for pg in res.get("value", []):
-                found.append({"id": pg["id"], "title": pg.get("title", "") or "",
-                              "sectionId": sct["id"], "modified": pg.get("lastModifiedDateTime", "")})
-            url = res.get("@odata.nextLink")
-        return found
+    def get(url):
+        return http("GET", url if url.startswith("http") else GRAPH + url,
+                    headers={"Authorization": "Bearer " + token, "Accept": "application/json"},
+                    max_bytes=MAX_LIST_BODY, retry_policy=msgraph.RetryPolicy.NEVER)
 
     if todo:
         error, error_kind = "", None
         try:
             with ThreadPoolExecutor(max_workers=4) as pool:
-                futures = dict((pool.submit(section_pages, sct), sct) for sct in todo)
+                futures = {pool.submit(collect_section_pages, sct, get): sct for sct in todo}
                 for future in as_completed(futures):
                     result = future.result()
-                    if isinstance(result, dict):
-                        error, error_kind = result["error"], result.get("kind")
-                        break
-                    listing.record(futures[future], result)
+                    if result.get("error"):
+                        if result.get("kind") == "transient":
+                            error, error_kind = result["error"], result["kind"]
+                            break
+                        section = futures[future]
+                        warnings.append(section["notebook"] + " › " + section["name"] + ": " + result["error"])
+                        listing.retain_pages(section["id"], result.get("pages", []))
+                        continue
+                    listing.record(futures[future], result["pages"])
                     listing.checkpoint()
         except (ratelimit.Throttled, msgraph.GraphError):
             # Keep what did arrive: the sections stored here are skipped by
             # their own stamp next time, so the run after the cooldown fetches
             # only the tail instead of spending the budget again from scratch.
-            listing.save(False)
+            listing.commit(False)
             raise
         if error:
             # Whatever went wrong, what did arrive is kept first — the same
             # bargain the `Throttled` path above makes, and the reason a run
             # after a failure fetches only the tail.
-            listing.save(False)
+            listing.commit(False)
             fail(error, kind=error_kind)
 
-    listing.save(True)
-    out({"sections": sections, "pages": listing.pages(), "cached": False,
-         "inventoryComplete": listing.within_limits(),
+    complete = listing.complete()
+    listing.commit(complete)
+    out({"sections": sections, "notebooks": notebooks, "pages": listing.pages(), "cached": False,
+         "listingWarnings": warnings,
+         "inventoryComplete": complete and listing.within_limits(),
          "sectionOrderPending": bool(sections)})
+
+
+def cmd_list_step(payload):
+    """Fetch at most 100 page titles, then yield the queue to user actions.
+
+    Pagination is persisted. Until a section is complete, cached pages are
+    retained; a partial response cannot establish that a page was deleted.
+    """
+    data = read_payload(payload) or {}
+    sid = data.get("sectionId")
+    if not isinstance(sid, str) or len(sid) > 1024:
+        fail("invalid section")
+    interactive = data.get("interactive") is True
+    with listing_lock():
+        cache = load_listing() or {}
+        listing = Listing(cache, cache.get("sections", []))
+        section = next((section for section in listing.sections if section["id"] == sid), None)
+        if section is None:
+            out(listing.answer())
+            return
+        if data.get("refresh") is True:
+            listing.seen.pop(sid, None)
+            listing.progress.pop(sid, None)
+            listing.revision = uuid.uuid4().hex
+            listing.save(False)
+        if sid not in listing.pending():
+            out(listing.answer())
+            return
+        progress = listing.progress.get(sid, {})
+        retry_after = max(0, progress.get("retryAt", 0) - time.time())
+        if retry_after and not interactive:
+            out(dict(listing.answer(), deferred=True, retryAfter=retry_after))
+            return
+        url = progress.get("url") or section_pages_url(sid, section.get("pagesUrl"))
+        if progress.get("url") and not notebook_inventory.graph_url(url):
+            fail("invalid saved page listing link")
+        revision = listing.revision
+
+    try:
+        with contextlib.nullcontext() if interactive else msgraph.background_requests():
+            status, response = graph("GET", url, max_bytes=MAX_LIST_BODY,
+                                     retry_policy=msgraph.RetryPolicy.NEVER)
+    except ratelimit.Deferred as deferred:
+        out(dict(listing.answer(), deferred=True, retryAfter=deferred.retry_after))
+        return
+
+    with listing_lock():
+        latest = load_listing() or {}
+        listing = Listing(latest, latest.get("sections", []))
+        current = listing.progress.get(sid, {})
+        # Another discovery, creation, deletion or section refresh invalidates
+        # the response. A continuation also has to match its starting point.
+        if (listing.revision != revision or current.get("url") != progress.get("url")
+                or not listing.stale(section, False)):
+            out(listing.answer())
+            return
+        if status != 200:
+            listing.progress[sid] = dict(progress, modified=section.get("modified", ""),
+                                         retryAt=time.time() + 300)
+            listing.save(False)
+            out(dict(listing.answer(), listingError=graph_err(response, status)))
+            return
+        found = progress.get("pages", [])
+        seen = {page["id"] for page in found}
+        for page in response.get("value", []):
+            if page["id"] not in seen:
+                found.append(page_record(page, section))
+                seen.add(page["id"])
+        limit = listing.page_limit(sid)
+        next_url = response.get("@odata.nextLink")
+        visited = progress.get("visited", []) + [url]
+        if next_url and (not notebook_inventory.graph_url(next_url) or next_url in visited
+                         or len(visited) >= MAX_PAGES):
+            listing.progress[sid] = dict(progress, modified=section.get("modified", ""),
+                                         retryAt=time.time() + 300)
+            listing.save(False)
+            out(dict(listing.answer(), listingError="Microsoft returned an invalid page listing link"))
+            return
+        limited = len(found) > limit or (bool(next_url) and len(found) >= limit)
+        found = found[:limit]
+        if next_url or limited:
+            listing.progress[sid] = {"modified": section.get("modified", ""), "url": next_url,
+                                     "pages": found, "visited": visited, "limited": limited}
+            listing.retain_pages(sid, found)
+        else:
+            listing.record(section, found)
+        listing.save(listing.complete())
+        out(dict(listing.answer(), sectionId=sid, sectionComplete=not next_url and not limited))
 
 
 def cmd_section_order():
@@ -509,8 +823,7 @@ def cmd_section_order():
 # the bearer token, and never across a redirect: an <img src> in page content
 # is untrusted and must not be able to send our token (or any request)
 # anywhere else. Anything else is shown as text, not loaded.
-IMAGE_HOST = "graph.microsoft.com"
-IMAGE_PATH_RE = re.compile(r"^/v1\.0/(?:me|users\('[^']*'\))/onenote/resources/[A-Za-z0-9!._-]+/\$value$")
+IMAGE_PATH_RE = re.compile(notebook_inventory.ROOT_PATH.pattern + r"resources/[A-Za-z0-9!._-]+/\$value$")
 # One page's images share a wall-clock budget and a count; the cache as a
 # whole is bounded too, so a page full of unique images can neither hold a
 # fetch open nor fill the disk.
@@ -525,11 +838,13 @@ _image_opener = urllib.request.build_opener(provider_io.NoRedirect)
 
 
 def image_allowed(src):
+    if not notebook_inventory.graph_url(src):
+        return False
     try:
         u = urllib.parse.urlsplit(src)
     except ValueError:
         return False
-    return u.scheme == "https" and u.netloc.lower() == IMAGE_HOST and bool(IMAGE_PATH_RE.match(u.path)) and not u.query and not u.fragment
+    return bool(IMAGE_PATH_RE.match(u.path)) and not u.query
 
 
 # A cached image on its own says nothing about where it came from, and a save
@@ -667,7 +982,8 @@ def cached_image(src, width=0):
         # An image is a Graph request like any other and is paced like one:
         # forty of them is what a picture-heavy page costs, and that is most
         # of a minute's budget on its own.
-        with ratelimit.slot(msgraph.settings.rate_key, msgraph.settings.rate_windows):
+        with ratelimit.slot(msgraph.settings.rate_key, msgraph.settings.rate_windows,
+                            reserve=msgraph.settings.background_reserve):
             with _image_opener.open(req, timeout=20) as r:
                 # Bounded in size and in time: a TimeoutError is an OSError, caught below.
                 data = provider_io.read_bounded(r, MAX_IMAGE, deadline)
@@ -699,21 +1015,36 @@ def cached_image(src, width=0):
 
 def cmd_onenote_pages(section_ids):
     """Pages of a few sections (one request each) — for cheap refreshes."""
+    section_ids = section_ids[:10]
+    cache = load_listing() or {}
+    sections = {section["id"]: section for section in cache.get("sections", [])}
     found = []
-    for sid in section_ids[:10]:
-        url = section_pages_url(sid)
-        while url and len(found) < MAX_PAGES:
-            status, res = graph("GET", url, max_bytes=MAX_LIST_BODY)
-            if status != 200:
-                fail(graph_err(res, status))
-            for pg in res.get("value", []):
-                found.append({"id": pg["id"], "title": pg.get("title", "") or "", "sectionId": sid, "modified": pg.get("lastModifiedDateTime", "")})
-            url = res.get("@odata.nextLink")
-    c = load_listing()
-    if c:
-        c["pages"] = [p for p in c.get("pages", []) if p["sectionId"] not in section_ids] + found
-        save_listing(c)
-    out({"sections": section_ids[:10], "pages": found})
+
+    def get(url):
+        return graph("GET", url, max_bytes=MAX_LIST_BODY)
+
+    for sid in section_ids:
+        result = collect_section_pages(sections.get(sid, {"id": sid}), get)
+        if result.get("error"):
+            fail(result["error"], kind=result.get("kind"))
+        found.extend(result["pages"])
+    if len(found) > MAX_PAGES:
+        fail("The page listing limit was reached")
+    with listing_lock():
+        c = load_listing()
+        if c:
+            if (c.get("pageRevision", "") != cache.get("pageRevision", "")
+                    or c.get("pageListSerial", 0) != cache.get("pageListSerial", 0)):
+                raise msgraph.GraphError("The notebook inventory changed — retry the listing", kind="transient")
+            pages = [p for p in c.get("pages", []) if p["sectionId"] not in section_ids] + found
+            if len(pages) > MAX_PAGES:
+                fail("The page listing limit was reached")
+            c["pages"] = pages
+            for sid in section_ids:
+                c.get("sectionProgress", {}).pop(sid, None)
+            invalidate_page_lists(c)
+            save_listing(c)
+    out({"sections": section_ids, "pages": found, "pageListSerial": (c or {}).get("pageListSerial", 0)})
 
 
 def normalize_note(note):
@@ -767,7 +1098,7 @@ def read_page(page_id):
     _image_budget[0] = time.monotonic() + IMAGE_BUDGET_SECONDS
     _image_budget[1] = 0
     ticket = search_ticket(page_id)
-    url = "/me/onenote/pages/" + urllib.parse.quote(page_id, safe="") + "/content?includeIDs=true"
+    url = page_content_url(page_id) + "?includeIDs=true"
     status, html = graph_raw("GET", url)
     if status != 200:
         try:
@@ -777,22 +1108,27 @@ def read_page(page_id):
     result = onenote_md.html_to_markdown(html, cached_image)
     remember_images(page_id, result["images"], result["editable"])
     remember_search(page_id, html, ticket)
+    if resource_read_only("pages", page_id):
+        result["editable"] = False
+        result["reason"] = READ_ONLY_REASON
     return result, html
 
 
 def cmd_onenote_page(page_id, check=False):
-    with merge_store(page_id) as journal:
+    with msgraph.background_requests() if check else contextlib.nullcontext(), merge_store(page_id) as journal:
         # Recovery does not depend on the account's page service being online.
         if not check:
             recovered = journal.recover()
             if recovered is not None:
-                out(dict(recovered, editable=True, markdown=True))
+                read_only = resource_read_only("pages", page_id)
+                out(dict(recovered, editable=not read_only, markdown=True,
+                         reason=READ_ONLY_REASON if read_only else ""))
                 return
         remote, html = read_page(page_id)
         if check:
             journal.check_remote(remote)
         result = normalize_note(remote) if check else journal.open(remote)
-        out(dict(result, editable=remote["editable"], markdown=True))
+        out(dict(result, editable=remote["editable"], markdown=True, reason=remote.get("reason", "")))
 
 
 MIME_BY_SUFFIX = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
@@ -929,7 +1265,7 @@ def wrap_runs(runs):
 
 def write_page(page_id, note, remote, current):
     """Write a merge planned against the exact HTML fetched by this save."""
-    url = "/me/onenote/pages/" + urllib.parse.quote(page_id, safe="") + "/content"
+    url = page_content_url(page_id)
     saved_html = current
     if note["body"] != normalize_note(remote)["body"]:
         uploads = Uploads()
@@ -995,6 +1331,7 @@ def refuse_unkept_formatting(payload):
 
 
 def cmd_onenote_update(page_id, path):
+    require_writable("pages", page_id)
     payload = read_payload(path)
     if not isinstance(payload, dict):
         fail("cannot read payload")
@@ -1003,7 +1340,7 @@ def cmd_onenote_update(page_id, path):
         journal.stage(payload.get("view", ""), payload)
         remote, current = read_page(page_id)
         if not remote["editable"]:
-            fail("this page now contains content that cannot be saved safely — your draft was kept")
+            fail(remote.get("reason") or "this page now contains content that cannot be saved safely — your draft was kept")
         merged = journal.prepare(remote, payload.get("resolution"))
         if merged["conflict"]:
             out({"error": "This note changed elsewhere. Review the conflicting changes.",
@@ -1022,6 +1359,7 @@ def cmd_onenote_update(page_id, path):
 
 
 def cmd_onenote_create(section_id, path):
+    require_writable("sections", section_id)
     # Resolve the recovery identity before making a page. A failed profile
     # read must not leave a newly created page behind an apparent failure.
     merge_account()
@@ -1050,7 +1388,9 @@ def cmd_onenote_create(section_id, path):
         content_type, payload_bytes = "application/xhtml+xml", html.encode()
     # A 502 or a 504 is the gateway losing the answer to a page Graph may
     # already have made; re-running would leave the user with two or three.
-    status, res = graph_raw("POST", "/me/onenote/sections/" + urllib.parse.quote(section_id, safe="") + "/pages",
+    section = cached_resource("sections", section_id)
+    endpoint = notebook_inventory.graph_url(section.get("pagesUrl")) or resource_url("sections", section_id) + "/pages"
+    status, res = graph_raw("POST", endpoint,
                             payload_bytes, content_type, retry_policy=msgraph.RetryPolicy.NEVER)
     if status not in (200, 201):
         try:
@@ -1058,18 +1398,19 @@ def cmd_onenote_create(section_id, path):
         except ValueError:
             fail("Graph error %s" % status)
     pg = json.loads(res)
-    page = {"id": pg["id"], "title": pg.get("title", "") or "", "sectionId": section_id,
-            "modified": pg.get("lastModifiedDateTime", "")}
-    c = load_listing({"sections": [], "pages": []})
+    page = page_record(pg, dict(section, id=section_id))
     # A new page goes to the end of its section, which is where OneNote itself
     # puts one and so where the next listing will show it. (It used to go to
     # the front, which was right while the list was newest-first.)
-    kept = [p for p in c.get("pages", []) if p["id"] != page["id"]]
-    last = max([i for i, p in enumerate(kept) if p.get("sectionId") == section_id],
-               default=len(kept) - 1)
-    kept.insert(last + 1, page)
-    c["pages"] = kept
-    save_listing(c)
+    with listing_lock():
+        c = load_listing({"sections": [], "pages": []})
+        kept = [p for p in c.get("pages", []) if p["id"] != page["id"]]
+        last = max([i for i, p in enumerate(kept) if p.get("sectionId") == section_id],
+                   default=len(kept) - 1)
+        kept.insert(last + 1, page)
+        c["pages"] = kept
+        invalidate_page_lists(c, section_id)
+        save_listing(c)
     try:
         index = content_index()
         index.sync([page], replace=False)
@@ -1078,49 +1419,57 @@ def cmd_onenote_create(section_id, path):
         pass
     with merge_store(page["id"]) as journal:
         note = journal.open({"title": page["title"], "body": payload.get("body", "")})
-    out({"ok": True, "page": page, "note": note})
+    out({"ok": True, "page": page, "note": note, "pageListSerial": c["pageListSerial"]})
 
 
 def cmd_onenote_create_section(notebook_id, path):
+    require_writable("notebooks", notebook_id)
     payload = read_payload(path) or {}
     name = (payload.get("name") or "").strip()
     if not name:
         fail("a section needs a name")
     # Not repeatable either, for the same reason a page create is not.
-    status, res = graph("POST", "/me/onenote/notebooks/%s/sections" % urllib.parse.quote(notebook_id, safe=""),
+    status, res = graph("POST", resource_url("notebooks", notebook_id) + "/sections",
                         {"displayName": name[:50]}, retry_policy=msgraph.RetryPolicy.NEVER)
     if status not in (200, 201) or "id" not in res:
         fail(graph_err(res, status))
-    section = {"id": res["id"], "name": res.get("displayName", name),
-               "notebook": "", "notebookId": notebook_id}
-    c = load_listing()
-    if c:
-        for sct in c.get("sections", []):
-            if sct.get("notebookId") == notebook_id:
-                section["notebook"] = sct.get("notebook", "")
-                break
-        c["sections"] = c.get("sections", []) + [section]
-        save_listing(c)
-    out({"ok": True, "section": section})
+    notebook = cached_resource("notebooks", notebook_id)
+    section = notebook_inventory.section_record(res, {"id": notebook_id, "displayName": notebook.get("name", "")})
+    section["name"] = res.get("displayName", name)
+    with listing_lock():
+        c = load_listing()
+        if c:
+            for sct in c.get("sections", []):
+                if sct.get("notebookId") == notebook_id:
+                    section["notebook"] = sct.get("notebook", "")
+                    break
+            c["sections"] = c.get("sections", []) + [section]
+            invalidate_page_lists(c)
+            save_listing(c)
+    out({"ok": True, "section": section, "pageListSerial": (c or {}).get("pageListSerial", 0)})
 
 
 def cmd_onenote_delete(page_id):
+    require_writable("pages", page_id)
     with merge_store(page_id) as journal:
-        status, res = graph_raw("DELETE", "/me/onenote/pages/" + urllib.parse.quote(page_id, safe=""))
+        status, res = graph_raw("DELETE", resource_url("pages", page_id))
         if status not in (204, 200, 404):
             try:
                 fail(graph_err(json.loads(res), status))
             except ValueError:
                 fail("Graph error %s" % status)
-        c = load_listing({"sections": [], "pages": []})
-        c["pages"] = [p for p in c.get("pages", []) if p["id"] != page_id]
-        save_listing(c)
+        with listing_lock():
+            c = load_listing({"sections": [], "pages": []})
+            section = next((p.get("sectionId") for p in c.get("pages", []) if p["id"] == page_id), "")
+            c["pages"] = [p for p in c.get("pages", []) if p["id"] != page_id]
+            invalidate_page_lists(c, section)
+            save_listing(c)
         try:
             content_index().remove(page_id)
         except (OSError, ValueError):
             pass
         journal.discard()
-    out({"ok": True})
+    out({"ok": True, "pageListSerial": c["pageListSerial"]})
 
 
 
@@ -1134,7 +1483,9 @@ def main(argv):
                 age = int(argv[argv.index("--max-age") + 1])
             except (IndexError, ValueError):
                 age = 0
-        cmd_onenote_list("--cached" in argv[2:], age, "--force" in argv[2:])
+        cmd_onenote_list("--cached" in argv[2:], age, "--force" in argv[2:], "--incremental" in argv[2:])
+    elif cmd == "list-step" and len(argv) >= 3:
+        cmd_list_step(argv[2])
     elif cmd == "section-order":
         cmd_section_order()
     elif cmd == "pages" and len(argv) >= 3:
@@ -1181,6 +1532,8 @@ def run(argv):
         fail("OneNote is still syncing the previous save — try again shortly", kind="transient")
     except ratelimit.Throttled as t:
         fail_throttled(t)
+    except ratelimit.Deferred as deferred:
+        out({"deferred": True, "retryAfter": deferred.retry_after})
     except Exception as e:
         fail("%s: %s" % (type(e).__name__, e))
 

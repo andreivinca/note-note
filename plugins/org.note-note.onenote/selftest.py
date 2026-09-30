@@ -39,6 +39,7 @@ sys.path.insert(0, HERE)
 import msgraph  # noqa: E402
 import onenote  # noqa: E402
 import order_selftest  # noqa: E402
+import inventory_selftest  # noqa: E402
 
 FAILURES = []
 
@@ -302,6 +303,7 @@ def main():
         total += test_uncertain_mutations_are_sent_once(args.verbose)
         total += test_replacement_requires_a_fresh_job_after_503(args.verbose)
         total += check("remote section-order suite", order_selftest.run())
+        total += check("automatic notebook inventory suite", inventory_selftest.run())
     finally:
         shutil.rmtree(WORK, ignore_errors=True)
 

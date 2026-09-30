@@ -338,6 +338,35 @@ Window {
       tryVerify(function() { return workspace.writesSettled }, 10000)
     }
 
+    function checkLightSystemContrast() {
+      var light = Resolve.baseline({ background: "#faf4ed", foreground: "#575279", accent: "#56949f" })
+      var dark = Resolve.baseline({ background: "#191724", foreground: "#e0def4", accent: "#9ccfd8" })
+      verify(Qt.color(light["text.secondary"]).a >= 0.84)
+      verify(Qt.color(light["input.placeholder"]).a >= 0.84)
+      verify(Qt.color(light["tab.inactiveForeground"]).a >= 0.84)
+      verify(Math.abs(Qt.color(dark["text.secondary"]).a - 0.65) < 0.01)
+      compare(Resolve.secondaryOpacity("#191724", 0.48), 0.48)
+      compare(Resolve.secondaryOpacity("#faf4ed", 1), 1)
+      var custom = Resolve.resolve(light, { "text.secondary": "#80606060" })
+      compare(custom["text.secondary"], "#80606060")
+
+      var previousSource = Color.source
+      var previousTheme = Color.theme
+      try {
+        Color.source = { menu: { background: "#faf4ed", text: "#575279", border: "#cecacd",
+          scrim: "#80000000", selectedBackground: "#dce4e3", selectedText: "#575279" },
+          accent: "#56949f", urgent: "#b4637a", popups: { text: "#575279" } }
+        Color.theme = null
+        compare(Style.secondaryOpacity(0.48), 0.85)
+        capture(backend.env("NOTE_NOTE_TEST_LIGHT_SCREENSHOT"))
+        Color.theme = { followsSystem: false, colors: light }
+        compare(Style.secondaryOpacity(0.48), 0.48)
+      } finally {
+        Color.source = previousSource
+        Color.theme = previousTheme
+      }
+    }
+
     function run() {
       // Before anything was read from disk the colours are whole: the system's.
       compare(Object.keys(workspace.themes.colors).length, Object.keys(Tokens.specification).length)
@@ -372,6 +401,7 @@ Window {
       tryVerify(function() { return workspace.rows.some(function(row) { return row.kind === "note" }) }, 10000)
       workspace.choosePath(workspace.rows.find(function(row) { return row.kind === "note" }).path)
       tryVerify(function() { return !!workspace.currentPath && !workspace.loadingNote }, 10000)
+      checkLightSystemContrast()
       var editor = findChild(workspace, "noteEditor")
       verify(editor.canColorText)
       checkPackageTools(editor)

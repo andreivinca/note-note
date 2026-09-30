@@ -12,11 +12,11 @@ import unittest
 import manifest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "themes"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib"))
 import theme
+import packagefiles
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "lib"))
-import packagefiles
 
 
 class Catalog(unittest.TestCase):

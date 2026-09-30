@@ -10,12 +10,21 @@ function alpha(value, opacity) {
   return Qt.rgba(color.r, color.g, color.b, opacity)
 }
 
+// Pale desktop palettes need stronger secondary ink than dark palettes.
+// Keep disabled controls separate: this is for readable, available content.
+function secondaryOpacity(background, opacity) {
+  return luminance(background) > 0.5 ? Math.max(opacity, 0.85) : opacity
+}
+
 // Named recipes are application code, never expressions supplied by a theme.
 // A recipe's parameters are its token's `inputs`, in order.
 var recipes = {
   // A colour only the host can give. Black is what is left when it does not.
   root: function() { return "#000000" },
   alias: function(source) { return source },
+  activeTabBackground: function(selection, background, foreground) {
+    return luminance(background) > 0.5 ? Qt.tint(selection, alpha(foreground, 0.06)) : selection
+  },
   raised: function(background, foreground) { return Qt.tint(background, alpha(foreground, 0.07)) },
   muted: function(foreground) { return alpha(foreground, 0.65) },
   inactiveText: function(foreground) { return alpha(foreground, 0.68) },
@@ -60,8 +69,13 @@ function derive(name, palette) {
 function baseline(hostRoles) {
   var result = {}
   Object.keys(Tokens.specification).forEach(function(name) {
-    var supplied = hostRoles[Tokens.specification[name].systemRole]
+    var token = Tokens.specification[name]
+    var supplied = hostRoles[token.systemRole]
     result[name] = supplied === undefined ? derive(name, result) : supplied.toString()
+    if (supplied === undefined && ["muted", "inactiveText", "placeholder"].indexOf(token.recipe) >= 0) {
+      var opacity = Qt.color(result[name]).a
+      result[name] = alpha(result[name], secondaryOpacity(result["surface.background"], opacity)).toString()
+    }
   })
   return result
 }

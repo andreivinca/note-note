@@ -93,6 +93,14 @@ class Retry(Exception):
         Exception.__init__(self, "retry in %.1fs" % self.after)
 
 
+class Deferred(Exception):
+    """Optional work yielded to the foreground reserve; no service throttle."""
+
+    def __init__(self, retry_after):
+        self.retry_after = float(retry_after)
+        super().__init__("background work deferred for %.1fs" % self.retry_after)
+
+
 # ---------------------------------------------------------------- state files
 
 def _dir():
@@ -249,7 +257,7 @@ def window_wait(stamps, windows, t):
     return wait
 
 
-def _acquire(key, windows, now, sleep):
+def _acquire(key, windows, now, sleep, reserve=0):
     deadline = now() + PACE_TIMEOUT
     token = "%d-%s" % (os.getpid(), uuid.uuid4().hex[:8])
     while True:
@@ -259,12 +267,16 @@ def _acquire(key, windows, now, sleep):
             _trim(st, windows, t)
             if st["cooldownUntil"] > t:
                 raise Throttled(st["cooldownUntil"] - t, "rate cooldown is active")
-            wait = window_wait(st["stamps"], windows, t)
-            if wait <= 0 and len(st["holders"]) < MAX_CONCURRENT:
+            limits = [(span, max(1, budget - reserve)) for span, budget in windows] if reserve else windows
+            wait = window_wait(st["stamps"], limits, t)
+            concurrency = MAX_CONCURRENT - 1 if reserve else MAX_CONCURRENT
+            if wait <= 0 and len(st["holders"]) < concurrency:
                 st["stamps"].append(t)
                 st["holders"].append([os.getpid(), t, token])
                 st.dirty = True
                 return token
+            if reserve:
+                raise Deferred(wait if wait > 0 else CONCURRENCY_POLL)
             # The concurrency cap has no deadline to compute: a slot frees
             # when another process finishes, so this is the one poll here.
             if wait <= 0:
@@ -283,15 +295,21 @@ def _release(key, token):
 
 
 @contextlib.contextmanager
-def slot(key, windows, now=time.time, sleep=time.sleep):
+def slot(key, windows, now=time.time, sleep=time.sleep, reserve=0):
     """Admit one request against `key`'s budget, and hold a concurrency slot
     for as long as the body runs.
 
     Raises `Throttled` immediately when a cooldown is recorded, and when the
     projected wait is longer than `PACE_TIMEOUT`. `now`/`sleep` are injected
     so the selftest can run a fake clock.
+
+    A positive reserve leaves requests in every window and one HTTP slot
+    for the foreground. It raises Deferred immediately when optional work
+    cannot fit, without sleeping or recording a service cooldown.
     """
-    token = _acquire(key, windows, now, sleep)
+    # The reserve is checked under the admission lock, so two background
+    # workers cannot both spend the last request after an advisory check.
+    token = _acquire(key, windows, now, sleep, reserve)
     try:
         yield
     finally:
@@ -374,15 +392,15 @@ def retry_after_of(headers):
 # ---------------------------------------------------------------- retry loop
 
 @contextlib.contextmanager
-def _maybe_slot(key, windows, now, sleep):
+def _maybe_slot(key, windows, now, sleep, reserve=0):
     if key:
-        with slot(key, windows, now=now, sleep=sleep):
+        with slot(key, windows, now=now, sleep=sleep, reserve=reserve):
             yield
     else:
         yield
 
 
-def attempt_loop(key, windows, once, attempts=3, now=time.time, sleep=time.sleep):
+def attempt_loop(key, windows, once, attempts=3, now=time.time, sleep=time.sleep, reserve=0):
     """Run `once()` under the pacer, repeating what it asks to repeat.
 
     `once()` returns whatever the caller wants back, or raises `Retry(after)`
@@ -399,7 +417,7 @@ def attempt_loop(key, windows, once, attempts=3, now=time.time, sleep=time.sleep
     last = None
     for attempt in range(max(1, attempts)):
         retry = None
-        with _maybe_slot(key, windows, now, sleep):
+        with _maybe_slot(key, windows, now, sleep, reserve):
             try:
                 return once()
             except Retry as r:

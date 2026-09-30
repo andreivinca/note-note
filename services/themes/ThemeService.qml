@@ -25,6 +25,9 @@ Item {
   readonly property var system: Color.baseline
   readonly property var candidate: previewId && catalog.entries[previewId]
     ? catalog.entries[previewId].value.colors : committedColors
+  readonly property bool followsSystem: !candidate || Object.keys(candidate).every(function(key) {
+    return candidate[key] === "system"
+  })
   readonly property var resolved: candidate ? Resolve.resolve(system, candidate) : system
   onResolvedChanged: theme.publish()
   Component.onCompleted: theme.publish()

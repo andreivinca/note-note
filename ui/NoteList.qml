@@ -186,7 +186,7 @@ Item {
         anchors.left: parent.left
         anchors.leftMargin: root.pagePadding + root.textInset
         text: root.noteCount + (root.noteCount === 1 ? " note" : " notes")
-        color: Util.alpha(root.foreground, 0.45)
+        color: Style.secondaryText(root.foreground, 0.45)
         font.pixelSize: Style.font.bodySmall
       }
       Rectangle {
@@ -298,9 +298,8 @@ Item {
               color: current ? root.selectionFill : (rowHover.hovered ? Util.alpha(root.foreground, 0.05) : "transparent")
               // Action rows ("New note…", sign in/out, settings) are dimmed so
               // notes stand out from the things you can do; hover lifts them.
-              // Dimmed, not faint: opacity fades toward whichever background
-              // the theme has, so this number means the same on all of them.
-              opacity: dragArea.drag.active ? 0.85 : ((slot.isNew || slot.isAction) && !rowHover.hovered ? 0.65 : 1)
+              // Light system palettes retain more ink so actions stay readable.
+              opacity: dragArea.drag.active ? 0.85 : ((slot.isNew || slot.isAction) && !rowHover.hovered ? Style.secondaryOpacity(0.65) : 1)
 
               HoverHandler { id: rowHover }
 
@@ -460,7 +459,7 @@ Item {
           anchors.centerIn: parent
           visible: !root.model.some(function(item) { return item.kind === "note" || item.kind === "tree" || item.kind === "action" })
           text: root.activeName ? "No notes yet" : "No notebooks yet"
-          color: Util.alpha(root.foreground, 0.65)
+          color: Style.secondaryText(root.foreground, 0.65)
           font.family: root.fontFamily
           font.pixelSize: Style.font.body
         }

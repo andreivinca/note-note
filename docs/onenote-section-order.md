@@ -109,9 +109,10 @@ app-registration permission edit (tenant consent policies still apply).
 - OneDrive metadata has its own rate budget and a 45-second pass budget. It
   receives an existing token snapshot and never refreshes or invalidates the
   normal OneNote sign-in. A metadata throttle does not park the note request lane.
-- `Provider.qml` requires only `Notes.ReadWrite`. **Enable custom section order…**
-  requests optional `Files.Read` consent without signing out first. Declining,
-  cancelling or losing that permission leaves notes accessible alphabetically.
+- `Provider.qml` requests `Notes.ReadWrite` and `Files.Read` together during
+  normal Microsoft sign-in. Section order is always applied when metadata is
+  accessible; there is no enable button or setting. Losing the metadata
+  permission leaves notes accessible alphabetically.
   Token renewal retries required scopes if previously granted optional scopes
   become unavailable; other Microsoft providers retain their existing behavior.
 - Synthetic tests cover package encoding, inherited revisions, duplicate

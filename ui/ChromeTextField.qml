@@ -38,7 +38,7 @@ Controls.TextField {
     anchors.leftMargin: Style.spacing.md
     anchors.verticalCenter: parent.verticalCenter
     text: field.iconText
-    color: Util.alpha(field.foreground, 0.55)
+    color: Style.secondaryText(field.foreground, 0.55)
     font.family: Style.fontFamily
     font.pixelSize: Style.font.iconSmall
   }

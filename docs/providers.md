@@ -164,7 +164,7 @@ to the running instance and `rebuild()` is called.
 
 | key | type | meaning |
 |---|---|---|
-| `notebookTabs` | bool | true: build `sections` with one entry per notebook, a binder tab each, the way the local folders show; false: fold them into a single section as `tree` rows. Declare it only when your notes have notebooks to spread — Sticky Notes and Notion do not. The local provider defaults it true, OneNote false |
+| `notebookTabs` | bool | true: build `sections` with one entry per notebook, a binder tab each, the way the local folders show; false: fold them into a single section as `tree` rows. Declare it only when your notes have notebooks to spread — Sticky Notes and Notion do not. Local and OneNote both default to true |
 | `notesDir` | string | the local provider's root directory; `~` is the provider's to expand |
 
 ## Functions
@@ -520,12 +520,15 @@ registration of their own gives it to your provider alone, in
 `{"microsoft": {"<providerId>": {"clientId": "…", "tenant": "…"}}}`.
 
 An account may declare `optionalScopes` (space-separated). `login()` requests
-required scopes only; `loginOptional()` requests incremental consent without
-signing out the existing account. Only already-granted optional scopes are
+the scopes declared in `scopes`, including optional scopes a provider wants
+in its initial sign-in. `loginOptional()` requests additional optional consent
+without signing out the existing account. The process environment excludes
+optional scopes from the required renewal grant. Only already-granted optional scopes are
 renewed, and a rejected optional refresh is retried with required scopes.
 The account's `env` includes `NOTE_NOTE_MS_OPTIONAL_SCOPES`; providers must not
-gate ordinary functionality on optional consent. OneNote uses this for its
-high-risk section-order workaround and falls back to alphabetical sections.
+gate ordinary functionality on optional consent. OneNote requests `Files.Read`
+in normal sign-in and treats it as optional during renewal for its high-risk
+section-order workaround; unavailable metadata falls back to alphabetical sections.
 
 
 ### Retirement and process ownership

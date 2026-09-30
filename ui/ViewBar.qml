@@ -114,7 +114,7 @@ Item {
             return !!part
           }).join(" › ")
           color: root.notice ? Qt.tint(root.foreground, Util.alpha(root.accent, 0.55))
-            : Util.alpha(root.foreground, 0.55)
+            : Style.secondaryText(root.foreground, 0.55)
           // A URL says the most at its two ends; a breadcrumb reads from its start.
           elide: root.hoveredLink ? Text.ElideMiddle : Text.ElideRight
         }
@@ -128,7 +128,7 @@ Item {
           objectName: "wordCount"
           style: statusStyle
           text: root.wordCount + (root.wordCount === 1 ? " word" : " words")
-          color: Util.alpha(root.foreground, 0.45)
+          color: Style.secondaryText(root.foreground, 0.45)
         }
       },
       Status.StatusItem {
@@ -140,7 +140,7 @@ Item {
           iconColor: Qt.tint(root.foreground, Util.alpha(root.accent, 0.6))
           text: root.loading ? "Loading…" : root.unsaved ? "Unsaved"
             : root.readOnly ? "Read-only" : "Saved"
-          color: Util.alpha(root.foreground, 0.5)
+          color: Style.secondaryText(root.foreground, 0.5)
         }
       }
     ]

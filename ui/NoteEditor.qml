@@ -1709,7 +1709,7 @@ Item {
       horizontalAlignment: Text.AlignRight
       text: root.modifiedText
       textFormat: Text.PlainText
-      color: Util.alpha(root.foreground, 0.45)
+      color: Style.secondaryText(root.foreground, 0.45)
       font.family: root.fontFamily
       font.pixelSize: Style.font.bodySmall
     }

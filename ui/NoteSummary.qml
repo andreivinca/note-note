@@ -49,7 +49,7 @@ Column {
       width: Math.max(0, parent.width - (dateLabel.visible ? dateLabel.width + parent.spacing : 0))
       text: root.preview.replace(/\s+/g, " ").trim()
       textFormat: Text.PlainText
-      color: Util.alpha(root.foreground, 0.48)
+      color: Style.secondaryText(root.foreground, 0.48)
       font.family: root.fontFamily
       font.pixelSize: root.fontSize - 1
       elide: Text.ElideRight

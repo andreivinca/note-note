@@ -110,6 +110,16 @@ Item {
     harness.check("dedupe queues nothing new", third.job === null && third.joined === second.job)
     harness.check("dedupe joins its caller to the job", second.job.settled.length === 2)
 
+    s = Scheduler.makeState()
+    a = Scheduler.enqueue(s, { key: "section", priority: 1 }).job
+    b = Scheduler.enqueue(s, { key: "other", priority: 1 }).job
+    Scheduler.enqueue(s, { key: "section", priority: 0, mode: "dedupe" })
+    harness.check("an interactive caller promotes a deduped background request",
+                  a.priority === 0 && Scheduler.nextRunnable(s, 0, opts) === a && s.jobs.length === 2)
+    harness.check("a handle can promote a waiting job", Scheduler.promoteJob(s, b) && b.priority === 0)
+    Scheduler.markRunning(s, b, 0)
+    harness.check("promotion does not change an in-flight job", !Scheduler.promoteJob(s, b))
+
     // A throttle parks the whole lane, and the job keeps its place.
     s = Scheduler.makeState()
     a = Scheduler.enqueue(s, { key: "t" }).job

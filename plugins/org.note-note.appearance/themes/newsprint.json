@@ -20,7 +20,7 @@
     "popup.border": "#D6CABB",
     "tooltip.background": "#EEE6D8",
     "sidebar.background": "#E5DCCB",
-    "tab.activeBackground": "#E5D5BC",
+    "tab.activeBackground": "#DDCBB0",
     "tab.activeForeground": "#52391F",
     "tab.inactiveForeground": "#776957",
     "titlebar.background": "#E5DCCB",

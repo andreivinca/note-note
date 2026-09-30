@@ -310,6 +310,69 @@ def test_retry_after(verbose):
     return failures
 
 
+def test_background(directory, verbose):
+    failures = 0
+    key = fresh(directory, "background")
+    clock = Clock()
+    windows = [(60, 5), (3600, 7)]
+    for i in range(3):
+        with ratelimit.slot(key, windows, reserve=2, now=clock.now, sleep=clock.sleep):
+            pass
+    try:
+        with ratelimit.slot(key, windows, reserve=2, now=clock.now, sleep=clock.sleep):
+            failures += check("background stops at the foreground reserve", False)
+    except ratelimit.Deferred as deferred:
+        failures += check("background wait is local", deferred.retry_after == 60)
+    failures += check("background never sleeps for budget", clock.slept == 0)
+    failures += check("background does not record a service cooldown", read_state(key)["cooldownUntil"] == 0)
+    with ratelimit.slot(key, windows, now=clock.now, sleep=clock.sleep):
+        pass
+    failures += check("foreground can use its reserved budget", len(read_state(key)["stamps"]) == 4)
+
+    key = fresh(directory, "background-slots")
+    held = []
+    for i in range(ratelimit.MAX_CONCURRENT - 1):
+        cm = ratelimit.slot(key, [(60, 100)], reserve=20, now=clock.now, sleep=clock.sleep)
+        cm.__enter__()
+        held.append(cm)
+    try:
+        with ratelimit.slot(key, [(60, 100)], reserve=20, now=clock.now, sleep=clock.sleep):
+            failures += check("background leaves an HTTP slot", False)
+    except ratelimit.Deferred:
+        failures += check("background slot wait never parks the lane", clock.slept == 0)
+    with ratelimit.slot(key, [(60, 100)], now=clock.now, sleep=clock.sleep):
+        failures += check("foreground takes its HTTP slot", len(read_state(key)["holders"]) == ratelimit.MAX_CONCURRENT)
+    for cm in held:
+        cm.__exit__(None, None, None)
+
+    # Every process sees room at startup; only two may actually spend it.
+    key = fresh(directory, "background-race")
+    ratelimit._save(key, {"stamps": [time.time()] * 78, "holders": [], "cooldownUntil": 0})
+    script = (
+        "import sys\n"
+        "sys.path.insert(0, %r)\n"
+        "import ratelimit\n"
+        "try:\n"
+        "    with ratelimit.slot(sys.argv[1], [(60,100),(3600,350)], reserve=20):\n"
+        "        print('admitted')\n"
+        "except ratelimit.Deferred:\n"
+        "    print('deferred')\n"
+    ) % os.path.dirname(os.path.abspath(__file__))
+    workers = [subprocess.Popen([sys.executable, "-c", script, key], stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, env=dict(os.environ, NOTE_NOTE_RATE_DIR=directory))
+               for _ in range(8)]
+    admitted = 0
+    for worker in workers:
+        output, error = worker.communicate(timeout=10)
+        failures += check("background race worker completes", worker.returncode == 0, error.decode())
+        admitted += int(output.strip() == b"admitted")
+    failures += check("competing processes preserve the reserve atomically",
+                      admitted == 2 and len(read_state(key)["stamps"]) == 80)
+    print("background admission and foreground reserve")
+    print("  %d checks failed" % failures if failures else "  all green")
+    return failures
+
+
 # ---------------------------------------------------------------- real locks
 
 HAMMER = r"""
@@ -399,6 +462,7 @@ def main():
         total += test_concurrency(directory, args.verbose)
         total += test_attempt_loop(directory, args.verbose)
         total += test_retry_after(args.verbose)
+        total += test_background(directory, args.verbose)
         total += test_hammer(directory, args.verbose)
 
     if FAILURES:

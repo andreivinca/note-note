@@ -47,7 +47,7 @@ Item {
     height: parent.height - root.rowGap
     radius: root.rowRadius
     color: !root.editing && hover.hovered ? Style.hoverFill : "transparent"
-    opacity: root.editing || hover.hovered ? 1 : 0.65
+    opacity: root.editing || hover.hovered ? 1 : Style.secondaryOpacity(0.65)
 
     HoverHandler { id: hover }
 

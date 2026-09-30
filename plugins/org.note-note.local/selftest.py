@@ -120,6 +120,44 @@ def coreutils_birth(path):
     return int(text) if text.isdigit() else 0
 
 
+def test_first_notebook(directory, verbose):
+    root = os.path.join(directory, "fresh")
+    failures = check("first run lists the getting-started note", listed(root) == ["Getting started.md"])
+    path = os.path.join(root, "Notes", "Getting started.md")
+    with open(path, encoding="utf-8") as handle:
+        title, body, _ = listing.notefile.split(handle.read())
+    failures += check("starter note has its own title", title == "Getting started")
+    failures += check("starter note includes a short formatted guide", "| Shortcut | Action |" in body and "- [ ]" in body)
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("my edited introduction")
+    listed(root)
+    with open(path, encoding="utf-8") as handle:
+        failures += check("refresh preserves an edited starter note", handle.read() == "my edited introduction")
+    os.unlink(path)
+    failures += check("refresh does not restore a deleted starter note", listed(root) == [])
+
+    existing = os.path.join(directory, "existing-root")
+    os.makedirs(existing)
+    note(existing, "mine.md", 10)
+    failures += check("root notes keep their existing notebook", listed(existing) == ["mine.md"] and not os.path.exists(os.path.join(existing, "Notes")))
+    empty = os.path.join(directory, "existing-empty-notebook")
+    os.makedirs(os.path.join(empty, "Work"))
+    failures += check("existing empty notebooks are preserved", listed(empty) == [] and not os.path.exists(os.path.join(empty, "Notes")))
+    blocked = os.path.join(directory, "blocked-first-notebook")
+    os.makedirs(blocked)
+    os.symlink(existing, os.path.join(blocked, "Notes"))
+    try:
+        listing.ensure_notebook(blocked)
+    except FileExistsError:
+        pass
+    else:
+        failures += check("initialization refuses a symlinked default notebook", False)
+    failures += check("default notebook cannot write through a symlink", not os.path.exists(os.path.join(existing, "Getting started.md")))
+    print("first-run notebook and starter note")
+    print("  %d checks failed" % failures if failures else "  all green")
+    return failures
+
+
 def test_struct_layout(directory, verbose):
     """The ctypes `struct statx` against the one the kernel writes."""
     failures = 0
@@ -412,6 +450,7 @@ def main():
 
     with tempfile.TemporaryDirectory(prefix="note-note-local-selftest-") as directory:
         total = 0
+        total += test_first_notebook(directory, args.verbose)
         total += test_struct_layout(directory, args.verbose)
         total += test_birth_time(directory, args.verbose)
         total += test_listing_order(directory, args.verbose)

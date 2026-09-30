@@ -1,6 +1,6 @@
 # Testing and development
 
-The aggregate runner exercises all nineteen suites without real accounts or note
+The aggregate runner exercises all twenty suites without real accounts or note
 contents:
 
 ```bash
@@ -63,6 +63,7 @@ omarchy plugin enable io.github.andreivinca.note-note
   editor's converters, which run as a process per conversion.
 - Always lint first: `qmllint -I /usr/share/omarchy/shell Workspace.qml design/*.qml design/controls/*.qml hosts/omarchy/*.qml ui/*.qml ui/statusbar/*.qml
   ui/editing/*.qml ui/tools/*.qml plugins/*/Provider.qml plugins/org.note-note.onenote/SearchCache.qml
+  plugins/org.note-note.onenote/PageInventory.qml
   plugins/org.note-note.calendar/*.qml services/*/*.qml`, and `python3 -m py_compile` the
   scripts. For Python there is also `uvx ruff check .`, configured in
   `pyproject.toml` — it needs nothing installed and it is narrowed to the
@@ -374,6 +375,7 @@ script does when the far end misbehaves.
 
 ```bash
 python3 plugins/org.note-note.onenote/search_selftest.py
+python3 plugins/org.note-note.onenote/page_inventory_selftest.py
 ```
 
 OneNote search tests use temporary private caches and stubbed Graph replies.

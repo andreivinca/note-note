@@ -15,7 +15,7 @@ Controls.TextField {
   color: foreground
   selectionColor: Util.alpha(accent, 0.35)
   selectedTextColor: foreground
-  placeholderTextColor: Util.alpha(foreground, 0.5)
+  placeholderTextColor: Style.secondaryText(foreground, 0.5)
   echoMode: password ? TextInput.Password : TextInput.Normal
   font.family: Style.font.family
   font.pixelSize: Style.font.body

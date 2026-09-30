@@ -169,19 +169,23 @@ def main():
         # A first run writes the config once the providers have recorded their
         # defaults, so the file documents every setting from the moment it exists.
         fresh = work / "fresh"
+        fresh_notes = fresh / "Notes"
         (fresh / "config/notenote").mkdir(parents=True)
         first_run = dict(env, HOME=str(fresh), XDG_CONFIG_HOME=str(fresh / "config"),
                          XDG_STATE_HOME=str(fresh / "state"), XDG_CACHE_HOME=str(fresh / "cache"),
-                         NOTE_NOTE_DIR=str(notes))
+                         NOTE_NOTE_DIR=str(fresh_notes))
         first_harness = fresh / "standalone_firstrun.qml"
         first_harness.write_text((ROOT / "tests/standalone_firstrun.qml").read_text().replace('"app/', '"' + resources.as_uri() + '/'))
         launch = subprocess.run([str(runner), "--data-dir", str(resources), "--qml", str(first_harness)],
                                 env=first_run, capture_output=True, text=True, timeout=45)
         written = json.loads((fresh / "config/notenote/config.json").read_text())
         if launch.returncode != 0 or "<<<FIRSTRUN_DONE>>>" not in launch.stderr \
-                or written["providers"]["local"] != {"enabled": True, "notebookTabs": True, "notesDir": str(notes)} \
-                or written["providers"]["onenote"] != {"enabled": True, "notebookTabs": False}:
+                or written["providers"]["local"] != {"enabled": True, "notebookTabs": True, "notesDir": str(fresh_notes)} \
+                or written["providers"]["onenote"] != {"enabled": True, "notebookTabs": True}:
             print("FAIL: the first-run config does not carry the providers' defaults:", written, launch.stderr[-800:])
+            return 1
+        if not (fresh_notes / "Notes/Getting started.md").is_file():
+            print("FAIL: first run did not create the local notebook and starter note")
             return 1
         shutil.copytree(ROOT / "examples/hello", config / "providers/hello")
         theme = work / "state/omarchy/current/theme"

@@ -45,6 +45,15 @@ QtObject {
   function space(value) {
     return source ? source.space(value) : value
   }
+  function secondaryOpacity(opacity) {
+    if (Color.theme && !Color.theme.followsSystem) {
+      return opacity
+    }
+    return Resolve.secondaryOpacity(Color.background, opacity)
+  }
+  function secondaryText(foreground, opacity) {
+    return Util.alpha(foreground, secondaryOpacity(opacity))
+  }
   // How a control answers the pointer is made from the ink of the control
   // itself, so a button in another colour (a destructive one, say) keeps its
   // own. A theme reaches these through the colours it gives the ink.

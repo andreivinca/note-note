@@ -221,6 +221,14 @@ class ProviderTests(unittest.TestCase):
         self.assertNotIn("kind", result)
         self.assertEqual(result["retryAfter"], 120)
 
+    def test_admission_race_defers_without_failing_or_leasing_the_page(self):
+        with patch.object(onenote.ratelimit, "background_delay", return_value=0), \
+                patch.object(onenote, "graph_raw", side_effect=onenote.ratelimit.Deferred(60)):
+            onenote.cmd_search_step("-")
+        self.assertTrue(self.out.call_args.args[0]["deferred"])
+        self.assertEqual(self.index.status()["failed"], 0)
+        self.assertEqual(self.index.next_page([])["id"], "p1")
+
     def test_failed_page_is_not_counted_as_indexed(self):
         with patch.object(onenote.ratelimit, "background_delay", return_value=0), \
                 patch.object(onenote, "graph_raw", return_value=(404, "{}")):

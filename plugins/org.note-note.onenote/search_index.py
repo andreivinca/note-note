@@ -267,6 +267,16 @@ class Index:
             self.write(state)
             return True
 
+    def release(self, ticket):
+        """A budget deferral did not fail the page or earn a retry backoff."""
+        with self.locked():
+            state = self.read()
+            entry = state["entries"].get(ticket["id"])
+            if not self.current(state) or not entry or entry["revision"] != ticket["revision"]:
+                return
+            entry["leaseUntil"] = 0
+            self.write(state)
+
     def failed(self, ticket, status=0):
         with self.locked():
             state = self.read()

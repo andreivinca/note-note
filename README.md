@@ -169,16 +169,19 @@ setting on first run.
 - `providers.local.notesDir` — where local notebooks live, overriding
   `~/Notes/` or `NOTE_NOTE_DIR`.
 - `providers.<id>.notebookTabs` — `true` spreads a source's notebooks into
-  a tab each across the top (how your local notebooks show by default);
-  `false` folds them into one tab as an expandable tree (OneNote's
-  default). Offered by the sources that have notebooks: `local` and
+  a tab each across the top (the default for local notebooks and OneNote);
+  `false` folds them into one tab as an expandable tree.
+  Offered by the sources that have notebooks: `local` and
   `onenote` — Sticky Notes and Notion are a single flat list either way.
 
 ## Notebooks
 
 Notebooks are folders under `~/Notes/` (override with `NOTE_NOTE_DIR`, or
 the `providers.local.notesDir` setting); notes are Markdown files inside
-them. Notes sitting directly in `~/Notes/` show up as a "Notes" notebook.
+them. An unused notes directory starts with a `Notes` notebook and a short
+**Getting started** note. Existing notebooks and root notes are preserved;
+refreshing never recreates a deleted starter note.
+Notes sitting directly in `~/Notes/` show up as a "Notes" notebook.
 The title is stored in a front-matter block at the top of the file:
 
 ```
@@ -258,12 +261,12 @@ the minimal `examples/hello/` package.
   `~/.local/state/notenote/` and `~/.cache/notenote/` (standalone).
 - **Microsoft account, only after you sign in**: `Mail.ReadWrite` (Sticky
   Notes are stored in your mailbox), `Notes.ReadWrite` (OneNote), and `User.Read`.
-  OneNote's optional `Files.Read` permission allows reading your OneDrive files;
-  the provider uses it only for notebook file listings and `.onetoc2` metadata
+  OneNote requests `Files.Read` alongside `Notes.ReadWrite` during sign-in.
+  This permission allows reading your OneDrive files;
+  the provider uses it for resolving shared notebook links, notebook file listings and `.onetoc2` metadata
   containing OneNote's custom section order. No separate local order is used.
-  Choose **Enable custom section order…** to consent to this optional scope.
-  Declining, cancelling or losing it leaves normal note access available,
-  with sections sorted alphabetically.
+  Section order loads automatically. If this permission becomes unavailable,
+  normal note access continues with sections sorted alphabetically.
   Each provider's token is separate and owner-only; signing out
   deletes only that one. The plugin talks to `login.microsoftonline.com` and
   `graph.microsoft.com`; OneNote metadata downloads also use Microsoft's

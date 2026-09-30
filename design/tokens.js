@@ -38,7 +38,7 @@ var specification = {
   "tooltip.foreground": { recipe: "alias", inputs: ["text.primary"], systemRole: "toolTipText", overlay: false, pair: "tooltip.background" },
   "sidebar.background": { recipe: "sidebar", inputs: ["surface.background", "text.primary"], overlay: false },
   "sidebar.foreground": { recipe: "alias", inputs: ["text.primary"], overlay: false, pair: "sidebar.background" },
-  "tab.activeBackground": { recipe: "alias", inputs: ["selection.background"], overlay: true },
+  "tab.activeBackground": { recipe: "activeTabBackground", inputs: ["selection.background", "surface.background", "text.primary"], overlay: true },
   "tab.activeForeground": { recipe: "alias", inputs: ["selection.foreground"], overlay: false, pair: "tab.activeBackground" },
   "tab.inactiveForeground": { recipe: "inactiveText", inputs: ["text.primary"], overlay: true, pair: "surface.background" },
   "titlebar.background": { recipe: "alias", inputs: ["sidebar.background"], overlay: false },

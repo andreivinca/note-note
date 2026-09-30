@@ -97,7 +97,7 @@ Rectangle {
           backgroundColor: labeledMenu ? Style.hoverFillFor(foreground, accent) : "transparent"
           active: menu.opened || modelData.panelOpen
           selected: modelData.checked
-          foreground: Util.alpha(group.editor.foreground, 0.72)
+          foreground: Style.secondaryText(group.editor.foreground, 0.72)
           accent: group.editor.accent
           iconText: modelData.icon
           // A tooltip must not cover an open tool panel or menu.

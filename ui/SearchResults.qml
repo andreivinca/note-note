@@ -53,7 +53,7 @@ Item {
         ? (root.loading ? "Searching…" : (root.status ? "No matches yet in " : "No match in ") + root.notebook)
         : root.count + (root.count === 1 ? " match in " : " matches in ") + root.notebook
           + (root.loading ? " — searching…" : "")
-      color: Util.alpha(root.foreground, 0.45)
+      color: Style.secondaryText(root.foreground, 0.45)
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
       elide: Text.ElideRight
@@ -66,7 +66,7 @@ Item {
       leftPadding: root.textInset
       rightPadding: root.textInset
       text: root.status
-      color: Util.alpha(root.foreground, 0.6)
+      color: Style.secondaryText(root.foreground, 0.6)
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
       wrapMode: Text.WordWrap

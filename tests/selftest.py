@@ -17,6 +17,7 @@ SUITES = [
     "plugins/org.note-note.onenote/selftest.py",
     "plugins/org.note-note.onenote/merge_selftest.py",
     "plugins/org.note-note.onenote/search_selftest.py",
+    "plugins/org.note-note.onenote/page_inventory_selftest.py",
     "plugins/org.note-note.onenote/order_selftest.py",
     "services/microsoft/selftest.py",
     "lib/ratelimit_selftest.py",

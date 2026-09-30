@@ -23,12 +23,19 @@ Item {
   property string clientId: ""
   // Space-separated Graph scopes to request at sign-in.
   property string scopes: "offline_access User.Read"
-  // Optional features request incremental consent without signing notes out.
+  // Optional scopes can be requested in the initial sign-in or later through
+  // incremental consent. Losing them must not invalidate the required grant.
   property string optionalScopes: ""
   property string loginScopes: root.scopes
+  readonly property string renewalScopes: {
+    var optional = root.optionalScopes.split(/\s+/)
+    return root.scopes.split(/\s+/).filter(function(scope) {
+      return optional.indexOf(scope) < 0
+    }).join(" ")
+  }
   // Environment for any process that uses msgraph.py on this account's behalf.
   readonly property var env: ({ NOTE_NOTE_MS_ACCOUNT: root.owner, NOTE_NOTE_MS_CLIENT_ID: root.clientId,
-                                NOTE_NOTE_MS_SCOPES: root.scopes, NOTE_NOTE_MS_TOKEN: root.tokenPath,
+                                NOTE_NOTE_MS_SCOPES: root.renewalScopes, NOTE_NOTE_MS_TOKEN: root.tokenPath,
                                 NOTE_NOTE_MS_CACHE_SESSION: root.cacheSession,
                                 NOTE_NOTE_MS_OPTIONAL_SCOPES: root.optionalScopes })
 
@@ -128,7 +135,11 @@ Item {
     streaming: true
     onLineReceived: function(line) {
       var msg
-      try { msg = JSON.parse(line) } catch (e) { return }
+      try {
+        msg = JSON.parse(line)
+      } catch (e) {
+        return
+      }
       if (msg.userCode) {
         root.codeReceived(msg.userCode, msg.verificationUri)
       } else if (msg.ok) {

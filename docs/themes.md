@@ -18,8 +18,11 @@ application’s own. Their saved IDs are `org.note-note.appearance/paper`,
 `org.note-note.appearance/newsprint`, and `org.note-note.appearance/nightfall`.
 Restart after updating to discover these additions, then preview them in the picker.
 
-**System** is the default and follows live desktop changes. The theme picker
-does not write notes or replace their document. Authored text colors retain
+**System** is the default and follows live desktop changes. On light desktops,
+secondary text, placeholders and available controls use stronger ink so previews,
+dates and actions remain readable. Dark desktops and custom themes keep their
+existing opacity levels. The theme picker does not write notes or replace
+their document. Authored text colors retain
 precedence over theme ink. The Markdown dialect treats non-code character
 backgrounds as semantic `==highlight==`; arbitrary authored backgrounds are
 not a separate feature of that dialect.

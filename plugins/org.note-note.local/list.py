@@ -54,6 +54,7 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "lib"))
 from notewalk import notebook_keys  # noqa: E402
 from readfile import read_capped  # noqa: E402
+from fileio import write_atomic  # noqa: E402
 import notefile  # noqa: E402
 
 HEAD_BYTES = 4096          # of a note: the front matter and the first content line
@@ -160,10 +161,35 @@ class Cut(Exception):
     says so in its last line."""
 
 
+def ensure_notebook(root):
+    """Give an unused notes directory its first notebook without moving notes."""
+    os.makedirs(root, exist_ok=True)
+    with os.scandir(root) as entries:
+        for entry in entries:
+            if entry.name.startswith("."):
+                continue
+            if entry.is_dir(follow_symlinks=False):
+                return
+            if entry.name.endswith(".md") and entry.is_file(follow_symlinks=False):
+                return
+    # mkdir refuses an existing file or symlink named Notes; initialization
+    # must never replace user data or follow a notebook symlink.
+    path = os.path.join(root, "Notes")
+    try:
+        os.mkdir(path, mode=0o700)
+    except FileExistsError:
+        if not stat.S_ISDIR(os.stat(path, follow_symlinks=False).st_mode):
+            raise
+        return
+    template = os.path.join(os.path.dirname(os.path.abspath(__file__)), "getting-started.md")
+    with open(template, encoding="utf-8") as handle:
+        write_atomic(os.path.join(path, "Getting started.md"), handle.read(), exclusive=True)
+
+
 def main():
     root, budget = sys.argv[1], int(sys.argv[2])
     deadline = time.monotonic() + DEADLINE
-    os.makedirs(root, exist_ok=True)
+    ensure_notebook(root)
     out = sys.stdout.buffer
 
     left = budget - END_BYTES

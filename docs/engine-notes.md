@@ -475,6 +475,35 @@ class is set: extended property `String 0x001A` = `IPM.StickyNote`.
 
 **OneNote quirks**
 
+- Notebook inventory starts from `/me/onenote/notebooks`, expands sections
+  and section groups, and follows their relationship links for nested content.
+  Cache each resource's `self`, `pagesUrl` and `contentUrl` to preserve the
+  location Microsoft supplies for shared content. The notebook and section
+  collections are documented as
+  [owned by the user or group](https://learn.microsoft.com/en-us/graph/api/resources/onenote?view=graph-rest-1.0#relationships).
+  A live personal-account recipient test returned a newly shared `demo`
+  notebook with `userRole: Reader` through the standard `/me` notebook list.
+  The normal provider listing loaded its one section and one page, and a
+  content read succeeded. A subsequent comparison using the previous
+  `/me/onenote/sections` request also returned this notebook's section;
+  replacing that endpoint alone does not explain the original missing share.
+  The provider also fixes startup listing before the request lane is ready
+  and prevents a late empty cache from replacing a successful network listing.
+  Earlier notebook requests returned only four owned notebooks;
+  `demo` appeared after the recipient opened it on a phone and some time had
+  passed. This does not distinguish first access from service propagation or
+  establish discovery of every unopened share. The undocumented
+  `includesharednotebooks=true` option is not used. Family Room and its 17
+  sections were verified with its owner's account, separately from this
+  incoming-share test. Family Room still needs verification in the updated
+  app under the wife's receiving account. Preserve `userRole`: Reader notebooks open read-only
+  and do not offer note or section creation. OneDrive's
+  [sharedWithMe API is deprecated](https://learn.microsoft.com/en-us/graph/api/drive-sharedwithme?view=graph-rest-1.0),
+  and [Microsoft reports no documented equivalent for personal accounts](https://learn.microsoft.com/en-us/answers/questions/5942212/microsoft-graph-sharedwithme-endpoint-alternative).
+  Synthetic tests verify handling of shared entries once returned by Graph.
+  Recent notebook links provide an additional discovery path for personal
+  shares: OneDrive resolves the linked notebook package, and OneNote verifies
+  its ID before it enters the inventory. There is no owner configuration.
 - `lastModifiedDateTime` is **not reliably updated** when a page is edited
   (an edit from a phone left a 2021 timestamp), so the open page is re-read on
   a poll and compared by text.
@@ -522,7 +551,7 @@ class is set: extended property `String 0x001A` = `IPM.StickyNote`.
   ("the number of maximum sections is exceeded") — observed at 39 sections. So
   pages are listed per section and there is no bulk endpoint to fall back on;
   what makes that affordable is diffing each section's own
-  `lastModifiedDateTime` (returned by the one request that lists all sections)
+  `lastModifiedDateTime` (returned by the notebook inventory)
   and fetching pages only where it moved. A quiet account skips page requests;
   section-order discovery additionally reads OneDrive metadata. The caveat
   is Graph's eventual consistency: a
@@ -627,8 +656,19 @@ QML lane parks until it is over. Neither layer waits out what the other
 already waited.
 
 Admission is by rolling **count**, not by a fixed gap between requests: while
-the window counts are under budget everything goes straight through, so a cold
-listing is exactly as fast as it was and only a genuinely heavy hour is paced.
+the window counts are under budget requests go straight through. OneNote's
+startup discovers the tree first, then `PageInventory.qml` fetches one response
+of up to 100 page titles per queue job. Opening a section promotes that job;
+opening a note uses the reserved interactive slot. Continuations are saved so
+a budget pause or restart resumes page discovery without starting over.
+Notebook discovery saves its remaining relationship requests as well,
+including a shared notebook awaiting verification after OneDrive resolution.
+
+Background discovery, search indexing and page checks reserve 20 requests in
+each window and one HTTP slot. The check happens atomically in `ratelimit.slot`,
+under the same lock as admission. A local `Deferred` result pauses that work
+alone, while a real service throttle still parks the lane. Graph batches do
+not reduce this cost: every subrequest counts against OneNote's rate limits.
 
 **`flock` on an exotic filesystem** (an NFS home) can degrade to no locking at
 all. That means over-admission, never a deadlock — two processes may both

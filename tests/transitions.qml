@@ -774,13 +774,11 @@ ShellRoot {
     property string account: "test"
     property string cacheSession: ""
     property var env: ({})
-    property int optionalLogins: 0
     property int destructiveLogins: 0
     signal updated()
     signal signedOut()
     signal statusFailed(string error)
     function hasScope(scope) { return scope === "Notes.ReadWrite" || (scope === "Files.Read" && filesRead) }
-    function loginOptional() { optionalLogins++ }
     function relogin() { destructiveLogins++ }
   }
   OneNote.Provider { id: oneNote; ms: oneNoteAccount }
@@ -854,6 +852,44 @@ ShellRoot {
     test.processes++
     orderProvider.refresh()
   }
+  QtObject {
+    id: immediateLane
+    property int writeDepth: 0
+    function enqueue(options, start, settled) {
+      start({ done: function(result) { settled(result) } })
+      return { cancel: function() {} }
+    }
+    function cancelOwner(owner) {}
+  }
+  OneNote.Provider {
+    id: raceProvider
+    ms: oneNoteAccount
+    script: Platform.env("NOTE_NOTE_TEST_ONENOTE_RACE_SCRIPT")
+  }
+  property bool raceLoaded: false
+  property bool raceLostInventory: false
+  function listingRaceCases() {
+    test.processes++
+    raceProvider.updated.connect(function() {
+      if (raceProvider.pages.length > 0) {
+        test.raceLoaded = true
+      } else if (test.raceLoaded) {
+        test.raceLostInventory = true
+      }
+    })
+    raceProvider.rq = immediateLane
+    raceProvider.refresh()
+    raceCheck.start()
+  }
+  Timer {
+    id: raceCheck
+    interval: 1500
+    onTriggered: {
+      check("an empty cached result cannot replace a newer network listing",
+            test.raceLoaded && !test.raceLostInventory && raceProvider.pages.length === 1 && raceProvider.onNotebooks.length === 1)
+      test.processes--
+    }
+  }
   Notes.NoteSession {
     id: oneNoteSession
     editor: document
@@ -869,6 +905,7 @@ ShellRoot {
       jobs.push({ options: options, start: start, settled: settled })
       return { cancel: function() {} }
     }
+    function cancelOwner(owner) {}
   }
   Component { id: oneNoteFactory; OneNote.Provider {} }
   Component { id: localFactory; Local.Provider {} }
@@ -996,7 +1033,7 @@ ShellRoot {
   }
   Microsoft.Account {
     id: scopeAccount
-    scopes: "offline_access User.Read Notes.ReadWrite"
+    scopes: "offline_access User.Read Notes.ReadWrite Files.Read"
     optionalScopes: "Files.Read"
   }
 
@@ -1140,13 +1177,14 @@ ShellRoot {
             return action.path.indexOf("newsection:") === 0
           }).map(function(action) { return action.path }).sort().join(",") === "newsection:book,newsection:other-book")
     created.destroy()
+    oneNote.notebookTabs = false
     oneNote.onSections = [{ id: "section", name: "Section", notebookId: "book", notebook: "Book" }]
     oneNote.pages = [{ id: "page", sectionId: "section", title: "Note" }]
     oneNote.rebuild()
     check("OneNote stays ready without Files.Read", oneNote.ready && oneNote.accountRows() === null)
     check("OneNote notes remain visible without Files.Read", oneNote.sections[0].notes.length === 1)
-    check("optional consent is offered without replacing notebook rows",
-          oneNote.sections[0].footerActions.some(function(action) { return action.path === "enableorder" }) &&
+    check("notebook rows need no ordering toggle",
+          !oneNote.sections[0].footerActions.some(function(action) { return action.path === "enableorder" }) &&
           oneNote.sections[0].rows.some(function(row) { return row.path === "book" }))
     check("OneNote keeps sign-out out of the scrolling tree",
           oneNote.sections[0].footerActions.some(function(action) { return action.path === "logout" }) &&
@@ -1156,21 +1194,43 @@ ShellRoot {
     check("OneNote notebook tabs retain the account footer",
           oneNote.sections[0].key === "book" && oneNote.sections[0].footerActions.some(function(action) { return action.path === "logout" }))
     oneNote.notebookTabs = false
-    oneNote.action("enableorder")
-    check("optional consent does not sign out first", oneNoteAccount.optionalLogins === 1 && oneNoteAccount.destructiveLogins === 0)
     oneNoteAccount.filesRead = true
     oneNote.rebuild()
-    check("consented ordering removes the optional action", !oneNote.sections[0].footerActions.some(function(action) { return action.path === "enableorder" }))
+    check("ordering consent needs no toggle", !oneNote.sections[0].footerActions.some(function(action) { return action.path === "enableorder" }))
     oneNoteAccount.filesRead = false
     oneNote.rebuild()
     check("losing Files.Read does not hide notes", oneNote.ready && oneNote.sections[0].notes.length === 1)
-    check("normal sign-in excludes optional scopes", scopeAccount.env.NOTE_NOTE_MS_SCOPES.indexOf("Files.Read") < 0 &&
+    check("OneNote sign-in includes ordering consent",
+          oneNote.microsoftScopes.indexOf("Files.Read") >= 0 && oneNote.microsoftScopes.indexOf("Notes.ReadWrite") >= 0)
+    check("optional initial consent stays optional during renewal",
+          scopeAccount.loginScopes.indexOf("Files.Read") >= 0 && scopeAccount.env.NOTE_NOTE_MS_SCOPES.indexOf("Files.Read") < 0 &&
           scopeAccount.env.NOTE_NOTE_MS_OPTIONAL_SCOPES === "Files.Read")
+
+    var previousExpansion = oneNote.expanded
+    oneNote.onNotebooks = [{ id: "book", name: "Book", userRole: "Reader" }]
+    oneNote.expanded = ["book", "section"]
+    oneNote.rebuild()
+    check("read-only shared notebooks keep their notes and omit creation actions",
+          oneNote.sections[0].notes.length === 1 &&
+          !oneNote.bookRows("book", 0).some(function(row) { return row.kind === "new" }) &&
+          !oneNote.accountActions("book").some(function(action) { return action.path.indexOf("newsection:") === 0 }) &&
+          oneNote.createTargetFor("onenote:page") === "")
+    var sharedBody = oneNote.cacheBody("onenote:page", { title: "Title", body: "Shared", view: "shared-view", editable: true })
+    check("a cached shared page respects its notebook's read-only permission", !sharedBody.editable && !!sharedBody.reason)
+    var sharedSave = null
+    oneNote.save("onenote:page", "Title", "Attempted edit", function(result) { sharedSave = result }, {})
+    check("read-only shared pages reject saves before queuing", !!sharedSave.error && oneNote.bodies.page.body === "Shared")
+    oneNote.onNotebooks = []
+    oneNote.expanded = previousExpansion
+    oneNote.rebuild()
 
     var changed = 0
     var onChanged = function(path) { changed++ }
     oneNote.noteChanged.connect(onChanged)
     oneNote.rq = mergeLane
+    check("OneNote starts listing when its lane becomes available",
+          oneNote.listPending && mergeLane.jobs.length === 1 && mergeLane.jobs[0].options.key === "list")
+    mergeLane.jobs.shift().settled({ sections: oneNote.onSections, pages: oneNote.pages, inventoryComplete: true })
     oneNote.cacheBody("onenote:page", { title: "Title", body: "original", view: "editor-base", editable: true })
     oneNoteSession.selectPath("onenote:page")
     var baseline = { view: oneNoteSession.editingView }
@@ -1225,6 +1285,7 @@ ShellRoot {
       pureCases()
       oneNoteCases()
       orderCases()
+      listingRaceCases()
       laneProviderCases()
       processCases()
       localCases()

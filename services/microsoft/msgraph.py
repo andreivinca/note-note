@@ -76,9 +76,21 @@ class Settings:
     rate_windows: list = field(default_factory=list)
     scopes: str = os.environ.get("NOTE_NOTE_MS_SCOPES", "offline_access User.Read")
     optional_scopes: str = os.environ.get("NOTE_NOTE_MS_OPTIONAL_SCOPES", "")
+    background_reserve: int = 0
 
 
 settings = Settings()
+
+
+@contextlib.contextmanager
+def background_requests(reserve=20):
+    """Keep optional Graph reads out of the foreground request allowance."""
+    previous = settings.background_reserve
+    settings.background_reserve = reserve
+    try:
+        yield
+    finally:
+        settings.background_reserve = previous
 
 
 def configure(rate_key, rate_windows, scopes=None, optional_scopes=None):
@@ -209,7 +221,8 @@ def request(method, url, body=None, headers=None, max_bytes=MAX_BODY,
         except urllib.error.URLError as error:
             raise GraphError("network error: %s" % error.reason) from error
 
-    return ratelimit.attempt_loop(rate_key, settings.rate_windows, once)
+    return ratelimit.attempt_loop(rate_key, settings.rate_windows, once,
+                                 reserve=settings.background_reserve if rate_key else 0)
 
 
 # ---------------------------------------------------------------- tokens

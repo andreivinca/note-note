@@ -108,9 +108,7 @@ Item {
           width: content.implicitWidth + root.horizontalPadding * 2
           height: root.height
           radius: Math.min(Style.cornerRadius, Style.space(6))
-          // The open tab's wash, the hover fill for the rest — the same
-          // treatment the sidebar rows get, so the strip reads as chrome
-          // of the same app.
+          // The active notebook uses the theme's selected-tab colors.
           color: current ? root.activeBackground
                          : (tabHover.hovered ? Style.hoverFill : "transparent")
           opacity: dimmed ? 0.38 : 1

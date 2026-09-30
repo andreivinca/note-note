@@ -5,9 +5,9 @@ import "../../services/providers"
 import "../../design"
 import "../../design/controls"
 
-// OneNote: notebooks → sections → pages. One tab holding the whole tree by
-// default, or — the host's notebookTabs setting — a binder tab per
-// notebook, the way the local folders show. Pages are fetched on demand as
+// OneNote: notebooks → sections → pages. A binder tab per notebook by
+// default, or one tab holding the whole tree when notebookTabs is false.
+// Pages are fetched on demand as
 // Markdown (onenote.py + onenote_md.py) and written back as OneNote HTML.
 LaneProvider {
   id: root
@@ -24,7 +24,7 @@ LaneProvider {
   // Pages carry their images through an edit, and a pasted one is uploaded
   // with the save (onenote.py).
   readonly property bool canImages: true
-  readonly property var microsoftScopes: ["Notes.ReadWrite"]
+  readonly property var microsoftScopes: ["Notes.ReadWrite", "Files.Read"]
   // What the page can hold (PROVIDERS.md). Not a quote, a code block, inline
   // code or a rule: onenote_md.py writes each as a look its reader has no
   // reading for, so they would come back as plain text — and a save holding
@@ -39,10 +39,10 @@ LaneProvider {
 
   // This provider's one setting (PROVIDERS.md), assigned by the host from
   // config.providers.onenote.notebookTabs: each notebook a binder tab of its
-  // own when true; the whole tree in one OneNote tab when false, the default.
+  // own by default; the whole tree in one OneNote tab when false.
   settings: ["notebookTabs"]
   liveSettings: ["notebookTabs"]
-  property bool notebookTabs: false
+  property bool notebookTabs: true
   readonly property string dir: Platform.localPath(Qt.resolvedUrl(".")).replace(/\/$/, "")
   script: dir + "/onenote.py"
   // Keyed to OneNote's own Graph budget: everything below goes through the
@@ -63,6 +63,7 @@ LaneProvider {
   signal searchChanged()
 
   property var onSections: []    // [{ id, name, notebook, notebookId }]
+  property var onNotebooks: []
   property var pages: []         // [{ id, sectionId, title, modified }]
   property var bodies: ({})      // id -> cached content and Python view token
   property var loadVersions: ({})
@@ -112,6 +113,11 @@ LaneProvider {
   }
   function bookList() {
     var books = [], seen = {}
+    for (var b = 0; b < root.onNotebooks.length; b++) {
+      var book = root.onNotebooks[b]
+      seen[book.id] = true
+      books.push(book)
+    }
     for (var i = 0; i < root.onSections.length; i++) {
       var s = root.onSections[i]
       if (!seen[s.notebookId]) {
@@ -121,6 +127,21 @@ LaneProvider {
     }
     books.sort(function(a, b) { return a.name.localeCompare(b.name) })
     return books
+  }
+  function bookWritable(bookId) {
+    for (var i = 0; i < root.onNotebooks.length; i++) {
+      var book = root.onNotebooks[i]
+      if (book.id === bookId) {
+        var role = (book.userRole || "").toLowerCase()
+        return role !== "reader" && role !== "none"
+      }
+    }
+    return true
+  }
+  function noteReadOnly(path) {
+    var page = root.pageAt(path)
+    var section = page ? root.sectionAt(page.sectionId) : null
+    return !!section && !root.bookWritable(section.notebookId)
   }
   // One notebook's sections with their pages and New Note rows when open,
   // starting at `level`: 0 when the notebook is a tab
@@ -144,7 +165,12 @@ LaneProvider {
         }
         rows.push({ kind: "note", path: pathOf(pg.id), title: pg.title, preview: "", level: level + 1, fixed: true, version: pg.modified || "", modified: pg.modified || "" })
       }
-      rows.push({ kind: "new", path: "section:" + sec.id, level: level + 1 })
+      if (pageInventory.pendingSections.indexOf(sec.id) >= 0) {
+        rows.push({ kind: "action", path: "loadsection:" + sec.id, title: pageInventory.status(sec.id), icon: "󰑐", level: level + 1 })
+      }
+      if (root.bookWritable(bookId)) {
+        rows.push({ kind: "new", path: "section:" + sec.id, level: level + 1 })
+      }
     }
     return rows
   }
@@ -152,16 +178,13 @@ LaneProvider {
   function accountActions(bookId) {
     var actions = []
     var books = bookList().filter(function(book) {
-      return !bookId || book.id === bookId
+      return (!bookId || book.id === bookId) && root.bookWritable(book.id)
     })
     books.forEach(function(book) {
       actions.push({ path: "newsection:" + book.id,
                      title: books.length === 1 ? "New section" : "New section in " + book.name,
                      icon: "󰉗" })
     })
-    if (!ms.hasScope("Files.Read")) {
-      actions.push({ path: "enableorder", title: ms.loggingIn ? "Cancel signing in…" : "Enable custom section order…", icon: "󰒓" })
-    }
     actions.push({ path: "logout", title: "Sign out" + (ms.account ? " (" + ms.account + ")" : ""), icon: "󰍃" })
     return actions
   }
@@ -201,7 +224,7 @@ LaneProvider {
       if (books.length === 0) {
         rows.push(root.listing
           ? { kind: "action", path: "refresh", title: "Loading notebooks…", icon: "󰑐" }
-          : { kind: "action", path: "refresh", title: "No notebooks found — refresh", icon: "󰑐" })
+          : { kind: "action", path: "refresh", title: root.listingError ? "Could not load notebooks — retry" : "No notebooks found — refresh", icon: "󰑐" })
       }
     }
     root.sections = [{ key: "onenote", name: "OneNote", color: "#7719AA", count: root.pages.length,
@@ -210,7 +233,10 @@ LaneProvider {
   }
 
   function crumb(path) { var pg = pageAt(path); return pg ? sectionName(pg.sectionId) : "OneNote" }
-  function createTargetFor(path) { var pg = pageAt(path); return pg ? "section:" + pg.sectionId : "" }
+  function createTargetFor(path) {
+    var pg = pageAt(path)
+    return pg && !root.noteReadOnly(path) ? "section:" + pg.sectionId : ""
+  }
   function restoreState(obj) {
     if (!obj) {
       return
@@ -277,6 +303,9 @@ LaneProvider {
       next.push(id)
     }
     root.expanded = next
+    if (i < 0 && root.sectionAt(id)) {
+      pageInventory.request(id, true, false)
+    }
     rebuild()
     root.persistRequested()
   }
@@ -316,15 +345,6 @@ LaneProvider {
         ms.login()
       }
     }
-    else if (id === "enableorder") {
-      if (ms.loggingIn) {
-        ms.cancelLogin()
-        root.noticeCleared()
-      } else {
-        // Failed/cancelled optional consent leaves the working sign-in intact.
-        ms.loginOptional()
-      }
-    }
     else if (id === "relogin") {
       if (ms.loggingIn) {
         ms.cancelLogin()
@@ -340,6 +360,8 @@ LaneProvider {
          { label: "Cancel", action: function() { root.noticeCleared() } }])
     } else if (id === "refresh") {
       root.listPages(true)
+    } else if (id.indexOf("loadsection:") === 0) {
+      pageInventory.request(id.substring(12), true, false)
     } else if (id.indexOf("newsection:") === 0) {
       root.newSectionNotebook = id.substring(11)
       root.newSectionError = ""
@@ -389,6 +411,8 @@ LaneProvider {
           return
         }
         var sct = r.section
+        root.supersedeOrderPass()
+        pageInventory.serial = Math.max(pageInventory.serial, r.pageListSerial || 0)
         if (!sct.notebook) {
           sct.notebook = root.notebookName(sct.notebookId)
         }
@@ -477,6 +501,7 @@ LaneProvider {
 
   function refresh() {
     if (!root.ready) {
+      root.onNotebooks = []
       root.onSections = []
       root.pages = []
       rebuild()
@@ -485,38 +510,102 @@ LaneProvider {
     // The cached read is a local file and no request at all, so it does not
     // belong in the lane — it must answer instantly even while OneNote is
     // parked, which is what keeps the sidebar populated during a throttle.
-    cachedProc.start()
+    root.readCached()
     root.listPages(false)
   }
 
-  // The account-wide listing checks section timestamps and OneDrive TOCs;
-  // page lists and unchanged TOC downloads are reused from the cache.
+  // Discover the tree first. PageInventory fetches one page-list response
+  // per job, keeping opening and saving notes ahead of startup work.
   function listPages(force) {
     if (!root.rq || !root.ready) {
       return
     }
+    var generation = ++root.listGeneration
+    root.listPending = true
+    root.listingError = ""
+    discoveryRetry.stop()
     root.rq.enqueue({ key: "list", mode: force ? "replace" : "dedupe", priority: 1,
-                      owner: root, label: "listing" },
-      function(ctx) { root.runScript(["list"].concat(force ? ["--force"] : ["--max-age", "600"]), "", ctx) },
+                      runWhenPaused: true, owner: root, label: "listing" },
+      function(ctx) { root.runScript(["list", "--incremental"].concat(force ? ["--force"] : ["--max-age", "600"]), "", ctx) },
       function(r) {
+        if (generation !== root.listGeneration) {
+          return
+        }
+        root.listPending = false
         if (!r) {
-          return  // superseded by a Refresh, or cancelled
+          root.rebuild()
+          return
         }
         if (r.error) {
+          root.listingError = r.error
           root.statusRequested("OneNote: " + r.error)
+          // An interrupted listing checkpoints real sections and pages.
+          root.readCached()
         } else {
-          if (Array.isArray(r.sections)) {
-            root.onSections = r.sections
-          }
-          if (Array.isArray(r.pages)) {
-            root.pages = r.pages
-            root.searchInventoryReady = true
-            root.searchInventoryComplete = r.inventoryComplete === true
-          }
+          root.applyInventory(r)
           root.listed(r)
+          if (r.deferred) {
+            discoveryRetry.interval = Math.max(100, Math.ceil(r.retryAfter * 1000))
+            discoveryRetry.restart()
+          }
+          if (Array.isArray(r.listingWarnings) && r.listingWarnings.length) {
+            root.statusRequested("OneNote: " + r.listingWarnings.join("; "))
+          }
         }
         root.rebuild()
       })
+    root.rebuild()
+  }
+
+  Timer { id: discoveryRetry; onTriggered: root.listPages(false) }
+
+  function applyInventory(result) {
+    if (!pageInventory.accept(result)) {
+      return
+    }
+    root.inventoryRevision++
+    if (Array.isArray(result.notebooks)) {
+      root.onNotebooks = result.notebooks
+    }
+    if (Array.isArray(result.sections)) {
+      root.onSections = result.sections
+    }
+    if (Array.isArray(result.pages)) {
+      root.pages = result.pages
+      root.searchInventoryReady = result.inventoryReady !== false
+      root.searchInventoryComplete = result.inventoryComplete === true
+    }
+  }
+
+  ProcessRunner { id: inventoryRunner }
+  PageInventory {
+    id: pageInventory
+    ready: root.ready && !(root.host && root.host.closing)
+    session: root.ms ? root.ms.cacheSession : ""
+    queue: root.rq
+    run: function(args, payload, callback) {
+      return root.runProcess(inventoryRunner, args, payload, callback)
+    }
+    preferredSections: root.expanded.filter(function(id) { return !!root.sectionAt(id) })
+    onLoaded: function(result) {
+      root.applyInventory(result)
+      root.rebuild()
+    }
+    onFailed: function(message) {
+      root.listingError = message
+      root.statusRequested("OneNote: " + message)
+      root.rebuild()
+    }
+  }
+
+  property int inventoryRevision: 0
+  property int listGeneration: 0
+  property bool listPending: false
+  property string listingError: ""
+  onRqChanged: {
+    if (root.ready && root.rq) {
+      root.listPages(false)
+    }
   }
 
   // Every listing answer passes through here: it is the newest word on the
@@ -606,9 +695,15 @@ LaneProvider {
   Connections {
     target: root.ms
     function onCacheSessionChanged() {
+      discoveryRetry.stop()
+      root.inventoryRevision++
+      root.listGeneration++
+      root.listPending = false
+      root.listingError = ""
       root.searchInventoryReady = false
       root.searchInventoryComplete = false
       root.onSections = []
+      root.onNotebooks = []
       root.pages = []
       root.bodies = ({})
       root.loadVersions = ({})
@@ -617,6 +712,7 @@ LaneProvider {
     function onSignedOut() {
       root.supersedeOrderPass()
       root.onSections = []
+      root.onNotebooks = []
       root.pages = []
       root.bodies = ({})
       root.loadVersions = ({})
@@ -646,6 +742,10 @@ LaneProvider {
     var id = root.idOf(path)
     var page = root.pageAt(path)
     var cached = Object.assign({}, result, { version: page ? page.modified || "" : "" })
+    if (root.noteReadOnly(path)) {
+      cached.editable = false
+      cached.reason = "This notebook is shared with you as read-only."
+    }
     root.bodies[id] = cached
     return cached
   }
@@ -653,7 +753,7 @@ LaneProvider {
   function load(path, cb) {
     var id = idOf(path), cached = root.bodies[id], pg = pageAt(path)
     if (cached && cached.view && (!pg || cached.version === (pg.modified || ""))) {
-      cb(cached)
+      cb(root.cacheBody(path, cached))
       return
     }
     if (!root.rq) {
@@ -685,6 +785,10 @@ LaneProvider {
   // out loud (business-requirements.md), never silently.
   function save(path, title, body, cb, options) {
     var id = idOf(path)
+    if (root.noteReadOnly(path)) {
+      cb({ error: "This notebook is shared with you as read-only." })
+      return
+    }
     if (!root.rq) {
       cb({ error: "not ready" })
       return
@@ -756,6 +860,7 @@ LaneProvider {
           return
         }
         root.pages = [r.page].concat(root.pages)
+        pageInventory.serial = Math.max(pageInventory.serial, r.pageListSerial || 0)
         root.bodies[r.page.id] = Object.assign({}, r.note, { editable: true, version: r.page.modified || "" })
         var sec = root.sectionAt(r.page.sectionId), exp = root.expanded.slice()
         if (sec && exp.indexOf(sec.notebookId) < 0) {
@@ -795,6 +900,7 @@ LaneProvider {
           return
         }
         root.pages = root.pages.filter(function(p) { return p.id !== id })
+        pageInventory.serial = Math.max(pageInventory.serial, r.pageListSerial || 0)
         delete root.bodies[id]
         root.rebuild()
         if (cb) {
@@ -830,7 +936,7 @@ LaneProvider {
       root.rq.enqueue({ key: "check:" + currentPath, mode: "dedupe", priority: 1, owner: root, label: "check" },
         function(ctx) { root.runScript(["page", root.idOf(currentPath), "--check"], "", ctx) },
         function(r) {
-          if (r && !r.error) {
+          if (r && !r.error && !r.deferred) {
             root.applyCheck(currentPath, r)
           }
         })
@@ -839,19 +945,7 @@ LaneProvider {
     if (!page || !page.sectionId) {
       return
     }
-    root.rq.enqueue({ key: "pages:" + page.sectionId, mode: "dedupe", priority: 1, owner: root, label: "section pages" },
-      function(ctx) { root.runScript(["pages", page.sectionId], "", ctx) },
-      function(r) {
-        if (!r || r.error || !Array.isArray(r.pages) || !Array.isArray(r.sections)) {
-          return
-        }
-        var ids = {}; r.sections.forEach(function(id) { ids[id] = true })
-        var merged = root.pages.filter(function(p) { return !ids[p.sectionId] }).concat(r.pages)
-        if (JSON.stringify(merged) !== JSON.stringify(root.pages)) {
-          root.pages = merged
-          root.rebuild()
-        }
-      })
+    pageInventory.request(page.sectionId, false, true)
   }
 
   // Graph does not reliably bump a page's lastModifiedDateTime, so the open
@@ -871,28 +965,30 @@ LaneProvider {
   // The cache, read straight off disk so the sidebar fills instantly — and
   // still fills while the account is parked, which is the point of reading it
   // outside the lane.
-  readonly property bool listing: cachedProc.running || (root.rq ? root.rq.depth > 0 : false)
+  readonly property bool listing: cachedProc.running || root.listPending || pageInventory.busy
+  onListingChanged: root.rebuild()
+  function readCached() {
+    if (cachedProc.running) {
+      return
+    }
+    cachedProc.session = root.ms ? root.ms.cacheSession : ""
+    cachedProc.revision = root.inventoryRevision
+    cachedProc.start()
+  }
   ProcessTask {
     id: cachedProc
     property string session: ""
-    onStarted: session = root.ms ? root.ms.cacheSession : ""
+    property int revision: 0
     environment: root.ms ? root.ms.env : ({})
     command: ["python3", root.script, "list", "--cached"]
     raw: true
     onFinished: function(result) {
-      if (cachedProc.session !== (root.ms ? root.ms.cacheSession : "")) {
+      if (cachedProc.session !== (root.ms ? root.ms.cacheSession : "") || cachedProc.revision !== root.inventoryRevision) {
         return
       }
       var res = root.parse(result.text || "")
       if (!res.error) {
-        if (Array.isArray(res.sections)) {
-          root.onSections = res.sections
-        }
-        if (Array.isArray(res.pages)) {
-          root.pages = res.pages
-          root.searchInventoryReady = res.inventoryReady === true
-          root.searchInventoryComplete = res.inventoryComplete === true
-        }
+        root.applyInventory(res)
         root.listed(res)
       }
       root.rebuild()

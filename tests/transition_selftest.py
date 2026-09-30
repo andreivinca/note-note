@@ -91,6 +91,16 @@ def main():
             "                    'inventoryComplete': True, 'sectionOrderPending': True},\n"
             "           'section-order': {'sections': [a, b], 'sectionOrderWarnings': ['N: placed by the pass']}}\n"
             "sys.stdout.write(json.dumps(answers[sys.argv[1]]))\n")
+        (work / "onenote_race_stub.py").write_text(
+            "import json, sys, time\n"
+            "if '--cached' in sys.argv:\n"
+            "    sys.stdout.write(json.dumps({'sections': [], 'notebooks': [], 'pages': [], 'inventoryReady': False}))\n"
+            "    sys.stdout.flush()\n"
+            "    time.sleep(0.8)\n"
+            "else:\n"
+            "    sys.stdout.write(json.dumps({'sections': [{'id': 's', 'name': 'Section', 'notebookId': 'n', 'notebook': 'Notebook'}],\n"
+            "                                'notebooks': [{'id': 'n', 'name': 'Notebook'}],\n"
+            "                                'pages': [{'id': 'p', 'sectionId': 's', 'title': 'Loaded'}], 'inventoryComplete': True}))\n")
         (work / "notes/Broken").write_text("a file, not a notebook")
         (work / "notes/External.md").write_text("---\ntitle: External original\n---\noriginal")
         (work / "notes/Large.md").write_text("漢" * 700000, encoding="utf-8")
@@ -104,6 +114,7 @@ def main():
                    XDG_STATE_HOME=str(work / "state"), NOTE_NOTE_TEST_DIR=str(work / "notes"),
                    NOTE_NOTE_TEST_STATUS_SCRIPT=str(work / "status_stub.py"),
                    NOTE_NOTE_TEST_ONENOTE_SCRIPT=str(work / "onenote_stub.py"),
+                   NOTE_NOTE_TEST_ONENOTE_RACE_SCRIPT=str(work / "onenote_race_stub.py"),
                    NOTE_NOTE_TEST_TOOLS=(tool_ui / "tools").as_uri(),
                    NOTE_NOTE_TEST_INVALID_TOOLS=invalid_tools.as_uri(),
                    NOTE_NOTE_TEST_PLUGIN_TOOLS=plugin_tools.as_uri(),
