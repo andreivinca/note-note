@@ -45,7 +45,7 @@ Native.Main {
         })
       }
       var workspace = window.workspaceUnderTest
-      if (!workspace || !workspace.providersLoaded || window.closeRequested) {
+      if (!workspace || !workspace.providersLoaded || !window.visible || window.closeRequested) {
         return
       }
       if (!window.providerUnderTest) {
