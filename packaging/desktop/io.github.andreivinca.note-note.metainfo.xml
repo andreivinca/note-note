@@ -34,6 +34,13 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.0.31" date="2026-10-02">
+      <description>
+        <p>Fix notes remaining Unsaved when an indented line contains pasted
+        inline code or other formatting. Tabs and leading spaces now preserve
+        prose indentation and formatting when the note is saved.</p>
+      </description>
+    </release>
     <release version="1.0.30" date="2026-09-30">
       <description>
         <p>OneNote discovers shared notebook links and resumes notebook and
