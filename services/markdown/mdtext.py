@@ -34,6 +34,7 @@ LINK_DEFINITION = re.compile(r"^(\s*)(\[)(?=[^\]\n]*\]:)")
 STRICT = re.compile(r"([\\*_`~=\[\]<>|])")
 UNESCAPED_PIPE = re.compile(r"(?<!\\)((?:\\\\)*)\|")
 LINK_DESTINATION_MARKERS = re.compile(r"([\\()])")
+LEADING_WHITESPACE = re.compile(r"^[ \t]+")
 
 
 def escape_inline(text, strict=False):
@@ -77,7 +78,15 @@ def escape_line_start(line):
     `**bold**` is not a bullet: only `- `, `+ ` and `* ` followed by a space
     are, which is what keeps emphasis at the start of a line intact.
     """
-    line = LINE_START.sub(r"\1\\\2", line or "")
+    line = line or ""
+    leading = LEADING_WHITESPACE.match(line)
+    if leading:
+        indent = leading.group(0).expandtabs(4)
+        if len(indent) >= 4:
+            # Prose uses non-breaking indentation in our Markdown dialect.
+            # Literal tabs/four spaces would turn its inline markup into code.
+            line = "\u00a0" * len(indent) + line[leading.end():]
+    line = LINE_START.sub(r"\1\\\2", line)
     line = TABLE_DELIMITER.sub(r"\1\\\2", line)
     line = LINK_DEFINITION.sub(r"\1\\\2", line)
     return LINE_NUMBER.sub(r"\1\\\2", line)

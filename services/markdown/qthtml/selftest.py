@@ -410,6 +410,26 @@ def check_command_line(verbose):
     return failures
 
 
+def check_pasted_prose_indentation(verbose):
+    """Literal clipboard indentation must keep prose and its inline formatting."""
+    documents = {
+        "tab before inline code": '<p style="white-space:pre-wrap;">\tfind: <code>iam.disableServiceAccountKeyCreation</code></p>',
+        "spaces before inline code": '<p style="white-space:pre-wrap;">    find: <code>iam.disableServiceAccountKeyCreation</code></p>',
+    }
+    expected = "\u00a0" * 4 + "find: `iam.disableServiceAccountKeyCreation`\n"
+    rendered = through_qt(documents)
+    failures = 0
+    for name, result in rendered.items():
+        for stage in ("saved", "reread"):
+            actual = to_markdown(result[stage])
+            if actual != expected:
+                failures += 1
+                report(name, stage, expected, actual, verbose)
+    print("pasted prose indentation (through Qt)")
+    print("  %d/%d cases" % (len(documents) * 2 - failures, len(documents) * 2))
+    return failures
+
+
 def report(name, stage, expected, actual, verbose):
     print("  FAIL  %-18s (%s)" % (name, stage))
     if verbose:
@@ -439,6 +459,7 @@ def main():
     failures += check_typed_filler(args.verbose)
     failures += check_as_text(args.verbose)
     failures += check_command_line(args.verbose)
+    failures += check_pasted_prose_indentation(args.verbose)
 
     # The chip rides through Qt too: the span must keep both halves — the
     # family that means code and the colour that shows it — and still read

@@ -269,6 +269,24 @@ class Content(unittest.TestCase):
         saved = to_markdown(to_html(fence + "\n" + value + "\n" + fence))
         self.assertEqual(parse(saved)[0]["raw"], value + "\n")
 
+    def test_prose_indentation_does_not_turn_inline_formatting_into_code(self):
+        # A leading tab made the whole line an indented Markdown code block,
+        # so its generated inline-code backticks became literal characters.
+        for indent in ("\t", "    ", "  \t", "\t\t", "     "):
+            for body, inline in (
+                    ('<span style="font-family:monospace;">iam.disableServiceAccountKeyCreation</span>',
+                     '`iam.disableServiceAccountKeyCreation`'),
+                    ('<span style="font-weight:700;">value</span>', '**value**'),
+                    ('<a href="https://example.com">value</a>', '[value](https://example.com)'),
+                    ('literal *stars*', r'literal \*stars\*')):
+                with self.subTest(indent=indent, body=body):
+                    source = '<p>' + indent + 'find: ' + body + '</p>'
+                    saved = to_markdown(source)
+                    expected_indent = "\u00a0" * len(indent.expandtabs(4))
+                    self.assertEqual(saved, expected_indent + "find: " + inline + "\n")
+                    self.assertEqual(parse(saved)[0]["type"], "paragraph")
+                    self.assertEqual(to_markdown(to_html(saved)), saved)
+
     def test_deep_headings_keep_their_level(self):
         # Levels four to six were clamped to three on both sides, so a note's
         # `####` became `###` at its first save.
