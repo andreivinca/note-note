@@ -34,6 +34,12 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.0.32" date="2026-10-03">
+      <description>
+        <p>Fix bold text returning after saving and reopening a note. Turning
+        Bold off now saves regular text while keeping other inline formatting.</p>
+      </description>
+    </release>
     <release version="1.0.31" date="2026-10-02">
       <description>
         <p>Fix notes remaining Unsaved when an indented line contains pasted
