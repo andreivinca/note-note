@@ -14,6 +14,11 @@ Controls.AbstractButton {
   property color foreground: Color.foreground
   property color backgroundColor: "transparent"
   property color accent: Color.accent
+  property color hoverColor: Style.hoverFillFor(foreground, accent)
+  property color pressedColor: Style.pressedFillFor(foreground, accent)
+  property color selectedColor: Style.selectedFillFor(foreground, accent)
+  property color selectedForeground: Style.selectedStateColor(foreground, accent)
+  readonly property color contentColor: selected || active ? selectedForeground : foreground
   property string fontFamily: Style.font.family
   property real fontSize: Style.font.body
   property real iconSize: Style.font.icon
@@ -37,10 +42,15 @@ Controls.AbstractButton {
   background: BorderSurface {
     radius: button.radius
     borderSpec: button.borderSpec
-    color: button.down ? Style.pressedFillFor(button.foreground, button.accent)
-      : button.hovered || button.activeFocus ? Style.hoverFillFor(button.foreground, button.accent)
-      : button.selected || button.active ? Style.selectedFillFor(button.foreground, button.accent)
+    color: button.down ? button.pressedColor
+      : button.hovered || button.activeFocus ? button.hoverColor
+      : button.selected || button.active ? button.selectedColor
       : button.backgroundColor
+    Behavior on color {
+      ColorAnimation {
+        duration: 120
+      }
+    }
   }
   contentItem: Item {
     implicitWidth: contentRow.implicitWidth
@@ -53,20 +63,39 @@ Controls.AbstractButton {
       anchors.alignWhenCentered: false
       spacing: Style.spacing.controlGap
 
-      Text {
+      Item {
         visible: button.iconText.length > 0
-        text: button.iconText
-        textFormat: Text.PlainText
-        color: button.foreground
-        font.family: button.fontFamily
-        font.pixelSize: button.iconSize
+        implicitWidth: iconGlyph.implicitWidth
+        implicitHeight: iconGlyph.implicitHeight
         Layout.alignment: Qt.AlignVCenter
+
+        TextMetrics {
+          id: iconMetrics
+          font: iconGlyph.font
+          text: iconGlyph.text
+        }
+
+        // Center the visible glyph within its font spacing box, keeping
+        // button sizes and icon-to-label spacing independent of bearings.
+        Text {
+          id: iconGlyph
+          x: (parent.width - iconMetrics.tightBoundingRect.width) / 2
+            - iconMetrics.tightBoundingRect.x
+          y: (parent.height - iconMetrics.tightBoundingRect.height) / 2
+            - baselineOffset - iconMetrics.tightBoundingRect.y
+          text: button.iconText
+          textFormat: Text.PlainText
+          color: button.contentColor
+          font.family: button.fontFamily
+          font.pixelSize: button.iconSize
+          renderType: Text.NativeRendering
+        }
       }
       Text {
         visible: button.text.length > 0
         text: button.text
         textFormat: Text.PlainText
-        color: button.selected ? Style.selectedStateColor(button.foreground, button.accent) : button.foreground
+        color: button.contentColor
         font.family: button.fontFamily
         font.pixelSize: button.fontSize
         Layout.alignment: Qt.AlignVCenter

@@ -76,7 +76,7 @@ Item {
       // All groups share the tallest button's height, including text-only
       // dropdowns whose labels are shorter than the icon glyphs.
       readonly property real buttonHeight: {
-        var tallest = Style.space(28)
+        var tallest = Style.space(32)
         for (var i = 0; i < children.length; i++) {
           var group = children[i]
           if (group.naturalButtonHeight) {
@@ -93,6 +93,7 @@ Item {
           required property var modelData
           objectName: "editingToolGroup-" + modelData.id
           registry: bar.registry
+          surfaceColor: bar.fill
           tools: modelData.tools
           toolbarFlow: toolFlow
           submenuComponent: submenuFactory

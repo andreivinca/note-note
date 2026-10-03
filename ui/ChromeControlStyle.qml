@@ -11,6 +11,6 @@ QtObject {
   readonly property color borderColor: Color.token("input.border")
   readonly property color focusBorderColor: Color.token("border.focus")
   readonly property real borderWidth: 1
-  readonly property real radius: Math.min(Style.cornerRadius, Style.space(6))
-  readonly property real height: Style.space(26)
+  readonly property real radius: Style.controlRadius
+  readonly property real height: Style.space(30)
 }

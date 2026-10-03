@@ -8,8 +8,7 @@
     "accent.primary": "#89B4FA",
     "selection.background": "#384866",
     "selection.foreground": "#FFFFFF",
-    "tab.activeBackground": "#384866",
-    "tab.activeForeground": "#FFFFFF",
+    "titlebar.background": "#384866",
     "editor.highlightBackground": "#635526",
     "editor.highlightForeground": "#FFF2BB"
   }

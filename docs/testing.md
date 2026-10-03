@@ -1,6 +1,6 @@
 # Testing and development
 
-The aggregate runner exercises all twenty suites without real accounts or note
+The aggregate runner exercises all twenty-one suites without real accounts or note
 contents:
 
 ```bash
@@ -113,6 +113,13 @@ run it while the user may be using the machine.
 The status bar has a focused suite, `python3 tests/statusbar_selftest.py`, for
 registration, left/right layouts, visibility, font sizes, narrow windows and
 custom dropdown interaction. See [the component contract](status-bar.md).
+
+The notebook tabs have a focused suite, `python3 tests/tabstrip_selftest.py`
+(`--shell` for Quickshell), for the curve gap on either side of the selected
+tab, stable face widths, clicks on overlapping shoulders, and narrow-window
+scrolling. It renders at 1×, 1.5× and 2× scale with small and large labels,
+including an elided name and a provider logo. CTest also runs it as
+`native-tabstrip`.
 
 Faster and safer than testing inside the shell:
 

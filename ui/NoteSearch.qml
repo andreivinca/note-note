@@ -1,6 +1,5 @@
 import QtQuick
 import "../design"
-import "../design/controls"
 
 // Search field with keyboard navigation and a shortcut hint.
 Item {
@@ -47,9 +46,7 @@ Item {
       anchors.verticalCenter: parent.verticalCenter
       width: searchKeycapText.width + Style.spacing.sm * 2
       height: searchKeycapText.height + Style.spacing.xxs * 2
-      // A square theme keeps its corners; a round one is capped where
-      // a keycap stops looking like a key.
-      radius: Math.min(Style.cornerRadius, height / 3)
+      radius: Math.min(Style.controlRadius, height / 3)
       color: Util.alpha(root.foreground, 0.06)
 
       Text {
@@ -63,7 +60,7 @@ Item {
       }
     }
 
-    Button {
+    ChromeButton {
       id: clearSearchButton
       visible: root.filterText.length > 0
       anchors.right: parent.right
@@ -71,7 +68,8 @@ Item {
       anchors.verticalCenter: parent.verticalCenter
       iconText: "󰅖"
       tooltipText: "Clear the search" + (root.keybindings ? root.keybindings.hint("app/back") : "")
-      foreground: root.foreground
+      contentForeground: root.foreground
+      surfaceColor: Color.token("input.background")
       accent: root.accent
       iconSize: Style.font.iconSmall
       horizontalPadding: Style.spacing.xs

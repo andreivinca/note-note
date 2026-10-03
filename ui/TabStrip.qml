@@ -21,14 +21,20 @@ Item {
   property color foreground: Color.menu.text
   property string fontFamily: Style.font.menuFamily
   property int fontSize: Style.font.bodySmall
-  // Mockup measurements at a 16 px tab font. Keep these proportions
-  // independent of the shell's general-purpose spacing overrides.
+  // Tab geometry scales with typography, independently of shell spacing.
   readonly property real designScale: root.fontSize / 16
-  readonly property real horizontalPadding: Math.round(18 * root.designScale)
-  readonly property real contentGap: Math.round(10 * root.designScale)
+  readonly property real horizontalPadding: Math.round(12 * root.designScale)
+  readonly property real contentGap: Math.round(8 * root.designScale)
   readonly property real iconSize: root.fontSize
-  readonly property real verticalInset: Math.round(5 * root.designScale)
-  implicitHeight: Math.round(42 * root.designScale)
+  readonly property real edgeInset: Math.round(8 * root.designScale)
+  readonly property real railHeight: Math.round(32 * root.designScale) + edgeInset * 2
+  // Hover faces sit close to the content below, with more breathing room above.
+  readonly property real topInset: Math.round(7 * root.designScale)
+  readonly property real bottomInset: Math.round(5 * root.designScale)
+  readonly property real tabRadius: Math.round(12 * root.designScale)
+  readonly property real selectedRadius: Math.round(10 * root.designScale)
+  readonly property real faceHeight: railHeight - topInset - bottomInset
+  implicitHeight: faceHeight + bottomInset
   signal activated(string key)
 
   clip: true
@@ -47,10 +53,12 @@ Item {
       if (!it || it.modelData.key !== root.activeKey) {
         continue
       }
-      if (strip.contentX > it.x) {
-        strip.contentX = it.x
-      } else if (strip.contentX + strip.width < it.x + it.width) {
-        strip.contentX = Math.max(0, it.x + it.width - strip.width)
+      var start = it.x
+      var end = it.x + it.width
+      if (strip.contentX > start) {
+        strip.contentX = start
+      } else if (strip.contentX + strip.width < end) {
+        strip.contentX = Math.max(0, end - strip.width)
       }
       return
     }
@@ -80,8 +88,9 @@ Item {
     Row {
       id: row
       height: strip.height
-      // Tabs meet at their dividers; the whitespace belongs inside each tab.
-      spacing: 0
+      // Bounds include both shoulders. Share that unused corner space while
+      // keeping the painted faces separated by the hover's lower inset.
+      spacing: root.bottomInset - root.tabRadius * 2
 
       Repeater {
         id: tabs
@@ -92,7 +101,7 @@ Item {
           }
         }
 
-        delegate: Rectangle {
+        delegate: Item {
           id: tab
           required property var modelData
           objectName: "notebookTab-" + modelData.key
@@ -103,33 +112,37 @@ Item {
           readonly property bool dimmed: root.filtering && hits === 0
           readonly property bool branded: String(modelData.logo || "").length > 0
           readonly property string displayName: modelData.name || "Notes"
+          readonly property real faceWidth: content.implicitWidth + root.horizontalPadding * 2
 
           anchors.verticalCenter: parent.verticalCenter
-          width: content.implicitWidth + root.horizontalPadding * 2
+          width: faceWidth + root.tabRadius * 2
           height: root.height
-          radius: Math.min(Style.cornerRadius, Style.space(6))
-          // The active notebook uses the theme's selected-tab colors.
-          color: current ? root.activeBackground
-                         : (tabHover.hovered ? Style.hoverFill : "transparent")
+          // Selected shoulders own the painted area beneath neighboring faces.
+          z: current ? 1 : 0
           opacity: dimmed ? 0.38 : 1
-          Behavior on color { ColorAnimation { duration: 120 } }
 
-          Rectangle {
-            anchors.right: parent.right
-            anchors.verticalCenter: parent.verticalCenter
-            width: Style.spacing.hairline
-            height: Math.round(18 * root.designScale)
-            visible: !tab.current && !tabHover.hovered
-            color: Util.alpha(root.foreground, 0.12)
+          TabSurface {
+            id: tabSurface
+            anchors.fill: parent
+            radius: root.tabRadius
+            selectedRadius: root.selectedRadius
+            bottomInset: root.bottomInset
+            selected: tab.current
+            // The active notebook uses the theme's selected-tab colors.
+            color: tab.current || hovered ? root.activeBackground : "transparent"
+            onClicked: root.activated(tab.modelData.key)
+            Behavior on color {
+              ColorAnimation {
+                duration: 120
+              }
+            }
           }
-
-          HoverHandler { id: tabHover }
 
           Row {
             id: content
             anchors.left: parent.left
-            anchors.leftMargin: root.horizontalPadding
-            anchors.verticalCenter: parent.verticalCenter
+            anchors.leftMargin: root.tabRadius + root.horizontalPadding
+            y: (tab.height - root.bottomInset - height) / 2
             spacing: root.contentGap
             anchors.alignWhenCentered: false
 
@@ -184,14 +197,8 @@ Item {
             }
           }
 
-          MouseArea {
-            anchors.fill: parent
-            cursorShape: Qt.PointingHandCursor
-            onClicked: root.activated(tab.modelData.key)
-          }
-
           PanelToolTip {
-            visible: tabHover.hovered && (label.implicitWidth > label.width || !root.filtering)
+            visible: tabSurface.hovered && (label.implicitWidth > label.width || !root.filtering)
             text: tab.displayName + " · " + (root.filtering ? tab.hits : (tab.modelData.count || 0))
           }
         }

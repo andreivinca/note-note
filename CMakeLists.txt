@@ -96,8 +96,12 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/transition_selftest.py --standalone)
     add_test(NAME native-extensions COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/extensions_selftest.py)
+    add_test(NAME native-tabstrip COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/tabstrip_selftest.py)
     set_tests_properties(native-extensions PROPERTIES
         ENVIRONMENT "NOTE_NOTE_HARNESS=$<TARGET_FILE:note-note-harness>" TIMEOUT 120)
     set_tests_properties(native-transitions PROPERTIES
         ENVIRONMENT "NOTE_NOTE_HARNESS=$<TARGET_FILE:note-note-harness>" TIMEOUT 240)
+    set_tests_properties(native-tabstrip PROPERTIES
+        ENVIRONMENT "NOTE_NOTE_HARNESS=$<TARGET_FILE:note-note-harness>" TIMEOUT 90)
 endif()

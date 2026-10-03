@@ -22,8 +22,9 @@ var recipes = {
   // A colour only the host can give. Black is what is left when it does not.
   root: function() { return "#000000" },
   alias: function(source) { return source },
-  activeTabBackground: function(selection, background, foreground) {
-    return luminance(background) > 0.5 ? Qt.tint(selection, alpha(foreground, 0.06)) : selection
+  tabRailBackground: function(selection, background, foreground) {
+    var fill = luminance(background) > 0.5 ? Qt.tint(selection, alpha(foreground, 0.06)) : selection
+    return Qt.tint(background, fill)
   },
   raised: function(background, foreground) { return Qt.tint(background, alpha(foreground, 0.07)) },
   muted: function(foreground) { return alpha(foreground, 0.65) },

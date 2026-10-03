@@ -6,6 +6,9 @@ QtObject {
   id: style
   property var source: null
   readonly property int cornerRadius: source ? source.cornerRadius : 6
+  // Workspace controls keep their own rounded shape in either host.
+  readonly property real controlRadius: space(8)
+  readonly property real popupRadius: space(10)
   readonly property int gapsOut: source ? source.gapsOut : 12
   readonly property string fontFamily: source ? source.fontFamily : Qt.application.font.family
   readonly property var font: source ? source.font : desktopFont

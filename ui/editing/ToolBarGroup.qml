@@ -1,6 +1,5 @@
 import QtQuick
 import "../../design"
-import "../../design/controls"
 import ".." as AppUi
 
 Rectangle {
@@ -15,6 +14,7 @@ Rectangle {
   property bool alignRight: false
   property bool separatorVisible: true
   property real precedingWidth: 0
+  property color surfaceColor: Color.token("toolbar.background")
   readonly property var editor: registry.editor
   property real panelPadding: Style.spacing.xs
   readonly property real naturalButtonHeight: {
@@ -44,7 +44,7 @@ Rectangle {
   implicitHeight: toolsFlow.implicitHeight + panelPadding * 2
   width: Math.min(toolbarFlow.width, alignRight ? Math.max(implicitWidth, toolbarFlow.width - precedingWidth) : implicitWidth)
   height: implicitHeight
-  radius: Math.min(Style.cornerRadius, Style.space(6))
+  radius: Style.controlRadius + panelPadding
 
   Rectangle {
     visible: group.separatorVisible
@@ -61,7 +61,7 @@ Rectangle {
     x: group.alignRight ? group.width - width - group.panelPadding : group.panelPadding
     y: group.panelPadding
     width: Math.max(0, Math.min(group.buttonMetrics.width, group.width - group.panelPadding * 2))
-    spacing: Style.spacing.xxs
+    spacing: Style.spacing.sm
 
     Repeater {
       id: buttons
@@ -78,7 +78,7 @@ Rectangle {
         width: actionButton.width
         height: group.buttonHeight
 
-        Button {
+        AppUi.ChromeButton {
           id: actionButton
           readonly property var modelData: buttonSlot.modelData
           readonly property bool labeledMenu: modelData.isMenu && modelData.toolbarLabelVisible
@@ -91,13 +91,13 @@ Rectangle {
           anchors.alignWhenCentered: false
           height: group.buttonHeight
           width: Math.max(implicitWidth, height)
-          radius: Math.max(0, group.radius - group.panelPadding)
           borderSpec: Border.none()
-          // Labeled menus use the ordinary tool hover fill even at rest.
-          backgroundColor: labeledMenu ? Style.hoverFillFor(foreground, accent) : "transparent"
+          // Labeled menus have the same rounded face as selected tools.
+          surfaceColor: group.surfaceColor
+          backgroundColor: labeledMenu ? selectedColor : "transparent"
           active: menu.opened || modelData.panelOpen
           selected: modelData.checked
-          foreground: Style.secondaryText(group.editor.foreground, 0.72)
+          contentForeground: group.editor.foreground
           accent: group.editor.accent
           iconText: modelData.icon
           // A tooltip must not cover an open tool panel or menu.

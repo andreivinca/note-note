@@ -28,6 +28,7 @@ SUITES = [
     "cpp/selftest.py",
     "tests/test_regressions.py",
     "tests/statusbar_selftest.py",
+    "tests/tabstrip_selftest.py",
     "tests/transition_selftest.py",
     "tests/extensions_selftest.py",
 ]
@@ -38,7 +39,7 @@ def main():
     env = dict(os.environ, QT_QPA_PLATFORMTHEME="generic")
     for suite in SUITES:
         command = [sys.executable, suite]
-        if suite == "tests/extensions_selftest.py":
+        if suite in ("tests/extensions_selftest.py", "tests/tabstrip_selftest.py"):
             command.append("--shell")
         if suite == "tests/transition_selftest.py" and "--host" in sys.argv:
             command.append("--host")

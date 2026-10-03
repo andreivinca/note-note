@@ -45,7 +45,7 @@ Item {
   signal keysRequested()
   signal detachToggled()
 
-  height: tabStrip.implicitHeight + tabStrip.verticalInset * 2
+  height: tabStrip.railHeight
 
   // The background and overflow fades share this fill.
   readonly property color fill: Color.token("titlebar.background")
@@ -61,17 +61,10 @@ Item {
     topRightRadius: root.cornerRadius
   }
 
-  Rectangle {
-    anchors.bottom: parent.bottom
-    width: parent.width
-    height: Style.spacing.hairline
-    color: Util.alpha(root.foreground, 0.1)
-  }
-
   Item {
     id: inner
     anchors.fill: parent
-    anchors.leftMargin: tabStrip.verticalInset
+    anchors.leftMargin: tabStrip.edgeInset
     // Match the menu button's outside gap to its gap beside Search.
     anchors.rightMargin: Style.spacing.lg
 
@@ -81,7 +74,7 @@ Item {
       anchors.left: parent.left
       anchors.right: search.visible ? search.left : menuButton.left
       anchors.rightMargin: horizontalPadding
-      anchors.verticalCenter: parent.verticalCenter
+      anchors.bottom: parent.bottom
       anchors.alignWhenCentered: false
       height: implicitHeight
       sections: root.sections
@@ -121,7 +114,7 @@ Item {
     // the key bindings. A row of pills along the bar would have to grow with
     // each new one, and each would spend the bar's width saying its own
     // name; the menu spends none until it is asked.
-    Button {
+    ChromeButton {
       id: menuButton
       objectName: "applicationMenu"
       anchors.right: parent.right
@@ -130,21 +123,13 @@ Item {
       // A tooltip under an open menu is one label too many, and it would
       // stand over the very rows it describes.
       tooltipText: menu.opened ? "" : "Detach the window, settings, key bindings"
-      // No outline at rest: the bar's right end is quiet until you reach
-      // for it, and the kit lends the button its hover ring then. Held open
-      // still reads as held down, and the settings page keeps the button
-      // marked for as long as it is the thing on screen — as a fill now,
-      // which is what a borderless button has to say it with.
+      // Keep the filled selected state while the menu or a settings page is open.
       selected: root.pageOpen || menu.opened
-      foreground: root.foreground
+      contentForeground: root.foreground
+      surfaceColor: root.fill
       accent: root.accent
-      // A square, as tall as the tab strip beside it. The radius is capped
-      // the way the search keycap above caps its own: a square theme keeps
-      // its corners, and a round one is held back short of the point where
-      // a box this small stops being a box and becomes a circle.
-      width: Style.spacing.controlHeight
-      height: Style.spacing.controlHeight
-      radius: Math.min(Style.cornerRadius, height / 4)
+      width: search.implicitHeight
+      height: width
       onClicked: menu.opened ? menu.close() : menu.open()
       // Detaching re-parents the whole content under a different window;
       // the menu that asked for it must not outlive the bar it hangs from.
@@ -168,7 +153,7 @@ Item {
             height: width
             radius: width / 2
             antialiasing: true
-            color: menuButton.selected ? Style.selectedStateColor(root.foreground, root.accent) : root.foreground
+            color: menuButton.contentColor
           }
         }
       }
