@@ -288,6 +288,14 @@ from the heading itself — turning a paragraph into a heading and back used to
 eat the markers. The writer writes bold *inside a heading* at `font-weight:900`
 (Qt keeps the two apart), and the reader counts only 900 as bold there.
 
+**Bold off leaves a heading's tag and size behind.** Qt removes the selected
+text's weight but retains its heading format. Reading that tag or size alone
+as a Markdown heading restores bold on reopening, even though the editor
+showed regular text and reported a successful save. The reader checks the
+effective weight of every non-whitespace text run; any regular text makes
+the block prose, preserving its remaining inline formatting. Code still
+counts by its font weight, and images do not decide the text's weight.
+
 **A link's underline is Qt's, not the author's.** Qt paints links and writes
 the painting back as `text-decoration: underline; color:#0000ff` inside the
 anchor. Inside an `<a>`, ignore it.

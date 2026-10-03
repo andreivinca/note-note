@@ -1115,6 +1115,26 @@ Window {
     return result.markdown
   }
 
+  function unboldReload() {
+    var cases = [
+      { source: "**notes**\n", select: "notes", expected: "notes\n" },
+      { source: "### notes\n\n### - move tabs to left\n", select: "notes\u2029- move tabs to left",
+        expected: "notes\n\n\\- move tabs to left\n" },
+      { source: "### notes and *details*\n", select: "notes", expected: "notes **and *details***\n" }
+    ]
+    for (var level = 1; level <= 6; level++) {
+      cases.push({ source: "#".repeat(level) + " notes\n", select: "notes", expected: "notes\n" })
+    }
+    for (var data of cases) {
+      toolRoundTrip({ id: "bold", source: data.source, select: data.select, expected: data.expected })
+      var saved = savedMarkdown()
+      load({ source: saved })
+      selectText("notes")
+      require(!editor.tools.find("bold").checked, "reloading restored bold: " + JSON.stringify(data))
+      require(savedMarkdown() === saved, "reloading changed the saved text: " + JSON.stringify(data))
+    }
+  }
+
   function textColorTool() {
     load({ source: "- [x] **Mushrooms**\n- [ ] Milk\n" })
     selectText("Mushrooms")
@@ -2639,6 +2659,7 @@ Window {
       { name: "tool-owned link panel preserves context and undo", run: toolLinkPanel },
       { name: "invalid tools are isolated and cannot take app shortcuts", run: toolRegistryValidation },
       { name: "one heading dropdown previews and applies all four styles and respects provider and list restrictions", run: toolMenuAndTyping },
+      { name: "turning Bold off survives saving, undo, redo and reopening", run: unboldReload },
       { name: "settings rearrange groups and dropdowns without changing actions or documents", run: toolLayout },
       { name: "nested menus support pointer and keyboard navigation and dismiss with editor changes", run: toolSubmenus },
       { name: "calendar dates follow locale, leap years and month boundaries", run: calendarDates },

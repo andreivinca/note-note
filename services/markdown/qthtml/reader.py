@@ -225,7 +225,11 @@ class _Reader:
             return [_Chunk("blank", [dialect.BLANK_PARAGRAPH], [at])]
 
         level = self.heading_level(node, style)
-        if level:
+        # Bold off leaves Qt's heading tag and size behind. Saving those as
+        # a Markdown heading would restore its default bold on reopening.
+        # Read a block with any regular text as prose, keeping the remaining
+        # inline formatting instead of discarding the author's weight edit.
+        if level and not _has_regular_text(node.children, dialect.is_bold(style)):
             head = self.inline(node.children, IN_HEADING).strip()
             return [_Chunk("heading", ["#" * level + " " + head], [at])]
 
@@ -518,6 +522,24 @@ class _Reader:
 
     def text_line(self, text):
         return escape_line_start(escape_inline(text, self.strict))
+
+
+def _has_regular_text(nodes, bold=False):
+    """Inspect effective weights, including code whose inline markers omit bold.
+
+    Images and whitespace do not decide a heading's text weight. Nested
+    spans inherit their parent's weight unless they declare their own.
+    """
+    for node in nodes:
+        if node.tag is None:
+            if (node.text or "").strip() and not bold:
+                return True
+            continue
+        style = dialect.style_map(node.style)
+        effective_bold = dialect.is_bold(style) if "font-weight" in style else bold
+        if _has_regular_text(node.children, effective_bold):
+            return True
+    return False
 
 
 class _Run:

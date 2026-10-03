@@ -295,6 +295,25 @@ class Content(unittest.TestCase):
             with self.subTest(level=level):
                 self.assertEqual(to_markdown(to_html(markdown)), markdown)
 
+    def test_unbolded_heading_format_does_not_restore_bold(self):
+        for level in range(1, 7):
+            size = dialect.HEADING_FONT_SIZE[level]
+            variant = ' font-variant:small-caps;' if level == 6 else ''
+            content = '<span style="font-size:%s;%s">notes</span>' % (size, variant)
+            for tag in ('p', 'h%d' % level):
+                with self.subTest(level=level, tag=tag):
+                    saved = to_markdown('<%s>%s</%s>' % (tag, content, tag))
+                    self.assertEqual(saved, 'notes\n')
+                    self.assertEqual(to_markdown(to_html(saved)), saved)
+
+    def test_partially_unbolded_heading_keeps_remaining_inline_formatting(self):
+        source = ('<h3><span style="font-size:large;">notes</span>'
+                  '<span style="font-size:large; font-weight:700;"> and </span>'
+                  '<span style="font-size:large; font-weight:700; font-style:italic;">details</span></h3>')
+        saved = to_markdown(source)
+        self.assertEqual(saved, 'notes **and *details***\n')
+        self.assertEqual(to_markdown(to_html(saved)), saved)
+
     def test_text_shapes_the_parser_would_consume_stay_text(self):
         # Each of these used to vanish on re-parse: a two-dash signature line
         # (a setext underline), a table delimiter row, a link reference

@@ -49,6 +49,8 @@ CASES = {
     "heading with formatting": "## Head with ==mark== and *italic*\n",
     "heading with bold": "## Head with **bold** inside\n",
     "heading with a link": "### See [the docs](https://example.com)\n",
+    "heading with inline code": "### Notes and `code`\n",
+    "heading with an image": "### ![a picture](file:///tmp/note-note-test.png)\n",
     "quote with formatting": "> quoted **bold** and ==mark==\n",
     "item with a link": "- [ ] read [the docs](https://example.com) **today**\n",
     "long paragraph": (
