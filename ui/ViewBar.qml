@@ -35,7 +35,7 @@ Item {
   readonly property string notice: root.hoveredLink || root.statusText
   property int wordCount: 0
   property bool countVisible: false
-  // The sidebar is folded away: the toggle then points the way back.
+  // The toggle's label follows whether the sidebar is folded away.
   property bool listCollapsed: false
   signal listToggled()
   property color background: Color.menu.background
@@ -86,7 +86,8 @@ Item {
         Status.StatusButton {
           objectName: "sidebarToggle"
           style: statusStyle
-          iconText: root.listCollapsed ? "󰅂" : "󰅁"
+          iconText: ""
+          iconSize: Style.font.icon
           tooltipText: (root.listCollapsed ? "Show sidebar" : "Hide sidebar")
             + (root.keybindings ? root.keybindings.hint("app/toggleList") : "")
           Accessible.name: root.listCollapsed ? "Show sidebar" : "Hide sidebar"

@@ -11,16 +11,27 @@ Item {
   property color fill: Color.token("toolbar.background")
   property bool toolsVisible: true
   readonly property real groupPadding: Style.spacing.xs
+  readonly property real groupSpacing: Style.spacing.lg
   readonly property real popupMargin: Style.spacing.lg
   // Buttons and dividers share the first row's center. Its height
   // includes both levels of padding and grows with the tallest control.
   readonly property real rowHeight: Math.max(Style.space(44),
-    toolFlow.buttonHeight + 2 * (groupPadding + Style.spacing.sm))
+    toolRail.buttonHeight + 2 * (groupPadding + Style.spacing.sm))
   readonly property var editor: registry.editor
   readonly property bool panelOpen: registry.panelOpen
+  readonly property var insertTool: registry.topLevelTools.find(function(tool) {
+    return tool.toolId === "insert" && tool.isMenu
+  }) || null
+  readonly property var scrollableGroups: registry.toolbarGroups.map(function(group) {
+    return { id: group.id, tools: group.tools.filter(function(tool) {
+      return tool !== bar.insertTool
+    }) }
+  }).filter(function(group) {
+    return group.tools.length > 0
+  })
   readonly property var visibleGroupIndexes: {
     var visible = []
-    var groups = registry.toolbarGroups
+    var groups = scrollableGroups
     for (var i = 0; i < groups.length; i++) {
       if (groups[i].tools.some(function(tool) {
         return registry.isVisible(tool)
@@ -32,13 +43,6 @@ Item {
   }
   readonly property int lastVisibleGroupIndex: visibleGroupIndexes.length > 0
     ? visibleGroupIndexes[visibleGroupIndexes.length - 1] : -1
-  readonly property bool lastGroupAlignsRight: {
-    var group = registry.toolbarGroups[lastVisibleGroupIndex]
-    return group ? group.tools.length === 1 && group.tools[0].isMenu : false
-  }
-  // The final menu sits apart from the tool groups, so it has no divider before it.
-  readonly property int separatorLimitIndex: lastGroupAlignsRight && visibleGroupIndexes.length > 1
-    ? visibleGroupIndexes[visibleGroupIndexes.length - 2] : lastVisibleGroupIndex
   height: visible ? Math.max(rowHeight, strip.implicitHeight) + Style.spacing.hairline : 0
 
   AppUi.ChromePopupStyle {
@@ -50,7 +54,7 @@ Item {
     ToolMenu {
       registry: bar.registry
       submenuComponent: submenuFactory
-      maximumWidth: toolFlow.width
+      maximumWidth: toolRail.width
       popupStyle: chromePopupStyle
     }
   }
@@ -64,57 +68,140 @@ Item {
     id: strip
     width: parent.width
     padding: Style.spacing.sm
-    topPadding: (bar.rowHeight - toolFlow.buttonHeight) / 2 - bar.groupPadding
+    topPadding: (bar.rowHeight - toolRail.buttonHeight) / 2 - bar.groupPadding
     bottomPadding: topPadding
     spacing: padding
 
-    Flow {
-      id: toolFlow
+    Item {
+      id: toolRail
       visible: bar.toolsVisible
       width: parent.width - parent.leftPadding - parent.rightPadding
-      spacing: Style.spacing.lg
+      height: buttonHeight + bar.groupPadding * 2
       // All groups share the tallest button's height, including text-only
       // dropdowns whose labels are shorter than the icon glyphs.
       readonly property real buttonHeight: {
         var tallest = Style.space(32)
-        for (var i = 0; i < children.length; i++) {
-          var group = children[i]
-          if (group.naturalButtonHeight) {
+        for (var i = 0; i < groups.count; i++) {
+          var group = groups.itemAt(i)
+          if (group) {
             tallest = Math.max(tallest, group.naturalButtonHeight)
           }
         }
-        return tallest
+        return Math.max(tallest, insertGroup.naturalButtonHeight)
       }
-      Repeater {
-        id: groups
-        model: bar.registry.toolbarGroups
-        delegate: ToolBarGroup {
-          required property int index
-          required property var modelData
-          objectName: "editingToolGroup-" + modelData.id
-          registry: bar.registry
-          surfaceColor: bar.fill
-          tools: modelData.tools
-          toolbarFlow: toolFlow
-          submenuComponent: submenuFactory
-          popupStyle: chromePopupStyle
-          buttonHeight: toolFlow.buttonHeight
-          panelPadding: bar.groupPadding
-          panelOpen: bar.panelOpen
-          separatorVisible: index < bar.separatorLimitIndex
-          alignRight: index === bar.lastVisibleGroupIndex && bar.lastGroupAlignsRight
-          precedingWidth: {
-            var used = 0
-            for (var i = 0; i < toolFlow.children.length; i++) {
-              var group = toolFlow.children[i]
-              if (group.modelData && group.index < index && group.visible) {
-                used += group.implicitWidth + toolFlow.spacing
-              }
-            }
-            return used
-          }
-          color: "transparent"
+
+      Flickable {
+        id: toolViewport
+        objectName: "editingToolViewport"
+        width: Math.max(0, toolRail.width - (insertGroup.visible ? insertGroup.width + bar.groupSpacing : 0))
+        height: parent.height
+        contentWidth: toolRow.width
+        contentHeight: height
+        flickableDirection: Flickable.HorizontalFlick
+        boundsBehavior: Flickable.StopAtBounds
+        interactive: contentWidth > width
+        clip: true
+        onWidthChanged: clampScroll()
+        onContentWidthChanged: clampScroll()
+
+        function clampScroll() {
+          contentX = Math.max(0, Math.min(contentX, Math.max(0, contentWidth - width)))
         }
+
+        // Match the notebook tabs: both wheel axes move the tools sideways.
+        WheelHandler {
+          target: null
+          acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+          onWheel: function(event) {
+            var delta = (event.pixelDelta.x !== 0 || event.pixelDelta.y !== 0)
+              ? (event.pixelDelta.x + event.pixelDelta.y) * 3
+              : ((event.angleDelta.x + event.angleDelta.y) / 120) * Style.space(56)
+            toolViewport.contentX = Math.max(0, Math.min(toolViewport.contentX - delta,
+              Math.max(0, toolViewport.contentWidth - toolViewport.width)))
+          }
+        }
+
+        Row {
+          id: toolRow
+          height: parent.height
+          spacing: bar.groupSpacing
+
+          Repeater {
+            id: groups
+            model: bar.scrollableGroups
+            delegate: ToolBarGroup {
+              required property int index
+              required property var modelData
+              objectName: "editingToolGroup-" + modelData.id
+              registry: bar.registry
+              surfaceColor: bar.fill
+              tools: modelData.tools
+              toolbar: bar
+              toolbarOffsetX: strip.x + toolRail.x + toolViewport.x - toolViewport.contentX
+              submenuComponent: submenuFactory
+              popupStyle: chromePopupStyle
+              buttonHeight: toolRail.buttonHeight
+              panelPadding: bar.groupPadding
+              panelOpen: bar.panelOpen
+              separatorVisible: index < bar.lastVisibleGroupIndex
+              color: "transparent"
+            }
+          }
+        }
+      }
+
+      Rectangle {
+        anchors.left: toolViewport.left
+        height: toolViewport.height
+        width: Math.min(Style.space(18), toolViewport.width / 2)
+        visible: toolViewport.contentX > 0
+        gradient: Gradient {
+          orientation: Gradient.Horizontal
+          GradientStop {
+            position: 0
+            color: Util.alpha(bar.fill, 0.95)
+          }
+          GradientStop {
+            position: 1
+            color: "transparent"
+          }
+        }
+      }
+
+      Rectangle {
+        anchors.right: toolViewport.right
+        height: toolViewport.height
+        width: Math.min(Style.space(18), toolViewport.width / 2)
+        visible: toolViewport.contentX < toolViewport.contentWidth - toolViewport.width - 1
+        gradient: Gradient {
+          orientation: Gradient.Horizontal
+          GradientStop {
+            position: 0
+            color: "transparent"
+          }
+          GradientStop {
+            position: 1
+            color: Util.alpha(bar.fill, 0.95)
+          }
+        }
+      }
+
+      ToolBarGroup {
+        id: insertGroup
+        objectName: "editingInsertGroup"
+        anchors.right: parent.right
+        registry: bar.registry
+        surfaceColor: bar.fill
+        tools: bar.insertTool ? [bar.insertTool] : []
+        toolbar: bar
+        toolbarOffsetX: strip.x + toolRail.x
+        submenuComponent: submenuFactory
+        popupStyle: chromePopupStyle
+        buttonHeight: toolRail.buttonHeight
+        panelPadding: bar.groupPadding
+        panelOpen: bar.panelOpen
+        separatorVisible: false
+        color: "transparent"
       }
     }
 
@@ -145,8 +232,8 @@ Item {
   }
 
   function popupX(id, popupWidth) {
-    for (var i = 0; i < groups.count; i++) {
-      var group = groups.itemAt(i)
+    for (var i = 0; i <= groups.count; i++) {
+      var group = i < groups.count ? groups.itemAt(i) : insertGroup
       var button = group ? group.buttonFor(id) : null
       if (!button && group) {
         for (var j = 0; j < group.tools.length; j++) {

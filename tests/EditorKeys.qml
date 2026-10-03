@@ -1427,6 +1427,72 @@ Window {
     require(read() === "woryd**x**\n", "moving the caret did not end pending formatting")
   }
 
+  function toolbarOverflow() {
+    load({ source: "word\n" })
+    var originalWidth = test.width
+    var viewport = keys.findChild(editor, "editingToolViewport")
+    require(viewport, "toolbar has no scrolling viewport")
+    try {
+      for (var width of [320, 460, 1100]) {
+        test.width = width
+        keys.waitForRendering(editor)
+        keys.wait(20)
+        var insert = keys.findChild(editor, "editingTool-insert")
+        var insertPosition = insert.mapToItem(editor, 0, 0)
+        require(insertPosition.x + insert.width <= editor.width
+                && editor.width - insertPosition.x - insert.width < Style.spacing.lg,
+                "Insert is not pinned to the right at width " + width)
+        require(editor.toolbarHeight === editor.toolbarRowHeight + Style.spacing.hairline,
+                "toolbar grew beyond one row at width " + width)
+        for (var tool of editor.tools.toolbarTools) {
+          var button = keys.findChild(editor, "editingTool-" + tool.toolId)
+          require(button && Math.abs(button.mapToItem(editor, 0, 0).y - insertPosition.y) < 0.5,
+                  tool.toolId + " wrapped at width " + width)
+        }
+        if (width < 1100) {
+          require(viewport.contentWidth > viewport.width, "narrow toolbar does not overflow")
+          var before = viewport.contentX
+          keys.mouseWheel(viewport, viewport.width / 2, viewport.height / 2, 0, -120)
+          keys.tryVerify(function() {
+            return viewport.contentX > before
+          }, 1000)
+          require(insert.mapToItem(editor, 0, 0).x === insertPosition.x,
+                  "scrolling moved Insert")
+          var popup = openInsertMenu()
+          var popupPosition = popup.contentItem.mapToItem(editor, -popup.leftPadding, 0)
+          require(popupPosition.x >= 0 && popupPosition.x + popup.width <= editor.width,
+                  "Insert menu escaped the narrow editor")
+          popup.dismiss()
+        } else {
+          require(viewport.contentX === 0 && viewport.contentWidth <= viewport.width,
+                  "widening the editor left the tools scrolled")
+        }
+      }
+      test.width = 320
+      keys.waitForRendering(editor)
+      keys.mouseWheel(viewport, viewport.width / 2, viewport.height / 2, 0, -12000)
+      keys.tryVerify(function() {
+        return Math.abs(viewport.contentX - (viewport.contentWidth - viewport.width)) < 0.5
+      }, 1000)
+      selectText("word")
+      clickEditingTool("quote")
+      keys.tryVerify(function() {
+        return read() === "> word\n"
+      }, 3000)
+      editor.undo()
+      editor.enabledTools = []
+      keys.tryVerify(function() {
+        return viewport.contentX === 0
+      }, 1000)
+      require(keys.findChild(editor, "editingTool-insert").visible,
+              "losing formatting tools hid Insert")
+    } finally {
+      test.width = originalWidth
+      editor.enabledTools = null
+      viewport.contentX = 0
+    }
+  }
+
   function toolLayout() {
     load({ source: "word\n" })
     require(editor.tools.menuTools("insert").map(function(tool) {
@@ -2048,6 +2114,15 @@ Window {
     require(button && button.visible && button.enabled, id + " button is unavailable")
     // Leaving a list restores the heading menu and can move the list group.
     keys.waitForRendering(button)
+    var viewport = keys.findChild(editor, "editingToolViewport")
+    var position = button.mapToItem(viewport, 0, 0)
+    if (position.x < 0) {
+      viewport.contentX = Math.max(0, viewport.contentX + position.x)
+    } else if (position.x + button.width > viewport.width) {
+      viewport.contentX = Math.min(viewport.contentWidth - viewport.width,
+        viewport.contentX + position.x + button.width - viewport.width)
+    }
+    keys.waitForRendering(button)
     keys.mouseClick(button)
   }
 
@@ -2660,6 +2735,7 @@ Window {
       { name: "invalid tools are isolated and cannot take app shortcuts", run: toolRegistryValidation },
       { name: "one heading dropdown previews and applies all four styles and respects provider and list restrictions", run: toolMenuAndTyping },
       { name: "turning Bold off survives saving, undo, redo and reopening", run: unboldReload },
+      { name: "narrow toolbars scroll on one row with Insert pinned and menus inside the editor", run: toolbarOverflow },
       { name: "settings rearrange groups and dropdowns without changing actions or documents", run: toolLayout },
       { name: "nested menus support pointer and keyboard navigation and dismiss with editor changes", run: toolSubmenus },
       { name: "calendar dates follow locale, leap years and month boundaries", run: calendarDates },

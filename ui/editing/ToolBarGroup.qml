@@ -6,29 +6,28 @@ Rectangle {
   id: group
   required property var registry
   required property var tools
-  required property Item toolbarFlow
+  required property Item toolbar
+  required property real toolbarOffsetX
   required property Component submenuComponent
   required property AppUi.ChromePopupStyle popupStyle
   required property real buttonHeight
   property bool panelOpen: false
-  property bool alignRight: false
   property bool separatorVisible: true
-  property real precedingWidth: 0
   property color surfaceColor: Color.token("toolbar.background")
   readonly property var editor: registry.editor
   property real panelPadding: Style.spacing.xs
   readonly property real naturalButtonHeight: {
     var tallest = 0
-    for (var i = 0; i < toolsFlow.children.length; i++) {
-      tallest = Math.max(tallest, toolsFlow.children[i].implicitHeight)
+    for (var i = 0; i < toolsRow.children.length; i++) {
+      tallest = Math.max(tallest, toolsRow.children[i].implicitHeight)
     }
     return tallest
   }
   readonly property var buttonMetrics: {
     var count = 0
     var width = 0
-    for (var i = 0; i < toolsFlow.children.length; i++) {
-      var button = toolsFlow.children[i]
+    for (var i = 0; i < toolsRow.children.length; i++) {
+      var button = toolsRow.children[i]
       if (!button.modelData) {
         continue
       }
@@ -37,30 +36,30 @@ Rectangle {
         count++
       }
     }
-    return { count: count, width: width + Math.max(0, count - 1) * toolsFlow.spacing }
+    return { count: count, width: width + Math.max(0, count - 1) * toolsRow.spacing }
   }
   visible: buttonMetrics.count > 0
   implicitWidth: buttonMetrics.width + panelPadding * 2
-  implicitHeight: toolsFlow.implicitHeight + panelPadding * 2
-  width: Math.min(toolbarFlow.width, alignRight ? Math.max(implicitWidth, toolbarFlow.width - precedingWidth) : implicitWidth)
+  implicitHeight: buttonHeight + panelPadding * 2
+  width: implicitWidth
   height: implicitHeight
   radius: Style.controlRadius + panelPadding
 
   Rectangle {
     visible: group.separatorVisible
-    // Center the divider in the Flow gap between this group and the next.
-    x: group.width + group.toolbarFlow.spacing / 2 - width / 2
+    // Center the divider in the gap between this group and the next.
+    x: group.width + group.toolbar.groupSpacing / 2 - width / 2
     y: group.panelPadding + (group.buttonHeight - height) / 2
     width: Style.spacing.hairline
     height: Style.space(18)
     color: Util.alpha(group.editor.foreground, 0.12)
   }
 
-  Flow {
-    id: toolsFlow
-    x: group.alignRight ? group.width - width - group.panelPadding : group.panelPadding
+  Row {
+    id: toolsRow
+    x: group.panelPadding
     y: group.panelPadding
-    width: Math.max(0, Math.min(group.buttonMetrics.width, group.width - group.panelPadding * 2))
+    height: group.buttonHeight
     spacing: Style.spacing.sm
 
     Repeater {
@@ -82,8 +81,8 @@ Rectangle {
           id: actionButton
           readonly property var modelData: buttonSlot.modelData
           readonly property bool labeledMenu: modelData.isMenu && modelData.toolbarLabelVisible
-          // Keep popup positioning reactive while the toolbar wraps or aligns groups.
-          readonly property real toolbarX: group.toolbarFlow.x + group.x + toolsFlow.x + buttonSlot.x + x
+          // Popups follow their button as the tools scroll or the editor resizes.
+          readonly property real toolbarX: group.toolbarOffsetX + group.x + toolsRow.x + buttonSlot.x + x
           objectName: "editingTool-" + modelData.toolId
           enabled: group.editor.writable && (!modelData.isMenu || menu.rows.length > 0)
           // Dropdowns and icon buttons share the same face geometry.
@@ -139,9 +138,10 @@ Rectangle {
             registry: group.registry
             tool: actionButton.modelData
             submenuComponent: group.submenuComponent
-            maximumWidth: group.toolbarFlow.width
+            maximumWidth: Math.max(0, group.toolbar.width - Style.spacing.sm * 2)
             popupStyle: group.popupStyle
-            x: Math.min(0, group.toolbarFlow.width - group.x - toolsFlow.x - buttonSlot.x - actionButton.x - width)
+            x: Math.max(Style.spacing.sm - actionButton.toolbarX,
+              Math.min(0, group.toolbar.width - Style.spacing.sm - actionButton.toolbarX - width))
             y: buttonSlot.height - actionButton.y + group.panelPadding + Style.spacing.xxs
           }
         }

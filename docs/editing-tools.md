@@ -15,8 +15,10 @@ editor retains its document, keyboard behavior, conversion and undo machinery.
 ## Arrange the toolbar
 
 Open **Settings** and edit `editor.toolbar` in the JSON. Each inner array is
-a group; array order controls button order. Each group has a rounded gray
-panel, and groups wrap together when space is tight. Save
+a group; array order controls button order, with dividers between groups.
+The tools stay on one row and scroll horizontally when space is tight;
+use the mouse wheel, trackpad or drag the strip to reach more tools.
+A top-level **Insert** dropdown stays fixed on the right. Save
 to apply the layout immediately. Existing configurations gain these defaults
 in the Settings page; the file is updated when you save it.
 Saved layouts that match an earlier default adopt the latest arrangement;

@@ -34,6 +34,14 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.0.33" date="2026-10-03">
+      <description>
+        <p>The editing tools stay on one horizontally scrollable row in narrow
+        windows, with Insert fixed on the right. Notebook tabs and workspace
+        controls have refined rounded shapes, and the status bar has a larger
+        left-panel icon for showing or hiding the sidebar.</p>
+      </description>
+    </release>
     <release version="1.0.32" date="2026-10-03">
       <description>
         <p>Fix bold text returning after saving and reopening a note. Turning

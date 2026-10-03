@@ -9,6 +9,7 @@ QQC.AbstractButton {
 
   property StatusStyle style: StatusStyle {}
   property string iconText: ""
+  property real iconSize: style.iconSize
   property string tooltipText: ""
   property color foreground: style.foreground
   property color accent: style.accent
@@ -54,7 +55,7 @@ QQC.AbstractButton {
       visible: root.iconText.length > 0
       text: root.iconText
       color: root.foreground
-      fontSize: root.style.iconSize
+      fontSize: root.iconSize
       Layout.alignment: Qt.AlignVCenter
       Layout.fillWidth: true
       Layout.fillHeight: true
