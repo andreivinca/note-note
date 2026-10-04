@@ -126,6 +126,24 @@ class ListingTests(unittest.TestCase):
         _, graph = self.step((200, {"value": []}))
         graph.assert_not_called()
 
+    def test_section_refresh_does_not_renew_the_account_listing(self):
+        discovered = time.time() - 700
+        self.save(sections=[section("s"), section("other")],
+                  sectionPages={"s": {"modified": "1"}, "other": {"modified": "1"}},
+                  fetched=discovered, inventoryVersion=onenote.INVENTORY_VERSION, inventoryComplete=True)
+        self.payload.return_value = {"sectionId": "s", "refresh": True}
+        with patch.object(onenote, "graph", return_value=(200, {"value": [{"id": "p"}]})):
+            onenote.cmd_list_step("-")
+        self.assertTrue(self.output.call_args.args[0]["inventoryComplete"])
+        self.assertEqual(onenote.load_listing()["fetched"], discovered)
+        changed = dict(section("other"), modified="2")
+        with patch.object(onenote.notebook_inventory, "discover",
+                          return_value=([], [section("s"), changed], [])) as discover:
+            onenote.cmd_onenote_list(False, max_age=600, incremental=True)
+        discover.assert_called_once()
+        self.assertEqual(self.output.call_args.args[0]["pendingSections"], ["other"])
+        self.assertGreater(onenote.load_listing()["fetched"], discovered)
+
     def test_force_refresh_starts_over_and_normal_discovery_keeps_the_cursor(self):
         self.save()
         continuation = ROOT + "/sections/s/pages?$skip=100"

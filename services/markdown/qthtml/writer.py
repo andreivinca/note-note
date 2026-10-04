@@ -11,6 +11,7 @@ import re
 from . import dialect
 from .siblings import parse, textcolor
 from .imagesize import local_path, width_of
+from audio import display_source, DISPLAY_WIDTH, DISPLAY_HEIGHT
 
 RULE = "<hr />"
 # Stated on every block: Qt keeps the value per block and hands it back
@@ -65,18 +66,18 @@ def first_block_kind(tokens):
     return ""
 
 
-def contains_image(tokens):
+def contains_media(tokens):
     for token in tokens or []:
-        if token["type"] == "image" or contains_image(token.get("children")):
+        if token["type"] in ("image", "audio") or contains_media(token.get("children")):
             return True
     return False
 
 
 def line_height(tokens):
-    """Add a fixed distance to an image line, including when a link or
+    """Add a fixed distance to a media line, including when a link or
     another inline style wraps it. Proportional prose height would add 30%
     of a large image's height below the image."""
-    return IMAGE_LINE_HEIGHT if contains_image(tokens) else LINE_HEIGHT
+    return IMAGE_LINE_HEIGHT if contains_media(tokens) else LINE_HEIGHT
 
 
 class _Renderer:
@@ -113,6 +114,8 @@ class _Renderer:
             return [self.heading(token)]
         if kind in ("paragraph", "block_text"):
             return [self.paragraph(token, indent, quote)]
+        if kind == "audio":
+            return [self.paragraph({"children": [token]}, indent, quote)]
         if kind == "block_quote":
             blocks = self.blocks(token.get("children"), indent, quote=True)
             return blocks or [self.paragraph({}, indent, True)]
@@ -309,6 +312,11 @@ class _Renderer:
                 out.append('<img src="%s" alt="%s"%s />' % (_html.escape(url, quote=True),
                                                             _html.escape(alt, quote=True),
                                                             self.image_width(url, attrs.get("width", 0))))
+            elif kind == "audio":
+                attrs = token["attrs"]
+                source = display_source(attrs["url"], attrs["title"], attrs.get("id", ""))
+                out.append('<img src="%s" width="%d" height="%d" />' % (
+                    _html.escape(source, quote=True), DISPLAY_WIDTH, DISPLAY_HEIGHT))
             elif kind == "linebreak":
                 out.append("<br />")
             elif kind == "softbreak":

@@ -24,6 +24,7 @@ from parse import parse as _parse  # noqa: E402
 from qthtml.dialect import BLANK_PARAGRAPH  # noqa: E402
 import htmltables  # noqa: E402
 import textcolor  # noqa: E402
+import audio  # noqa: E402
 
 # OneNote note tags -> a prefix we can recognise again on save.
 TAG_PREFIX = {
@@ -49,7 +50,7 @@ class Node:
 
 
 class TreeBuilder(HTMLParser):
-    VOID = {"br", "img", "meta", "link", "hr", "input"}
+    VOID = {"br", "img", "meta", "link", "hr", "input", "source"}
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
@@ -79,7 +80,7 @@ class TreeBuilder(HTMLParser):
 # ---------------------------------------------------------------- HTML -> Markdown
 
 class Converter:
-    def __init__(self, image_path_for=None):
+    def __init__(self, image_path_for=None, audio_path_for=None, audio_identity_for=None):
         self.lines = []
         # What the previous emitted block was: consecutive plain paragraphs
         # are joined with hard line breaks, because OneNote writes one <p>
@@ -92,6 +93,34 @@ class Converter:
         self.images = []
         # (src, declared width or 0) -> url/path to show
         self.image_path_for = image_path_for or (lambda src, width: None)
+        self.audio_path_for = audio_path_for or (lambda src, title: None)
+        self.audio_identity_for = audio_identity_for
+        self.recordings = []
+
+    def recording(self, node):
+        """Phone recordings are often 3GP objects with a video MIME type."""
+        mime = node.attrs.get("type", "").lower().split(";", 1)[0].strip()
+        title = node.attrs.get("data-attachment") or node.attrs.get("title") or "Audio recording"
+        is_audio = node.tag == "audio" or mime.startswith("audio/")
+        is_phone_audio = mime == "video/3gpp" and title.lower().endswith((".3gp", ".3gpp"))
+        if not (is_audio or is_phone_audio):
+            return None
+        source = node.attrs.get("data") if node.tag == "object" else node.attrs.get("src")
+        if not source and node.tag == "audio":
+            child = next((child for child in node.children if child.tag == "source"), None)
+            if child is not None:
+                source = child.attrs.get("src", "")
+                mime = child.attrs.get("type", mime).lower().split(";", 1)[0].strip()
+        local = self.audio_path_for(source or "", title) or ""
+        identifier = node.attrs.get("data-id", "")
+        if not audio.valid_identifier(identifier):
+            identifier = ""
+        if self.audio_identity_for and local:
+            local, identifier = self.audio_identity_for(source or "", local, title, identifier)
+        self.recordings.append({"src": source or "", "title": title, "local": local, "mime": mime, "id": identifier})
+        if not local:
+            self.editable = False
+        return audio.markup(local, title, identifier)
 
     # -- inline --------------------------------------------------------
     def inline(self, node):
@@ -139,8 +168,12 @@ class Converter:
                     self.editable = False
                     out.append("[image: %s]" % (alt or "not shown"))
             elif c.tag in LOSSY_TAGS:
-                self.editable = False
-                out.append("[unsupported: %s]" % c.tag)
+                recording = self.recording(c) if c.tag in ("object", "audio") else None
+                if recording is not None:
+                    out.append(recording)
+                else:
+                    self.editable = False
+                    out.append("[unsupported: %s]" % c.tag)
             elif c.tag in ("span", "code", "font", "sup", "sub", "s", "strike", "del", "cite"):
                 tag = c.attrs.get("data-tag", "")
                 inner = self.inline(c)
@@ -211,11 +244,11 @@ class Converter:
                 self.lines.append("")
             self.last = None
             return
-        if t == "p" and not self.inline(node).strip() and any(c.tag == "br" for c in node.children):
-            self.block(Node("br"), depth)      # <p><br/></p>: an empty line
-            return
         if t == "p" or t == "cite":
             text = self.inline(node).strip()
+            if t == "p" and not text and any(c.tag == "br" for c in node.children):
+                self.block(Node("br"), depth)
+                return
             prefix = self.para_prefix(node) if t == "p" else "*"
             if t == "p":
                 m = re.search(r"margin-left:\s*([\d.]+)(px|pt)", node.attrs.get("style", ""))
@@ -280,8 +313,13 @@ class Converter:
             self.last = None
             return
         if t in LOSSY_TAGS:
-            self.editable = False
-            self.lines.append("[unsupported: %s]" % t)
+            recording = self.recording(node) if t in ("object", "audio") else None
+            if recording is None:
+                self.editable = False
+            if self.lines and self.lines[-1] != "":
+                self.lines.append("")
+            self.lines.append(recording if recording is not None else "[unsupported: %s]" % t)
+            self.lines.append("")
             return
         # unknown container: descend
         for c in node.children:
@@ -334,7 +372,7 @@ class Converter:
         """Keep paragraph and nested table boundaries within a cell."""
         if not any(child.tag in htmltables.BLOCK_TAGS for child in node.children):
             return self.inline(node).strip()
-        converter = Converter(self.image_path_for)
+        converter = Converter(self.image_path_for, self.audio_path_for, self.audio_identity_for)
         converter.table_depth = self.table_depth + 1
         for child in node.children:
             task = child.tag == "p" and converter.para_prefix(child).startswith("- [")
@@ -345,6 +383,7 @@ class Converter:
             converter.block(child)
         self.editable = self.editable and converter.editable
         self.images.extend(converter.images)
+        self.recordings.extend(converter.recordings)
         return converter.result()
 
     def result(self):
@@ -377,16 +416,17 @@ def _find_all(node, tag):
 
 
 
-def html_to_markdown(html, image_path_for=None):
+def html_to_markdown(html, image_path_for=None, audio_path_for=None, audio_identity_for=None):
     tb = TreeBuilder()
     tb.feed(html)
     title = ""
     for t in _find_all(tb.root, "title"):
         title = "".join(c.text for c in t.children if c.tag is None).strip()
-    conv = Converter(image_path_for)
+    conv = Converter(image_path_for, audio_path_for, audio_identity_for)
     for body in (_find_all(tb.root, "body") or [tb.root]):
         conv.block(body)
-    return {"title": title, "body": conv.result(), "editable": conv.editable, "images": conv.images}
+    return {"title": title, "body": conv.result(), "editable": conv.editable,
+            "images": conv.images, "recordings": conv.recordings}
 
 
 # ---------------------------------------------------------------- Markdown -> OneNote HTML
@@ -398,48 +438,48 @@ def html_to_markdown(html, image_path_for=None):
 _QUOTE_STYLE = ' style="margin-left:20pt;color:#595959"'
 
 
-def _inline_html(tokens, image_ref=None):
+def _inline_html(tokens, image_ref=None, audio_ref=None):
     out = []
     for t in tokens or []:
         ty = t["type"]
         if ty == "text":
             out.append(_html.escape(t.get("raw", ""), quote=False))
+        elif ty == "audio":
+            out.append(_audio_html(t, audio_ref))
         elif ty == "softbreak":
             out.append(" ")
         elif ty == "linebreak":
             out.append("\n")                    # paragraph split, see _paragraphs()
         elif ty == "strong":
-            out.append("<b>%s</b>" % _inline_html(t.get("children"), image_ref))
+            out.append("<b>%s</b>" % _inline_html(t.get("children"), image_ref, audio_ref))
         elif ty == "emphasis":
-            out.append("<i>%s</i>" % _inline_html(t.get("children"), image_ref))
+            out.append("<i>%s</i>" % _inline_html(t.get("children"), image_ref, audio_ref))
         elif ty == "underline":
-            out.append("<u>%s</u>" % _inline_html(t.get("children"), image_ref))
+            out.append("<u>%s</u>" % _inline_html(t.get("children"), image_ref, audio_ref))
         elif ty == "strikethrough":
-            out.append("<s>%s</s>" % _inline_html(t.get("children"), image_ref))
+            out.append("<s>%s</s>" % _inline_html(t.get("children"), image_ref, audio_ref))
         elif ty == "text_color":
-            out.append(textcolor.span(t["attrs"]["color"], _inline_html(t.get("children"), image_ref)))
+            out.append(textcolor.span(t["attrs"]["color"], _inline_html(t.get("children"), image_ref, audio_ref)))
         elif ty == "mark":
-            out.append('<span style="background-color:#FFFF00">%s</span>' % _inline_html(t.get("children"), image_ref))
+            out.append('<span style="background-color:#FFFF00">%s</span>' % _inline_html(t.get("children"), image_ref, audio_ref))
         elif ty == "codespan":
             out.append('<span style="font-family:Consolas">%s</span>' % _html.escape(t.get("raw", ""), quote=False))
         elif ty == "link":
-            out.append('<a href="%s">%s</a>' % (_html.escape(t.get("attrs", {}).get("url", ""), quote=True), _inline_html(t.get("children"), image_ref)))
+            out.append('<a href="%s">%s</a>' % (_html.escape(t.get("attrs", {}).get("url", ""), quote=True), _inline_html(t.get("children"), image_ref, audio_ref)))
         elif ty == "image":
             out.append(_img_html(t, image_ref))
         elif ty == "inline_html":
             out.append(_html.escape(t.get("raw", ""), quote=False))
         else:
-            out.append(_inline_html(t.get("children"), image_ref) if t.get("children")
+            out.append(_inline_html(t.get("children"), image_ref, audio_ref) if t.get("children")
                        else _html.escape(t.get("raw", ""), quote=False))
     return "".join(out)
 
 
-def _lone_image(token):
-    """A paragraph that is nothing but an image: OneNote keeps images as
-    siblings of the paragraphs, not inside them, and only a top-level image
-    can be left untouched while the text around it is rewritten."""
+def _lone_media(token):
+    """A media-only paragraph becomes its own independently editable object."""
     kids = [c for c in token.get("children") or [] if not (c["type"] == "text" and not c.get("raw", "").strip())]
-    return len(kids) == 1 and kids[0]["type"] == "image"
+    return kids[0] if len(kids) == 1 and kids[0]["type"] in {"image", "audio"} else None
 
 
 def _img_html(token, image_ref):
@@ -461,6 +501,13 @@ def _img_html(token, image_ref):
     width = attrs.get("width", 0) or width
     size = ' width="%d"' % width if width else ""
     return '<img src="%s" alt="%s"%s/>' % (_html.escape(src, quote=True), _html.escape(alt, quote=True), size)
+
+
+def _audio_html(token, audio_ref):
+    attrs = token["attrs"]
+    if audio_ref:
+        return audio_ref(attrs["url"], attrs["title"], attrs.get("id", ""))
+    return audio.markup(attrs["url"], attrs["title"], attrs.get("id", ""))
 
 
 def _alt_of(token):
@@ -490,7 +537,7 @@ def _tag_prefix(tokens):
     return None, tokens
 
 
-def _paragraphs(tokens, image_ref=None):
+def _paragraphs(tokens, image_ref=None, audio_ref=None):
     """A paragraph's inline tokens -> list of (tag, html) per visual line:
     a hard line break starts a new OneNote paragraph."""
     out, cur = [], []
@@ -503,7 +550,7 @@ def _paragraphs(tokens, image_ref=None):
     result = []
     for line in out:
         tag, line = _tag_prefix(line)
-        result.append((tag, _inline_html(line, image_ref)))
+        result.append((tag, _inline_html(line, image_ref, audio_ref)))
     return result
 
 
@@ -518,7 +565,7 @@ def _p(tag, html):
     return "<p%s>%s</p>" % (style, html)
 
 
-def _render_blocks(tokens, out, depth=0, image_ref=None):
+def _render_blocks(tokens, out, depth=0, image_ref=None, audio_ref=None):
     for t in tokens or []:
         ty = t["type"]
         if ty == "blank_line":
@@ -528,14 +575,17 @@ def _render_blocks(tokens, out, depth=0, image_ref=None):
             if text.strip() == "" and BLANK_PARAGRAPH in text:
                 out.append("<br/>")               # an explicit empty line
                 continue
-            if _lone_image(t):
-                out.append(_img_html(t["children"][0], image_ref))
+            media = _lone_media(t)
+            if media is not None:
+                out.append(_img_html(media, image_ref) if media["type"] == "image" else _audio_html(media, audio_ref))
                 continue
-            for tag, html in _paragraphs(t.get("children"), image_ref):
+            for tag, html in _paragraphs(t.get("children"), image_ref, audio_ref):
                 out.append(_p(tag, html))
+        elif ty == "audio":
+            out.append(_audio_html(t, audio_ref))
         elif ty == "heading":
             lvl = min(max(t.get("attrs", {}).get("level", 1), 1), 6)
-            out.append("<h%d>%s</h%d>" % (lvl, _inline_html(t.get("children"), image_ref), lvl))
+            out.append("<h%d>%s</h%d>" % (lvl, _inline_html(t.get("children"), image_ref, audio_ref), lvl))
         elif ty == "thematic_break":
             out.append("<p%s>———</p>" % P_STYLE)
         elif ty == "block_code":
@@ -543,21 +593,21 @@ def _render_blocks(tokens, out, depth=0, image_ref=None):
             out.append('<p%s><span style="font-family:Consolas">%s</span></p>' % (P_STYLE, code))
         elif ty == "block_quote":
             inner = []
-            _render_blocks(t.get("children"), inner, depth, image_ref)
+            _render_blocks(t.get("children"), inner, depth, image_ref, audio_ref)
             out.extend(i.replace("<p" + P_STYLE, "<p" + _QUOTE_STYLE, 1) if i.startswith("<p") else i for i in inner)
         elif ty == "list":
-            _render_list(t, out, depth, image_ref)
+            _render_list(t, out, depth, image_ref, audio_ref)
         elif ty == "table":
-            _render_table(t, out, image_ref)
+            _render_table(t, out, image_ref, audio_ref)
         elif ty in ("block_text",):
-            for tag, html in _paragraphs(t.get("children"), image_ref):
+            for tag, html in _paragraphs(t.get("children"), image_ref, audio_ref):
                 out.append(_p(tag, html))
         else:
             if t.get("children"):
-                _render_blocks(t["children"], out, depth, image_ref)
+                _render_blocks(t["children"], out, depth, image_ref, audio_ref)
 
 
-def _render_list(t, out, depth, image_ref=None):
+def _render_list(t, out, depth, image_ref=None, audio_ref=None):
     items = t.get("children") or []
     ordered = t.get("attrs", {}).get("ordered", False)
     # A top-level list made only of checkboxes is how OneNote's own to-do
@@ -565,7 +615,7 @@ def _render_list(t, out, depth, image_ref=None):
     if depth == 0 and not ordered and items and all(i["type"] == "task_list_item" for i in items) and not any(_has_sublist(i) for i in items):
         for i in items:
             tag = "to-do:completed" if i.get("attrs", {}).get("checked") else "to-do"
-            out.append(_p(tag, _item_inline(i, image_ref)))
+            out.append(_p(tag, _item_inline(i, image_ref, audio_ref)))
         return
     start = t.get("attrs", {}).get("start", 1)
     attrs = ' start="%d"' % start if ordered and start != 1 else ""
@@ -574,13 +624,13 @@ def _render_list(t, out, depth, image_ref=None):
         li = ["<li>"]
         if i["type"] == "task_list_item":
             tag = "to-do:completed" if i.get("attrs", {}).get("checked") else "to-do"
-            li.append('<span data-tag="%s">%s</span>' % (tag, _item_inline(i, image_ref)))
+            li.append('<span data-tag="%s">%s</span>' % (tag, _item_inline(i, image_ref, audio_ref)))
         else:
-            li.append(_item_inline(i, image_ref))
+            li.append(_item_inline(i, image_ref, audio_ref))
         for c in i.get("children") or []:
             if c["type"] == "list":
                 sub = []
-                _render_list(c, sub, depth + 1, image_ref)
+                _render_list(c, sub, depth + 1, image_ref, audio_ref)
                 li.extend(sub)
         li.append("</li>")
         out.append("".join(li))
@@ -591,22 +641,22 @@ def _has_sublist(item):
     return any(c["type"] == "list" for c in item.get("children") or [])
 
 
-def _item_inline(item, image_ref=None):
+def _item_inline(item, image_ref=None, audio_ref=None):
     parts = []
     for c in item.get("children") or []:
         if c["type"] in ("block_text", "paragraph"):
-            parts.append(" ".join(h for _, h in _paragraphs(c.get("children"), image_ref)))
+            parts.append(" ".join(h for _, h in _paragraphs(c.get("children"), image_ref, audio_ref)))
     return " ".join(parts)
 
 
-def _render_table(t, out, image_ref=None):
+def _render_table(t, out, image_ref=None, audio_ref=None):
     rows = []
     for part in t.get("children") or []:
         if part["type"] == "table_head":
-            rows.append([_render_cell(c, image_ref) for c in part.get("children") or []])
+            rows.append([_render_cell(c, image_ref, audio_ref) for c in part.get("children") or []])
         elif part["type"] == "table_body":
             for r in part.get("children") or []:
-                rows.append([_render_cell(c, image_ref) for c in r.get("children") or []])
+                rows.append([_render_cell(c, image_ref, audio_ref) for c in r.get("children") or []])
     # Graph emits CSS borders on reads, but accepts only the HTML border
     # attribute on writes. Reusing its output style creates borderless tables.
     out.append('<table border="1">')
@@ -615,12 +665,12 @@ def _render_table(t, out, image_ref=None):
     out.append("</table>")
 
 
-def _render_cell(cell, image_ref):
+def _render_cell(cell, image_ref, audio_ref=None):
     if cell.get("attrs", {}).get("block"):
         parts = []
-        _render_blocks(cell.get("children"), parts, image_ref=image_ref)
+        _render_blocks(cell.get("children"), parts, image_ref=image_ref, audio_ref=audio_ref)
         return "".join(parts) or "<p><br/></p>"
-    return _inline_html(cell.get("children"), image_ref)
+    return _inline_html(cell.get("children"), image_ref, audio_ref)
 
 
 def walk_text_local(tokens):
@@ -789,26 +839,27 @@ def _table_without_images(token, out):
     return table
 
 
-def markdown_to_runs(md, image_ref=None):
+def markdown_to_runs(md, image_ref=None, audio_ref=None):
     """Markdown -> the page as OneNote sees it: a list of runs.
 
         [{"kind": "text", "html": "<p>…</p><p>…</p>"},
          {"kind": "image", "html": "<img …/>", "url": "file:///…"}]
 
-    The element planner updates individual changed blocks and images.
-    Runs also group text when creating a page. Unchanged images stay outside
+    The element planner updates individual changed blocks and media objects.
+    Runs also group text when creating a page. Unchanged media stay outside
     every replacement; sending one back would copy its resource.
     """
     blocks = []
-    _render_blocks(hoist_images(_parse(md or "")), blocks, 0, image_ref)
+    _render_blocks(hoist_images(_parse(md or "")), blocks, 0, image_ref, audio_ref)
     runs, text = [], []
     for html in blocks:
-        if html.startswith("<img"):
+        if html.startswith(("<img", "<object", "<audio")):
             if text:
                 runs.append({"kind": "text", "html": "".join(text)})
                 text = []
-            ref = re.search(r'src="([^"]*)"', html)
-            runs.append({"kind": "image", "html": html, "ref": _html.unescape(ref.group(1)) if ref else ""})
+            kind = "image" if html.startswith("<img") else "audio"
+            ref = re.search(r'(?:src|data)="([^"]*)"', html)
+            runs.append({"kind": kind, "html": html, "ref": _html.unescape(ref.group(1)) if ref else ""})
         else:
             text.append(html)
     if text:
@@ -841,7 +892,7 @@ def unkept_formatting(md):
     return found
 
 
-def markdown_to_onenote_html(md, image_ref=None):
+def markdown_to_onenote_html(md, image_ref=None, audio_ref=None):
     out = []
-    _render_blocks(hoist_images(_parse(md)), out, 0, image_ref)
+    _render_blocks(hoist_images(_parse(md)), out, 0, image_ref, audio_ref)
     return "\n".join(out) or "<p%s></p>" % P_STYLE

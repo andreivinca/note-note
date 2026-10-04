@@ -94,7 +94,7 @@ class Discovery:
     request each and remain pending until that request has returned.
     """
 
-    def __init__(self, limit, progress=None):
+    def __init__(self, limit, progress=None, cached_notebooks=()):
         self.limit = limit
         url = ("/me/onenote/notebooks?$select=id,displayName,userRole,self,sectionsUrl,sectionGroupsUrl,links"
                "&$expand=" + NOTEBOOK_EXPAND + "&$top=100")
@@ -104,7 +104,15 @@ class Discovery:
             "notebooks": [], "sections": [], "warnings": [],
             "links": [], "groups": [], "visited": [], "recentChecks": 0,
         }
+        # Recent links are history, not evidence that a notebook still exists.
+        # Verify cached notebooks by ID as well, so an unavailable history link
+        # cannot hide a working shared notebook or keep a removed one forever.
+        if not self.state.get("cachedQueued"):
+            if cached_notebooks:
+                self.state["tasks"].append({"kind": "cached", "notebooks": list(cached_notebooks)})
+            self.state["cachedQueued"] = True
         self.book_ids = {book["id"].casefold() for book in self.state["notebooks"]}
+        self.checked_book_ids = set(self.state.get("checkedNotebooks", []))
         self.section_ids = {section["id"] for section in self.state["sections"]}
         self.group_ids = set(self.state["groups"])
         self.links = set(self.state["links"])
@@ -215,6 +223,19 @@ class Discovery:
                           "label": notebook.get("displayName", "Notebook")})
         return tasks
 
+    def cached(self, notebooks):
+        tasks = []
+        for notebook in notebooks:
+            notebook_id = notebook["id"]
+            if notebook_id.casefold() in self.book_ids or notebook_id.casefold() in self.checked_book_ids:
+                continue
+            endpoint = graph_url(notebook.get("self"))
+            if not endpoint:
+                endpoint = "/me/onenote/notebooks/" + urllib.parse.quote(notebook_id, safe="")
+            tasks.append({"kind": "notebook", "url": endpoint + "?$expand=" + NOTEBOOK_EXPAND,
+                          "id": notebook_id, "label": notebook.get("name", "Notebook")})
+        return tasks
+
     def drive(self, response, task):
         notebook_id = personal_notebook_id(response)
         if not notebook_id:
@@ -263,6 +284,10 @@ class Discovery:
             self.state["tasks"].pop(0)
             self.relationship(task)
             return
+        if task["kind"] == "cached":
+            self.state["tasks"].pop(0)
+            self.prepend(self.cached(task["notebooks"]))
+            return
         url = task["url"]
         if not url.startswith("/") and not graph_url(url):
             self.state["tasks"].pop(0)
@@ -283,19 +308,29 @@ class Discovery:
             raise DiscoveryError(status, response)
         self.state["tasks"].pop(0)
         self.visited.add(url)
+        if task["kind"] == "notebook":
+            self.checked_book_ids.add(task["id"].casefold())
+        if (task["kind"] == "drive" and status in (403, 404, 410)
+                or task["kind"] == "notebook" and status in (404, 410)):
+            # A recent link must resolve and verify before it is a notebook.
+            # OneDrive also reports deleted links as 403. Known notebooks get
+            # a separate ID lookup above; genuine permission failures there
+            # still warn and preserve the cached inventory.
+            return
         if status != 200:
             self.warn(task["label"], "could not retrieve the list (HTTP %s)" % status)
         else:
             self.response(task, response)
 
     def progress(self):
-        self.state.update(links=sorted(self.links), groups=sorted(self.group_ids), visited=sorted(self.visited))
+        self.state.update(links=sorted(self.links), groups=sorted(self.group_ids), visited=sorted(self.visited),
+                          checkedNotebooks=sorted(self.checked_book_ids))
         return self.state
 
 
-def discover(graph, limit, max_bytes, progress=None, checkpoint=None):
+def discover(graph, limit, max_bytes, progress=None, checkpoint=None, cached_notebooks=()):
     """List notebooks and walk their direct and nested section relationships."""
-    discovery = Discovery(limit, progress)
+    discovery = Discovery(limit, progress, cached_notebooks)
     while discovery.state["tasks"]:
         if checkpoint and "url" in discovery.state["tasks"][0]:
             checkpoint(discovery.progress())

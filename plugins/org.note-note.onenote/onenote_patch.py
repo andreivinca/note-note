@@ -12,7 +12,7 @@ from notemerge import AmbiguousAlignment, align, text_key
 from onenote_md import Converter, Node, TreeBuilder
 import htmltables
 
-REPLACEABLE = {"p", "li", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "table", "img"}
+REPLACEABLE = {"p", "li", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "table", "img", "object"}
 LISTS = {"ul", "ol"}
 LAYOUT = {"html", "body", "div"}
 
@@ -90,8 +90,15 @@ def document_elements(root):
     return result[start:end]
 
 
+def content_converter():
+    # Graph resources identify attachments during planning. Instance IDs
+    # belong to the editor/merge boundary and need not exist on legacy HTML.
+    return Converter(lambda src, width: src, lambda src, title: src,
+                     lambda src, local, title, identifier: (local, ""))
+
+
 def text(node):
-    converter = Converter(lambda src, width: src)
+    converter = content_converter()
     converter.block(node)
     return converter.result()
 
@@ -100,11 +107,20 @@ def identity(node):
     return text_key(text(node))
 
 
-def target(node):
+def target_identifier(node):
     value = node.attrs.get("id", "")
-    if node.tag not in REPLACEABLE or not value.startswith(node.tag + ":"):
-        raise UnsupportedEdit("OneNote supplied no editable target for this %s element" % (node.tag or "text"))
-    return value
+    if node.tag in REPLACEABLE and value.startswith(node.tag + ":"):
+        return value
+    if node.tag in {"img", "object"} and node.attrs.get("data-id"):
+        return "#" + node.attrs["data-id"]
+    return ""
+
+
+def target(node):
+    value = target_identifier(node)
+    if value:
+        return value
+    raise UnsupportedEdit("OneNote supplied no editable target for this %s element" % (node.tag or "text"))
 
 
 def replacement(old, new):
@@ -138,6 +154,7 @@ class _Planner:
         self.insertions = []
         self.replacements = []
         self.retained = {}
+        self.parents = {id(child): parent for parent in walk(tree) for child in parent.children}
 
     def retain(self, node, subtree=True):
         for original in walk(node) if subtree else (node,):
@@ -179,18 +196,64 @@ class _Planner:
 
     def insert(self, additions, before, index, container):
         content = "".join(serialize(node) for node in additions)
-        if index < len(before) and before[index].tag in REPLACEABLE:
-            command = {"target": target(before[index]), "action": "insert", "position": "before"}
-        elif index > 0 and before[index - 1].tag in REPLACEABLE:
-            command = {"target": target(before[index - 1]), "action": "insert", "position": "after"}
-        elif not before and container.tag in LISTS | {"body", "div"}:
+        candidates = []
+        if index < len(before):
+            candidates.append((before[index], "before"))
+        if index > 0:
+            candidates.append((before[index - 1], "after"))
+        command = None
+        for node, position in candidates:
+            identifier = target_identifier(node)
+            if identifier:
+                command = {"target": identifier, "action": "insert", "position": position}
+                break
+        if command is None:
+            for node, position in candidates:
+                command = self.insert_at_layout_boundary(node, position, additions)
+                if command is not None:
+                    self.insertions.append(command)
+                    return
+        if command is None and not before and container.tag in LISTS | {"body", "div"}:
             identifier = container.attrs.get("id")
             if container.tag != "body" and not identifier:
                 raise UnsupportedEdit("OneNote supplied no target for this empty container")
             command = {"target": identifier or "body", "action": "append"}
-        else:
+        if command is None:
             raise UnsupportedEdit("OneNote supplied no insertion target at this position")
         self.insertions.append(dict(command, content=content))
+
+    def insert_at_layout_boundary(self, node, position, additions):
+        """A phone attachment may have no ID even with includeIDs=true.
+
+        Its layout div supports adding first/last children by generated ID.
+        Use that operation only at the corresponding content boundary; the
+        original attachment and every other child stay intact.
+        """
+        parent = self.parents.get(id(node))
+        while parent is not None and parent.tag in LAYOUT:
+            if parent.tag == "div" and parent.attrs.get("id", "").startswith("div:"):
+                contents = elements(parent)
+                start, end = 0, len(contents)
+                while start < end and contents[start].tag == "br":
+                    start += 1
+                while end > start and contents[end - 1].tag == "br":
+                    end -= 1
+                boundary = contents[start if position == "before" else end - 1] if start < end else None
+                if boundary is node:
+                    # Boundary breaks omitted on import become visible when
+                    # content is added beyond them. Reuse the corresponding
+                    # requested blank lines rather than adding them twice.
+                    breaks = start if position == "before" else len(contents) - end
+                    shared = additions[-breaks:] if position == "before" and breaks else additions[:breaks]
+                    if len(shared) != breaks or any(item.tag != "br" for item in shared):
+                        return None
+                    inserted = additions[:-breaks] if position == "before" and breaks else additions[breaks:]
+                    if not inserted:
+                        return None
+                    return {"target": parent.attrs["id"], "action": "append", "position": position,
+                            "content": "".join(serialize(item) for item in inserted)}
+            parent = self.parents.get(id(parent))
+        return None
 
     def update(self, old, new):
         if text(old) == text(new):
@@ -206,7 +269,10 @@ class _Planner:
         if old.tag == new.tag == "table":
             self.table(old, new)
             return
-        if any(child.tag in REPLACEABLE for child in list(walk(old))[1:]):
+        # An inline recording shares its paragraph's Graph target. Replacing
+        # that carrier is supported by the caller's bounded media upload;
+        # independently editable paragraphs/lists/images must keep their IDs.
+        if any(child.tag in REPLACEABLE - {"object"} for child in list(walk(old))[1:]):
             raise UnsupportedEdit("this restructure would replace nested elements; edit it in OneNote")
         self.replacements.append({"target": target(old), "action": "replace",
                                   "content": serialize(replacement(old, new))})
@@ -234,7 +300,7 @@ class _Planner:
             self.inline_table(old, new_rows)
             return
         self.retain(old, subtree=False)
-        converter = Converter(lambda src, width: src)
+        converter = content_converter()
         for old_row, new_row in zip(old_rows, new_rows):
             old_cells = [node for node in children(old_row) if node.tag in {"td", "th"}]
             new_cells = [node for node in children(new_row) if node.tag in {"td", "th"}]
@@ -270,7 +336,7 @@ class _Planner:
         be lost, copying the original layout and every unchanged cell.
         """
         updated = copy.deepcopy(old)
-        converter = Converter(lambda src, width: src)
+        converter = content_converter()
         for old_row, new_row in zip(htmltables.rows(updated), new_rows):
             old_cells = [node for node in children(old_row) if node.tag in {"td", "th"}]
             new_cells = [node for node in children(new_row) if node.tag in {"td", "th"}]
@@ -312,14 +378,19 @@ def simulate(tree, commands):
             parent = bodies[0] if bodies else tree
             node = next((child for child in parent.children if child.tag == "div"), parent)
         else:
+            attribute = "data-id" if identifier.startswith("#") else "id"
+            value = identifier[1:] if attribute == "data-id" else identifier
             matches = [(parent, node) for parent in walk(tree) for node in parent.children
-                       if node.attrs.get("id") == identifier]
+                       if node.attrs.get(attribute) == value]
             if len(matches) != 1:
                 raise InvalidPlan("an operation targets a missing or repeated element")
             parent, node = matches[0]
         content = parse(command["content"]).children
         if command["action"] == "append":
-            node.children.extend(content)
+            if command.get("position", "after") == "before":
+                node.children[0:0] = content
+            else:
+                node.children.extend(content)
         else:
             position = parent.children.index(node)
             if command["action"] == "replace":

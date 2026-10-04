@@ -96,6 +96,7 @@ connected providers, Wayland with an X11 fallback, and graphics acceleration.
 Qt handles clipboard access and opens external URLs through the desktop
 portal. Theme files have narrowly scoped read-only permissions; there is
 no blanket home-directory or session-bus access.
+The PulseAudio socket allows playback of existing audio recordings.
 
 For notes elsewhere, grant that directory explicitly and set
 `providers.local.notesDir` in the app's Settings to the same path:

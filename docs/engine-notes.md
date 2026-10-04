@@ -512,6 +512,12 @@ class is set: extended property `String 0x001A` = `IPM.StickyNote`.
   Recent notebook links provide an additional discovery path for personal
   shares: OneDrive resolves the linked notebook package, and OneNote verifies
   its ID before it enters the inventory. There is no owner configuration.
+  Recent links are history and can outlive a removed notebook; OneDrive can
+  report such a link as 403. Unavailable recent links are skipped. Cached
+  notebooks missing from discovery are also checked through their OneNote
+  IDs: a successful lookup keeps them, 404/410 removes them from the listing,
+  and other failures warn and retain cached content. These checks resume
+  with the rest of notebook discovery after a background budget pause.
 - `lastModifiedDateTime` is **not reliably updated** when a page is edited
   (an edit from a phone left a 2021 timestamp), so the open page is re-read on
   a poll and compared by text.

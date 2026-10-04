@@ -79,7 +79,7 @@ Qt runtime. See [Flatpak installation and builds](docs/flatpak.md).
 After installing the build tools listed there, run `./build-flatpak.sh`
 to create a bundle and checksum under `build/dist/<version>/`.
 
-Building and running natively requires Linux, Qt **6.8 or newer** (Quick, Quick Controls 2, Network and
+Building and running natively requires Linux, Qt **6.8 or newer** (Quick, Quick Controls 2, Network, Multimedia and
 SVG image support), Python **3.9 or newer**, and `inotifywait` from
 inotify-tools. Building also requires CMake 3.21+, a C++17 compiler and Qt
 Test when tests are enabled. No Omarchy or Quickshell installation is needed.
@@ -217,6 +217,11 @@ you type, even when they are plain text in Markdown. Drag across a link to
 select it. The display styling leaves saved Markdown and cursor spacing
 unchanged. Type a space to continue with ordinary text after a URL. A new
 list item starts with ordinary text.
+Existing OneNote audio attachments, including phone recordings in 3GP format,
+show an inline player with Play/Stop, a decorative square waveform and a seek
+bar. Stop returns to the beginning. Switching notes stops playback. You can
+edit notes containing recordings; ordinary text edits retain the original
+attachment. Recording and insertion tools are not provided yet.
 Local and OneNote notes support tables inside table cells, including
 **Insert → Insert month → Insert current month**. Place the caret in a cell before inserting;
 row and column tools act on the table containing the caret.

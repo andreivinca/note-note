@@ -10,6 +10,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 SUITES = [
+    "plugins/org.note-note.onenote/audio_selftest.py",
     "lib/notemerge/selftest.py",
     "plugins/org.note-note.local/selftest.py",
     "plugins/org.note-note.notion/selftest.py",

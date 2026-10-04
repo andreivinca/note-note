@@ -1,5 +1,6 @@
 """Automatic notebook discovery and shared-content routing; no live account."""
 import contextlib
+import copy
 import sys
 import tempfile
 import unittest
@@ -36,7 +37,10 @@ class InventoryTests(unittest.TestCase):
             if url == inventory.RECENT_NOTEBOOKS:
                 return 200, {"value": [{"links": {"oneNoteWebUrl": {"href":
                     "https://d.docs.live.net/0123456789ABCDEF/Family"}}}]}
-            return next(replies)
+            reply = next(replies)
+            if isinstance(reply, Exception):
+                raise reply
+            return reply
 
         return unittest.mock.Mock(side_effect=graph)
 
@@ -152,6 +156,94 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual([book["id"] for book in books], ["owned"])
         self.assertEqual([entry["id"] for entry in sections], ["s"])
         self.assertIn("HTTP 403", warnings[0])
+
+    def test_unavailable_recent_links_do_not_fail_the_inventory(self):
+        for status in (403, 404, 410):
+            with self.subTest(status=status):
+                graph = self.recent_graph([(status, {"error": {"code": "accessDenied"}})],
+                                          known_ids=["owned"])
+                books, _, warnings = inventory.discover(graph, 500, 100000)
+                self.assertEqual([book["id"] for book in books], ["owned"])
+                self.assertEqual(warnings, [])
+
+    def test_recent_server_failure_still_warns(self):
+        graph = self.recent_graph([(503, {})], known_ids=["owned"])
+        books, _, warnings = inventory.discover(graph, 500, 100000)
+        self.assertEqual([book["id"] for book in books], ["owned"])
+        self.assertIn("HTTP 503", warnings[0])
+
+    def cached_share_after_failed_recent_link(self, status):
+        shared_section = inventory.section_record(section("s", "family"))
+        cache = {"notebooks": [{"id": "owned", "name": "Mine"},
+                               {"id": "family", "name": "Family", "self": SHARED + "/notebooks/family"}],
+                 "sections": [shared_section],
+                 "pages": [{"id": "p", "title": "Cached shared page", "sectionId": "s"}],
+                 "sectionPages": {"s": {"modified": "stamp"}}}
+        book = {"id": "family", "displayName": "Family", "userRole": "Reader",
+                "sections": [section("s", "family")], "sectionGroups": []}
+        graph = self.recent_graph([(403, {}), (status, book if status == 200 else {})],
+                                  known_ids=["owned"])
+        with patch.object(onenote, "load_listing", return_value=cache), \
+                patch.object(onenote, "load_order", return_value={}), \
+                patch.object(onenote, "graph", graph), \
+                patch.object(onenote, "save_listing", side_effect=cache.update), \
+                patch.object(onenote, "out") as output:
+            onenote.cmd_onenote_list(False, incremental=True)
+        self.assertEqual(graph.call_args.args[1], SHARED + "/notebooks/family?$expand=" + inventory.NOTEBOOK_EXPAND)
+        return output.call_args.args[0], cache
+
+    def test_removed_cached_notebook_does_not_return_from_recent_history(self):
+        for status in (404, 410):
+            with self.subTest(status=status):
+                answer, cache = self.cached_share_after_failed_recent_link(status)
+                self.assertEqual([book["id"] for book in answer["notebooks"]], ["owned"])
+                self.assertEqual(answer["pages"], [])
+                self.assertEqual(answer["listingWarnings"], [])
+                self.assertTrue(answer["inventoryComplete"])
+                self.assertNotIn("s", cache["sectionPages"])
+
+    def test_cached_shared_notebook_is_verified_when_recent_link_is_unavailable(self):
+        answer, _ = self.cached_share_after_failed_recent_link(200)
+        self.assertEqual([book["id"] for book in answer["notebooks"]], ["owned", "family"])
+        self.assertEqual([page["id"] for page in answer["pages"]], ["p"])
+        self.assertEqual(answer["listingWarnings"], [])
+        self.assertTrue(answer["inventoryComplete"])
+
+    def test_cached_permission_failure_still_preserves_the_notebook(self):
+        answer, _ = self.cached_share_after_failed_recent_link(403)
+        self.assertEqual([book["id"] for book in answer["notebooks"]], ["owned", "family"])
+        self.assertEqual([page["id"] for page in answer["pages"]], ["p"])
+        self.assertIn("Family: could not retrieve the list (HTTP 403)", answer["listingWarnings"])
+        self.assertFalse(answer["inventoryComplete"])
+
+    def test_cached_verification_resumes_without_repeating_recent_lookups(self):
+        cached = [{"id": "family", "name": "Family"}]
+        progress = {}
+
+        def checkpoint(state):
+            progress.clear()
+            progress.update(copy.deepcopy(state))
+
+        graph = self.recent_graph([(403, {}), onenote.ratelimit.Deferred(60), (404, {})],
+                                  known_ids=["owned"])
+        with self.assertRaises(onenote.ratelimit.Deferred):
+            inventory.discover(graph, 500, 100000, checkpoint=checkpoint, cached_notebooks=cached)
+        books, _, warnings = inventory.discover(graph, 500, 100000, progress=progress,
+                                                cached_notebooks=cached)
+        self.assertEqual([book["id"] for book in books], ["owned"])
+        self.assertEqual(warnings, [])
+        self.assertEqual(graph.call_count, 5)
+
+    def test_missing_recent_notebook_is_not_verified_twice_from_cache(self):
+        cached = [{"id": "0-0123456789ABCDEF!123", "name": "Family"}]
+        graph = self.recent_graph([
+            (200, {"id": "0123456789ABCDEF!123", "package": {"type": "oneNote"}}),
+            (404, {}),
+        ], known_ids=["owned"])
+        books, _, warnings = inventory.discover(graph, 500, 100000, cached_notebooks=cached)
+        self.assertEqual([book["id"] for book in books], ["owned"])
+        self.assertEqual(warnings, [])
+        self.assertEqual(graph.call_count, 4)
 
     def test_shared_section_self_supplies_the_page_route(self):
         value = inventory.section_record(dict(section("s", "family"), self=SHARED + "/sections/s"))

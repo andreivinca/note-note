@@ -8,6 +8,7 @@ import "QuoteBars.js" as QuoteBars
 import "EditContext.js" as EditContext
 import "Dialect.js" as Dialect
 import "MarkdownBlocks.js" as MarkdownBlocks
+import "AudioObjects.js" as AudioObjects
 import "../services/shortcuts/stroke.js" as Stroke
 
 // The note pane: the formatting tools pinned across its top the way an IDE
@@ -235,6 +236,7 @@ Item {
   // Conversions are asynchronous, so a note that arrives while an earlier one
   // is still being converted must win: only the newest token may assign.
   property int noteToken: 0
+  property int audioDocumentToken: -1
   property int documentRevision: 0
   // TextEdit also emits textChanged for display/selection refreshes. The
   // native document's contentsChange signal identifies actual content and
@@ -266,6 +268,8 @@ Item {
   // A setNote that a newer one overtook never calls its `shown`: the editor
   // now belongs to the newer note, and so does the host's state.
   function setNote(t, body, shown) {
+    audioModel.clear()
+    root.activeAudioPlayer = null
     editing.clearPending()
     var token = ++root.noteToken
     settingText = true
@@ -296,6 +300,8 @@ Item {
   }
 
   function restoreDocument(snapshot) {
+    audioModel.clear()
+    root.activeAudioPlayer = null
     editing.clearPending()
     var token = ++root.noteToken
     root.settingText = true
@@ -313,6 +319,8 @@ Item {
     area.text = root.plain ? document : Dialect.documentHtml(document)
     root.configureLinkDisplay()
     settingText = false
+    root.audioDocumentToken = token
+    root.updateDecorations()
     showTop()
   }
 
@@ -430,7 +438,7 @@ Item {
       var to = Math.max(area.selectionStart, area.selectionEnd)
       var before = area.length, added = 0
       atomic(function() {
-        area.insert(to, Dialect.documentHtml(html))
+        area.insert(to, AudioObjects.copiedHtml(Dialect.documentHtml(html)))
         added = area.length - before
         if (from !== to) {
           area.remove(from, to)
@@ -1083,6 +1091,7 @@ Item {
       root.codeSlabs = []
       root.imageBoxes = []
       root.checkBoxes = []
+      audioModel.clear()
       return
     }
     var runs, boxes
@@ -1094,14 +1103,17 @@ Item {
       runs = QuoteBars.runsFromBlocks(bs)
       boxes = QuoteBars.boxesFromBlocks(bs)
       root.imageBoxes = root.readOnly ? [] : root.imageGeometry()
+      root.updateAudioObjects(nativeBlocks.item.images())
     } else if (area.length > 0 && area.length <= 200000) {
       var html = area.getFormattedText(0, area.length), text = area.getText(0, area.length)
       runs = QuoteBars.runs(html, text)
       boxes = QuoteBars.boxes(html, text)
+      root.updateAudioObjects(AudioObjects.imagesFromHtml(html, text))
     } else {
       root.quoteBars = []
       root.codeSlabs = []
       root.checkBoxes = []
+      audioModel.clear()
       return
     }
     var bars = [], slabs = [], marks = [], i
@@ -1146,6 +1158,39 @@ Item {
   //
   // [{ position, x, y, width, height }] in the editor's own coordinates.
   property var imageBoxes: []
+  property var activeAudioPlayer: null
+  ListModel { id: audioModel }
+
+  function updateAudioObjects(images) {
+    if (root.audioDocumentToken !== root.noteToken) {
+      audioModel.clear()
+      return
+    }
+    var entries = [], occurrences = ({})
+    for (var index = 0; index < images.length; index++) {
+      var image = images[index]
+      var recording = AudioObjects.recording(image.source)
+      if (!recording) {
+        continue
+      }
+      var identity = JSON.stringify([recording.source, recording.title])
+      var occurrence = occurrences[identity] || 0
+      occurrences[identity] = occurrence + 1
+      var rectangle = area.positionToRectangle(image.position)
+      entries.push({ key: recording.id || identity + ":" + occurrence,
+        audioSource: recording.source, recordingTitle: recording.title,
+        objectLeft: rectangle.x, objectTop: rectangle.y + Math.max(0, image.ascent - image.height),
+        objectWidth: image.width, objectHeight: image.height })
+    }
+    AudioObjects.reconcile(audioModel, entries)
+  }
+
+  function audioStarted(player) {
+    if (root.activeAudioPlayer && root.activeAudioPlayer !== player) {
+      root.activeAudioPlayer.stop()
+    }
+    root.activeAudioPlayer = player
+  }
   // Mirrors dialect.MAX_IMAGE_DISPLAY in services/markdown/qthtml — the
   // display cap the converter puts on a large image that names no width.
   readonly property int maxImageDisplay: Dialect.MAX_IMAGE_DISPLAY
@@ -1155,6 +1200,9 @@ Item {
     var images = nativeBlocks.item.images(), out = []
     for (var i = 0; i < images.length; i++) {
       var img = images[i]
+      if (AudioObjects.recording(img.source)) {
+        continue
+      }
       if (!(img.width > 0) || !(img.height > 0)) {
         continue  // not loaded yet
       }
@@ -2012,7 +2060,9 @@ Item {
               root.lastContentRevision = nativeBlocks.item.contentRevision
             }
             root.scheduleDecorations()
-            if (root.settingText) {
+            // Qt can refresh rich text after an embedded resource loads.
+            // A read-only page cannot have an authored edit in that refresh.
+            if (root.settingText || root.readOnly) {
               return
             }
             editing.applyPendingToInsertion()
@@ -2117,6 +2167,36 @@ Item {
               // would show its I-beam; the handler grabs nothing, so the
               // click still falls through to Qt's marker.
               HoverHandler { id: overBox; cursorShape: Qt.PointingHandCursor }
+            }
+          }
+
+          Repeater {
+            id: audioPlayers
+            objectName: "audioObjects"
+            model: audioModel
+            delegate: AudioPlayer {
+              id: audioPlayer
+              required property real objectLeft
+              required property real objectTop
+              required property real objectWidth
+              required property real objectHeight
+              required audioSource
+              required recordingTitle
+              objectName: "audioPlayer"
+              x: objectLeft
+              y: objectTop
+              width: Math.max(0, Math.min(objectWidth, area.width - x - area.rightPadding))
+              height: objectHeight
+              foreground: root.foreground
+              backgroundColor: root.background
+              accent: root.accent
+              playbackAllowed: root.hasNote && !root.loading && !root.showingNotice && root.visible
+              onStarted: root.audioStarted(audioPlayer)
+              Component.onDestruction: {
+                if (root.activeAudioPlayer === audioPlayer) {
+                  root.activeAudioPlayer = null
+                }
+              }
             }
           }
 

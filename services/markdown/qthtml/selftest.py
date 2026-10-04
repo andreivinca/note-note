@@ -27,6 +27,14 @@ from qthtml import convert, dialect, to_html, to_markdown  # noqa: E402
 # because Qt's *Markdown* writer used to corrupt them (docs/engine-notes.md);
 # they are the reason the editor moved to rich text.
 CASES = {
+    "audio recording": '<audio src="file:///tmp/recording.3gp" title="Audio Recording.3gp"></audio>\n',
+    "audio instance identity": '<audio src="file:///tmp/recording.3gp" title="Audio Recording.3gp" data-id="nn-audio-original"></audio>\n',
+    "copied audio instances": '<audio src="file:///tmp/recording.3gp" title="Recording" data-id="nn-audio-original"></audio>\n\n<audio src="file:///tmp/recording.3gp" title="Recording" data-id="nn-audio-copy"></audio>\n',
+    "audio title escaping": '<audio src="file:///tmp/Audio%20Recording.3gp" title="A &amp; B &quot;recording&quot;"></audio>\n',
+    "unavailable recording": '<audio src="" title="Audio recording"></audio>\n',
+    "text around audio": 'Before\n\n<audio src="file:///tmp/recording.3gp" title="Audio recording"></audio>\n\nAfter\n',
+    "two recordings": '<audio src="file:///tmp/one.wav" title="One"></audio>\n\n<audio src="file:///tmp/two.wav" title="Two"></audio>\n',
+    "audio in table": '| Recording |\n|---|\n| <audio src="file:///tmp/recording.3gp" title="Audio recording"></audio> |\n',
     "text color": '<span style="color:#0070c0;">Mushrooms</span>\n',
     "color in checklist": '- [x] <span style="color:#0070c0;">Mushrooms</span>\n- [ ] Milk\n',
     "color with formatting": '<span style="color:#ff0000;">**bold** and *italic* and ==mark==</span>\n',

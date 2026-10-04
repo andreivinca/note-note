@@ -594,6 +594,29 @@ inotifywait -m -e close_write,moved_to --format '%e %f' ~/Notes   # writes are a
 
 ## Checklist for a UI change
 
+`python3 tests/audio_selftest.py` runs the inline recording player through
+real Qt playback with silent audio. It checks Play/Stop, mouse seeking,
+playback across layout changes, completion, note switching, missing recordings
+and the editor's fallback without a native inspector. Add
+`--recording /path/to/cached-recording.3gp` to exercise a phone recording or
+`--screenshot /tmp/audio-player.png` to capture the player. OneNote conversion
+and cache boundaries are covered by
+`python3 plugins/org.note-note.onenote/audio_selftest.py`. The player suite also
+checks typing, undo and save/reload of an editable note. The provider suites
+check resource retention while editing text, distinct recordings with the
+same filename, table-cell edits, concurrent recording additions, deletion,
+multipart recreation with identical bytes, upload limits and resource aliases.
+Audio clipboard regressions use Qt's actual copy and paste path, then verify
+distinct instance IDs through save/reload and playback after pasting into
+another note. Provider regressions copy audio
+before, after and inline with the original, save subsequent text edits without
+another upload, keep both source and destination notes saveable after a paste,
+and recover a legacy draft with the former false conflict.
+Phone attachment fixtures also omit generated object IDs, as the live API
+does. These check insertion through the containing layout, reuse of its
+boundary line breaks, and subsequent deletion through a copied object's
+data-id. Known pasted images retain their display width during normalization.
+
 1. `qmllint` clean, `py_compile` clean, `ruff` silent, `qthtml/selftest.py`
    green — and, if anything touched requests, `ratelimit_selftest.py` and
    `services/requests/selftest.py` too; if it touched a provider script, the

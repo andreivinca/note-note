@@ -1,5 +1,6 @@
 """OneNote merge integration, with a scripted server and private temporary state."""
 import contextlib
+import hashlib
 import html
 import io
 import json
@@ -38,6 +39,17 @@ def page_html(value):
 
 
 class ImageConversionTests(unittest.TestCase):
+    def test_known_pasted_image_keeps_display_width_during_normalization(self):
+        local = "file:///tmp/cached-image"
+        entry = {"src": "https://graph.microsoft.com/v1.0/me/onenote/resources/picture/$value", "width": 624}
+        with patch.object(onenote, "known_image", side_effect=lambda url: entry if url == local else None):
+            normalized = onenote.normalize_note(note("![Picture](%s)" % local))
+            self.assertIn("{width=624}", normalized["body"])
+            resized = onenote.normalize_note(note("![Picture](%s){width=200}" % local))
+            self.assertIn("{width=200}", resized["body"])
+            unknown = onenote.normalize_note(note("![Picture](file:///tmp/other-image)"))
+            self.assertNotIn("{width=", unknown["body"])
+
     def test_generated_descriptions_preserve_images_in_every_container(self):
         descriptions = (
             "Text alternativ generat automat:\n\n",
@@ -70,6 +82,317 @@ class ImageConversionTests(unittest.TestCase):
 
 
 class SaveTests(unittest.TestCase):
+    def recording(self, name="phone", title="Audio Recording.3gp"):
+        """A cached attachment served by the scripted page endpoint."""
+        source = "https://graph.microsoft.com/v1.0/me/onenote/resources/%s/$value" % name
+        path = Path(onenote.ONENOTE_AUDIO_DIR) / (hashlib.sha1(source.encode()).hexdigest() + ".3gp")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(("synthetic audio " + name).encode())
+        self.audio_paths[source] = path.as_uri()
+        return ('<object id="object:%s" data="%s" type="video/3gpp" '
+                'data-attachment="%s" style="width:120px"></object>' % (name, source, html.escape(title)))
+
+    def audio_page(self, contents):
+        self.remote = ('<html><head><title>Title</title></head><body><div id="div:audio">'
+                       + contents + '</div></body></html>')
+
+    def operations(self):
+        return [op for method, _, data in self.calls if method == "PATCH" for op in json.loads(data)]
+
+    def upload_audio_patch(self, url, commands, parts):
+        """Acknowledge uploaded parts with new Graph resource identities."""
+        references = {}
+        for name, mime, data in parts:
+            self.audio_uploads.append((name, mime, data))
+            source = "https://graph.microsoft.com/v1.0/me/onenote/resources/%s/$value" % name
+            path = Path(onenote.ONENOTE_AUDIO_DIR) / (hashlib.sha1(source.encode()).hexdigest() + ".3gp")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+            self.audio_paths[source] = path.as_uri()
+            references["name:" + name] = source
+        expanded = json.dumps(commands)
+        for reference, source in references.items():
+            expanded = expanded.replace(reference, source)
+        return self.graph("PATCH", url, expanded)
+
+    def test_moving_recording_keeps_audio_bytes_and_text(self):
+        self.audio_page('<p id="p:before">Before</p>' + self.recording() + '<p id="p:after">After</p>')
+        loaded = self.load()
+        audio_markup = loaded["body"].split("\n\n")[1]
+        with patch.object(onenote, "patch_page", side_effect=self.upload_audio_patch):
+            result = self.save(note("Before  \nAfter\n\n" + audio_markup), loaded["view"])
+        self.assertTrue(result.get("ok"), result)
+        self.assertEqual(self.audio_uploads, [])
+        self.assertEqual(len(list(ET.fromstring(self.remote).iter("object"))), 1)
+        self.assertIn('id="p:before"', self.remote)
+        self.assertIn('id="object:phone"', self.remote)
+        self.assertEqual(onenote.normalize_note(self.load()), onenote.normalize_note(result))
+
+    def test_inserted_audio_uses_backend_upload_and_survives_reload(self):
+        self.audio_page('<p id="p:text">Text</p>')
+        loaded = self.load()
+        path = Path(self.temp.name) / "New recording.3gp"
+        path.write_bytes(b"new recording bytes")
+        audio_markup = '<audio src="%s" title="New recording.3gp"></audio>' % path.as_uri()
+        with patch.object(onenote, "patch_page", side_effect=self.upload_audio_patch):
+            result = self.save(note(loaded["body"] + "\n\n" + audio_markup), loaded["view"])
+        self.assertTrue(result.get("ok"), result)
+        self.assertEqual([(mime, data) for _, mime, data in self.audio_uploads], [("video/3gpp", b"new recording bytes")])
+        self.assertEqual(onenote.normalize_note(self.load()), onenote.normalize_note(result))
+        self.assertIn('id="p:text"', self.remote)
+
+    def test_copied_recording_saves_and_subsequent_edits_keep_both_resources(self):
+        for placement in ("before", "middle", "after", "inline"):
+            with self.subTest(placement=placement):
+                with self.store() as journal:
+                    journal.discard()
+                self.audio_uploads.clear()
+                self.audio_page('<p id="p:before">Before</p>' + self.recording() + '<p id="p:after">After</p>')
+                loaded = self.load()
+                original = loaded["body"].split("\n\n")[1]
+                copied = original.replace('data-id="nn-audio-legacy-', 'data-id="nn-audio-copy-')
+                bodies = {
+                    "before": copied + "\n\n" + loaded["body"],
+                    "middle": loaded["body"].replace(original, original + "\n\n" + copied),
+                    "after": loaded["body"] + "\n\n" + copied,
+                    "inline": loaded["body"].replace("After", "After " + copied),
+                }
+                body = bodies[placement]
+                with patch.object(onenote, "patch_page", side_effect=self.upload_audio_patch):
+                    result = self.save(note(body), loaded["view"])
+                    self.assertTrue(result.get("ok"), result)
+                    self.assertEqual(len(self.audio_uploads), 1)
+                    self.assertIn('id="object:phone"', self.remote)
+                    self.calls.clear()
+                    edited = body.replace("Before", "Edited before")
+                    result = self.save(note(edited), loaded["view"])
+                self.assertTrue(result.get("ok"), result)
+                self.assertEqual(len(self.audio_uploads), 1, "editing text must not upload either recording again")
+                recordings = list(ET.fromstring(self.remote).iter("object"))
+                self.assertEqual(len(recordings), 2)
+                self.assertEqual(len({recording.get("data") for recording in recordings}), 2)
+                self.assertEqual(onenote.normalize_note(self.load()), onenote.normalize_note(result))
+
+    def test_recording_pasted_into_another_note_keeps_both_notes_saveable(self):
+        self.audio_page('<p id="p:source">Source text</p>' + self.recording())
+        source_html = self.remote
+        source = self.load("source")
+        original = source["body"].split("\n\n")[1]
+        copied = original.replace('data-id="nn-audio-legacy-', 'data-id="nn-audio-copy-')
+        original_resource = next(ET.fromstring(source_html).iter("object")).get("data")
+        self.audio_page('<p id="p:target">Target text</p>')
+        target = self.load("target")
+        pasted = target["body"] + "\n\n" + copied
+        self.calls.clear()
+        with patch.object(onenote, "patch_page", side_effect=self.upload_audio_patch):
+            result = self.save(note(pasted), target["view"], page_id="target")
+            self.assertTrue(result.get("ok"), result)
+            self.assertEqual([(mime, data) for _, mime, data in self.audio_uploads],
+                             [("video/3gpp", b"synthetic audio phone")])
+            copied_resource = next(ET.fromstring(self.remote).iter("object")).get("data")
+            self.assertNotEqual(copied_resource, original_resource)
+            result = self.save(note(pasted.replace("Target text", "Edited target")),
+                               target["view"], page_id="target")
+            self.assertTrue(result.get("ok"), result)
+            self.assertEqual(len(self.audio_uploads), 1)
+            self.assertEqual(onenote.normalize_note(self.load("target")), onenote.normalize_note(result))
+            self.assertTrue(all("/target/" in path for method, path, _ in self.calls if method == "PATCH"))
+            self.remote = source_html
+            self.assertEqual(self.load("source")["body"], source["body"])
+            result = self.save(note(source["body"].replace("Source text", "Edited source")),
+                               source["view"], page_id="source")
+        self.assertTrue(result.get("ok"), result)
+        self.assertEqual(len(self.audio_uploads), 1, "editing the source must retain its original resource")
+        self.assertEqual(next(ET.fromstring(self.remote).iter("object")).get("data"), original_resource)
+        self.assertIn('id="object:phone"', self.remote)
+
+    def test_legacy_copy_with_false_conflict_is_recovered_without_losing_draft(self):
+        original = self.recording()
+        copied = self.recording("old-copy")
+        old_copy = next(iter(ET.fromstring("<root>" + copied + "</root>"))).get("data")
+        original_path = self.audio_paths[next(iter(self.audio_paths))]
+        copy_path = self.audio_paths[old_copy]
+        Path(onenote.file_path_of(copy_path)).write_bytes(Path(onenote.file_path_of(original_path)).read_bytes())
+        self.audio_page('<p id="p:text">Text</p>' + original + copied)
+        legacy_audio = '<audio src="%s" title="Audio Recording.3gp"></audio>' % copy_path
+        legacy_base = note("Text\n\n" + legacy_audio + "\n\n" + legacy_audio)
+        legacy_draft = note(legacy_base["body"].replace("Text", "Unsaved text"))
+        with MergeStore(self.temp.name, "onenote", "test-account", "page") as journal:
+            view = journal.open(legacy_base)["view"]
+            journal.stage(view, legacy_draft)
+            remote_body = legacy_base["body"].replace(copy_path, original_path, 1)
+            conflict = journal.prepare(note(remote_body))
+            self.assertTrue(conflict["conflict"], "the old resource alias must reproduce the false conflict")
+        recovered = self.load()
+        self.assertTrue(recovered.get("recovered"), recovered)
+        self.assertNotIn("conflict", recovered)
+        self.assertTrue(recovered.get("retry"), recovered)
+        self.assertIn("Unsaved text", recovered["body"])
+        result = self.save(legacy_draft, view)
+        self.assertTrue(result.get("ok"), result)
+        self.assertIn("Unsaved text", self.remote)
+        self.assertEqual(len(list(ET.fromstring(self.remote).iter("object"))), 2)
+        self.assertFalse(self.audio_uploads)
+
+    def test_text_edits_preserve_recording_and_neighbouring_elements(self):
+        attachment = self.recording()
+        self.audio_page('<p id="p:before">Before</p>' + attachment + '<p id="p:after">After</p>')
+        original = ET.tostring(next(ET.fromstring(self.remote).iter("object")))
+        loaded = self.load()
+        self.assertTrue(loaded["editable"], loaded)
+        desired = to_markdown(to_html(loaded["body"])).replace("Before", "Edited before").replace("After", "Edited after")
+        result = self.save(note(desired), loaded["view"])
+        self.assertTrue(result.get("ok"), result)
+        self.assertEqual([op["target"] for op in self.operations()], ["p:before", "p:after"])
+        self.assertTrue(all("<object" not in op["content"] for op in self.operations()))
+        self.assertEqual(ET.tostring(next(ET.fromstring(self.remote).iter("object"))), original)
+        self.assertEqual(self.load()["body"], result["body"])
+
+    def test_audio_only_page_accepts_text_before_and_after(self):
+        self.audio_page(self.recording())
+        loaded = self.load()
+        result = self.save(note("Before\n\n" + loaded["body"] + "\n\nAfter"), loaded["view"])
+        self.assertTrue(result.get("ok"), result)
+        operations = self.operations()
+        self.assertEqual([op["target"] for op in operations], ["object:phone", "object:phone"])
+        self.assertEqual([op["position"] for op in operations], ["before", "after"])
+        self.assertIn('id="object:phone"', self.remote)
+        self.assertEqual(self.load()["body"], result["body"])
+
+    def test_phone_recording_without_object_id_uses_its_layout_for_pastes(self):
+        self.generate_object_ids = False
+        cases = [(placement, breaks) for placement in ("before", "after") for breaks in (0, 1, 3)]
+        for placement, breaks in cases:
+            with self.subTest(placement=placement, breaks=breaks):
+                with self.store() as journal:
+                    journal.discard()
+                self.audio_uploads.clear()
+                attachment = self.recording().replace(' id="object:phone"', '')
+                self.audio_page(attachment + '<br/>' * breaks)
+                tree = ET.fromstring(self.remote)
+                next(tree.iter("div")).set("style", "position:absolute;left:48px;top:139px;width:624px")
+                self.remote = ET.tostring(tree, encoding="unicode")
+                original = ET.tostring(next(tree.iter("object")))
+                loaded = self.load()
+                copied = loaded["body"].replace('data-id="nn-audio-legacy-', 'data-id="nn-audio-copy-')
+                bodies = {"before": copied + "\n\n" + loaded["body"],
+                          "after": loaded["body"] + "\n\n\u00a0" * breaks + "\n\n" + copied}
+                self.calls.clear()
+                with patch.object(onenote, "patch_page", side_effect=self.upload_audio_patch):
+                    result = self.save(note(bodies[placement]), loaded["view"])
+                    self.assertTrue(result.get("ok"), result)
+                    operations = self.operations()
+                    self.assertEqual(len(operations), 1)
+                    self.assertEqual({key: operations[0][key] for key in ("target", "action", "position")},
+                                     {"target": "div:audio", "action": "append", "position": placement})
+                    self.assertEqual(len(self.audio_uploads), 1)
+                    recordings = list(ET.fromstring(self.remote).iter("object"))
+                    self.assertEqual(len(recordings), 2)
+                    retained = next(recording for recording in recordings if not recording.get("data-id"))
+                    self.assertEqual(ET.tostring(retained), original)
+                    self.assertEqual(onenote.normalize_note(self.load()), onenote.normalize_note(result))
+                    self.calls.clear()
+                    remaining = loaded["body"]
+                    result = self.save(note(remaining), self.load()["view"])
+                self.assertTrue(result.get("ok"), result)
+                self.assertEqual(len(self.audio_uploads), 1)
+                self.assertEqual(len(self.operations()), 1)
+                self.assertTrue(self.operations()[0]["target"].startswith("#nn-audio-copy-"))
+                self.assertEqual(len(list(ET.fromstring(self.remote).iter("object"))), 1)
+
+    def test_legacy_pending_audio_copy_can_save_without_a_graph_object_id(self):
+        self.audio_page(self.recording().replace(' id="object:phone"', '') + '<br/>')
+        loaded = self.load()
+        identifier = onenote.onenote_md.audio.from_markup(loaded["body"])["id"]
+        legacy = loaded["body"].replace(' data-id="%s"' % identifier, '')
+        desired = legacy + "\n\n\u00a0\n\n" + legacy + "\n\n\u00a0\n\nCaption"
+        with patch.object(onenote, "patch_page", side_effect=self.upload_audio_patch):
+            result = self.save(note(desired), loaded["view"])
+        self.assertTrue(result.get("ok"), result)
+        self.assertEqual(len(self.audio_uploads), 1)
+        self.assertEqual(len(list(ET.fromstring(self.remote).iter("object"))), 2)
+        self.assertIn("Caption", self.remote)
+        self.assertEqual(onenote.normalize_note(self.load()), onenote.normalize_note(result))
+        with self.store() as journal:
+            self.assertIsNone(journal.recover())
+
+    def test_text_around_phone_recording_without_id_keeps_original_bytes(self):
+        self.audio_page(self.recording().replace(' id="object:phone"', '') + '<br/>')
+        loaded = self.load()
+        result = self.save(note("Before\n\n" + loaded["body"] + "\n\n\u00a0\n\nAfter"), loaded["view"])
+        self.assertTrue(result.get("ok"), result)
+        self.assertEqual([(op["target"], op["action"], op["position"]) for op in self.operations()],
+                         [("div:audio", "append", "before"), ("div:audio", "append", "after")])
+        self.assertEqual(self.audio_uploads, [])
+        self.assertEqual(onenote.normalize_note(self.load()), onenote.normalize_note(result))
+
+    def test_recordings_with_same_filename_keep_distinct_resources(self):
+        self.audio_page(self.recording("first") + self.recording("second") + '<p id="p:end">End</p>')
+        loaded = self.load()
+        self.assertEqual(loaded["body"].count("<audio"), 2)
+        result = self.save(note(loaded["body"].replace("End", "Edited ending")), loaded["view"])
+        self.assertTrue(result.get("ok"), result)
+        self.assertEqual([op["target"] for op in self.operations()], ["p:end"])
+        self.assertIn('id="object:first"', self.remote)
+        self.assertIn('id="object:second"', self.remote)
+
+    def test_table_cell_edits_preserve_recording(self):
+        attachment = self.recording()
+        self.audio_page('<table id="table:audio"><tr><td>' + attachment + '<p id="p:caption">Caption</p>'
+                        '</td><td><p id="p:neighbour">Neighbour</p></td></tr></table>')
+        loaded = self.load()
+        self.assertTrue(loaded["editable"], loaded)
+        result = self.save(note(loaded["body"].replace("Caption", "Edited caption")), loaded["view"])
+        self.assertTrue(result.get("ok"), result)
+        self.assertEqual([op["target"] for op in self.operations()], ["p:caption"])
+        self.assertIn('id="object:phone"', self.remote)
+        self.assertIn('id="p:neighbour"', self.remote)
+
+    def test_remote_recording_added_during_local_text_edit_is_merged(self):
+        self.audio_page('<p id="p:text">Original text</p>')
+        loaded = self.load()
+        attachment = self.recording()
+        self.audio_page('<p id="p:text">Original text</p>' + attachment)
+        result = self.save(note("Edited text"), loaded["view"])
+        self.assertTrue(result.get("ok"), result)
+        self.assertIn("<audio", result["body"])
+        self.assertEqual([op["target"] for op in self.operations()], ["p:text"])
+        self.assertIn('id="object:phone"', self.remote)
+
+    def test_recording_deletion_is_explicit_and_preserves_neighbour(self):
+        self.audio_page(self.recording() + '<p id="p:keep">Keep</p>')
+        loaded = self.load()
+        result = self.save(note("Keep"), loaded["view"])
+        self.assertTrue(result.get("ok"), result)
+        self.assertEqual([op["target"] for op in self.operations()], ["object:phone"])
+        self.assertNotIn("<object", self.remote)
+        self.assertIn('id="p:keep"', self.remote)
+
+    def test_title_edit_does_not_touch_recording(self):
+        self.audio_page(self.recording())
+        loaded = self.load()
+        result = self.save(note(loaded["body"], "New title"), loaded["view"])
+        self.assertTrue(result.get("ok"), result)
+        self.assertEqual([op["target"] for op in self.operations()], ["title"])
+        self.assertIn('id="object:phone"', self.remote)
+
+    def test_inline_text_edit_recreates_recording_with_unchanged_bytes(self):
+        self.audio_page('<p id="p:inline">Before ' + self.recording() + ' after</p><p id="p:keep">Keep</p>')
+        loaded = self.load()
+        with patch.object(onenote, "patch_page", side_effect=self.upload_audio_patch):
+            result = self.save(note(loaded["body"].replace("Before", "Edited before")), loaded["view"])
+        self.assertTrue(result.get("ok"), result)
+        self.assertEqual([(mime, data) for _, mime, data in self.audio_uploads], [("video/3gpp", b"synthetic audio phone")])
+        self.assertIn('id="p:keep"', self.remote)
+        self.assertEqual(len(list(ET.fromstring(self.remote).iter("object"))), 1)
+        self.assertEqual(onenote.normalize_note(self.load()), onenote.normalize_note(result))
+        loaded = self.load()
+        self.calls.clear()
+        result = self.save(note(loaded["body"].replace("Keep", "Keep edited")), loaded["view"])
+        self.assertTrue(result.get("ok"), result)
+        self.assertEqual(len(self.operations()), 1)
+        self.assertNotIn("<object", self.operations()[0]["content"])
+
     def test_edit_beside_normalized_layout_preserves_original_elements(self):
         image = Path(onenote.ONENOTE_IMG_DIR) / "layout-image"
         image.parent.mkdir(parents=True, exist_ok=True)
@@ -410,11 +733,17 @@ class SaveTests(unittest.TestCase):
         self.refuse_body = False
         self.refuse_paragraphs = False
         self.write_ids = 0
+        self.audio_paths = {}
+        self.audio_uploads = []
+        self.generate_object_ids = True
         self.addCleanup(patch.stopall)
         self.raw_transport = onenote.graph_raw
         patch.object(onenote, "merge_store", self.store).start()
         patch.object(onenote, "graph_raw", self.graph).start()
         patch.object(onenote, "graph", side_effect=AssertionError("unexpected network request")).start()
+        patch.object(onenote, "ONENOTE_AUDIO_DIR", str(Path(self.temp.name) / "audio")).start()
+        patch.object(onenote, "AUDIO_INDEX", str(Path(self.temp.name) / "audio/index.json")).start()
+        patch.object(onenote, "cached_audio", side_effect=lambda src, title: self.audio_paths.get(src)).start()
 
     def store(self, page_id="page"):
         return MergeStore(self.temp.name, "onenote", "test-account", page_id,
@@ -441,22 +770,29 @@ class SaveTests(unittest.TestCase):
                     for replacement in replacements:
                         for child in replacement.iter():
                             self.write_ids += 1
-                            child.set("id", "%s:written%d" % (child.tag, self.write_ids))
+                            if child.tag != "object" or self.generate_object_ids:
+                                child.set("id", "%s:written%d" % (child.tag, self.write_ids))
                     if operation["target"] == "body":
                         self.assertEqual(operation["action"], "append", "a save must never replace the page body")
                         body = current.find("body")
                         outer = body.find("div")
                         (outer if outer is not None else body).extend(replacements)
                         continue
+                    identifier = operation["target"]
+                    attribute = "data-id" if identifier.startswith("#") else "id"
+                    value = identifier[1:] if attribute == "data-id" else identifier
                     found = [(parent, child) for parent in current.iter() for child in parent
-                             if child.get("id") == operation["target"]]
+                             if child.get(attribute) == value]
                     self.assertEqual(len(found), 1, "PATCH targeted a missing or repeated generated ID")
                     parent, child = found[0]
                     index = list(parent).index(child)
                     if operation["action"] == "replace":
                         parent[index:index + 1] = replacements
                     elif operation["action"] == "append":
-                        child.extend(replacements)
+                        if operation.get("position", "after") == "before":
+                            child[0:0] = replacements
+                        else:
+                            child.extend(replacements)
                     else:
                         self.assertEqual(operation["action"], "insert")
                         index += int(operation.get("position", "after") == "after")
@@ -474,13 +810,13 @@ class SaveTests(unittest.TestCase):
                 pass
         return json.loads(output.getvalue())
 
-    def load(self):
-        return self.invoke(onenote.cmd_onenote_page, "page")
+    def load(self, page_id="page"):
+        return self.invoke(onenote.cmd_onenote_page, page_id)
 
-    def save(self, value, view, resolution=None):
+    def save(self, value, view, resolution=None, page_id="page"):
         path = Path(self.temp.name) / "payload.json"
         path.write_text(json.dumps(dict(value, view=view, resolution=resolution)))
-        return self.invoke(onenote.cmd_onenote_update, "page", str(path))
+        return self.invoke(onenote.cmd_onenote_update, page_id, str(path))
 
     @contextlib.contextmanager
     def http_transport(self, endpoint):

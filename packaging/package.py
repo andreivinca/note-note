@@ -96,7 +96,7 @@ def main():
             "Run `./bin/note-note` from this directory, or copy `bin/` and `share/`\n"
             "into the same installation prefix, such as `~/.local/`. Keep both together.\n\n"
             "This native build uses your system libraries. It needs a compatible\n"
-            "Qt runtime (Quick, Quick Controls 2, Network, DBus, SVG and Wayland/X11),\n"
+            "Qt runtime (Quick, Quick Controls 2, Network, DBus, Multimedia, SVG and Wayland/X11),\n"
             "Python 3.9+ and inotify-tools. ImageMagick is optional for large images.\n"
             "It is not a self-contained cross-distribution bundle.\n\n"
             f"Sources: https://github.com/andreivinca/note-note/tree/{commit}\n")
@@ -114,7 +114,7 @@ def main():
         (plugin / "INSTALL.md").write_text(
             "# Note Note Omarchy plugin\n\n"
             f"Release {version}. Requires Omarchy 4 / Quickshell, Python 3.9+,\n"
-            "inotify-tools and wl-clipboard.\n\n"
+            "inotify-tools, wl-clipboard and the Qt Multimedia QML module.\n\n"
             f"Place this directory at `~/.config/omarchy/plugins/{manifest['id']}`\n"
             f"and enable it with `omarchy plugin enable {manifest['id']}`.\n\n"
             "The archive contains the shared application and Omarchy host, without\n"
