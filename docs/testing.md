@@ -145,6 +145,7 @@ Qt 6 runner — plain `qml` is Qt 5 and will silently load nothing.
 ```bash
 python3 tests/test_regressions.py
 python3 tests/transition_selftest.py [--host]
+python3 tests/transition_selftest.py --notes [--standalone]  # note sessions and OneNote mutations only
 ```
 
 The Python cases verify complete UTF-8 reads, explicit failures, atomic write
@@ -155,6 +156,17 @@ The QML cases drive the actual editor, note-session controller, provider
 lifecycle, process runner and local provider. They control callback order to
 check A → B → A loads, stale formatting/paste callbacks, save failures after
 selection changes, failed deletes, and settings changes while writes drain.
+OneNote creation cases open editable drafts before any network response,
+append several pages in creation order, retain them during listings, and
+transfer early saves and conversions to the permanent page identity. They
+also check stable positions after sync, retained content on creation failure,
+and deletion while a page is being created. A sign-out that cancels a
+creation keeps the draft reachable and deletable, so it never blocks closing.
+Optimistic delete cases remove rows and release the editor before the remote
+response, keep them hidden during refreshes, and restore failed or cancelled
+deletes in their original positions. They retain unsaved text and its editing
+baseline and cover multiple deletions with responses arriving out of order,
+pages not yet listed, and each failure being reported exactly once.
 Real temporary files cover image-save ordering, confirmed mutations, byte
 limits and external inotify events immediately after the provider's own saves.
 Editing-tool cases add an extra QML file to an isolated tool directory and

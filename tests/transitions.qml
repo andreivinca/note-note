@@ -369,9 +369,11 @@ ShellRoot {
     provider.loads[7]({ body: "B" })
     check("reload and selection share the same generation guard", document.body === "B")
     session.onEdited()
+    test.sessionReports = []
     session.remove("test:B", function(result) {})
     provider.deletions.shift()({ error: "delete refused" })
     check("failed delete preserves the editable unsaved note", session.dirty && document.body === "B" && !document.readOnly)
+    check("the session reports a failed delete exactly once", test.sessionReports.join("|") === "Test: delete refused")
   }
 
   QtObject {
@@ -908,6 +910,38 @@ ShellRoot {
     function cancelOwner(owner) {}
   }
   Component { id: oneNoteFactory; OneNote.Provider {} }
+  Component {
+    id: creatingOneNoteFactory
+    OneNote.Provider {
+      property var commands: []
+      function runScript(args, payload, ctx) {
+        commands.push({ args: args, payload: payload, context: ctx })
+      }
+    }
+  }
+  Notes.NoteSession {
+    id: creationSession
+    property var source: null
+    property var reports: []
+    editor: document
+    providerFor: function(path) { return creationSession.source }
+    versionFor: function(path) { return "" }
+    report: function(message) { creationSession.reports.push(message) }
+  }
+  // An account of its own, so signing it out reaches no other provider.
+  QtObject {
+    id: creationAccount
+    property bool configured: true
+    property bool signedIn: true
+    property bool loggingIn: false
+    property string account: "test"
+    property string cacheSession: ""
+    property var env: ({})
+    signal updated()
+    signal signedOut()
+    signal statusFailed(string error)
+    function hasScope(scope) { return scope === "Notes.ReadWrite" }
+  }
   Component { id: localFactory; Local.Provider {} }
   Component { id: stickyFactory; Sticky.Provider {} }
   Component { id: notionFactory; Notion.Provider {} }
@@ -1275,15 +1309,376 @@ ShellRoot {
     oneNote.noteChanged.disconnect(onChanged)
     oneNote.rq = null
   }
+  function oneNoteCreationCases() {
+    var source = creatingOneNoteFactory.createObject(test, { ms: oneNoteAccount })
+    creationSession.source = source
+    var deletionOutcomes = {}, statuses = []
+    source.statusRequested.connect(function(text) { statuses.push(text) })
+    source.notePathChanged.connect(function(previous, next, view) {
+      creationSession.replacePath(previous, next, view)
+    })
+    source.noteDeletionFinished.connect(function(path, result) {
+      deletionOutcomes[path] = result
+      creationSession.finishDeletion(path, result)
+    })
+    source.onSections = [{ id: "s", name: "Section", notebookId: "n", notebook: "Notebook" },
+                         { id: "other", name: "Other", notebookId: "n", notebook: "Notebook" }]
+    var original = [{ id: "a", sectionId: "s", title: "A" }, { id: "b", sectionId: "s", title: "B" },
+                    { id: "z", sectionId: "other", title: "Z" }]
+    source.pages = original
+    source.rq = mergeLane
+    mergeLane.jobs.shift().settled({ sections: source.onSections, pages: original })
+    var first = "", second = "", replies = 0
+    source.create("section:s", function(result) {
+      first = result.path
+      replies++
+    })
+    source.create("section:s", function(result) {
+      second = result.path
+      replies++
+    })
+    check("OneNote creates two distinct editable drafts before any network response",
+          replies === 2 && first && second && first !== second && mergeLane.jobs.length === 2)
+    var firstId = source.idOf(first), secondId = source.idOf(second)
+    check("OneNote drafts append at the end of their section in creation order",
+          source.pages.map(function(page) { return page.id }).join(",") === "a,b," + firstId + "," + secondId + ",z")
+    check("OneNote creation expands its destination immediately",
+          source.expanded.indexOf("s") >= 0 && source.expanded.indexOf("n") >= 0)
+    source.applyInventory({ sections: source.onSections, pages: original })
+    check("a listing during creation retains both local drafts",
+          source.pages.map(function(page) { return page.id }).join(",") === "a,b," + firstId + "," + secondId + ",z")
+    creationSession.selectPath(first)
+    check("a new OneNote draft opens without a remote page read",
+          !creationSession.loadingNote && !document.readOnly && mergeLane.jobs.length === 2)
+    document.title = "Typed immediately"
+    document.body = "early content"
+    creationSession.onEdited()
+    creationSession.flushSave()
+    document.conversions.shift()("early content", true)
+    check("typing before creation retains the draft and waits to send its save",
+          source.bodies[firstId].body === "early content" && creationSession.saveInFlight(first) && mergeLane.jobs.length === 2)
+    creationSession.onEdited()
+    creationSession.flushSave()
+    document.conversions.shift()("early content", true)
+    check("autosaves during a slow creation retain only the latest document",
+          source.pendingPages[firstId].operations.length === 1 && creationSession.savesPending[first] === 1)
+    var firstCreate = mergeLane.jobs.shift()
+    var secondCreate = mergeLane.jobs.shift()
+    check("remote creates share a section key to preserve their order",
+          firstCreate.options.key === secondCreate.options.key && firstCreate.options.mode === "append")
+    var sequence = creationSession.noteLoadSeq
+    source.lastPages = { n: first }
+    firstCreate.settled({ page: { id: "real-first", sectionId: "s", title: "", modified: "1" },
+                          note: { title: "", body: "", view: "first-base" }, pageListSerial: 2 })
+    check("remote creation transfers identity without reloading the editor",
+          creationSession.currentPath === "onenote:real-first" && creationSession.noteLoadSeq === sequence &&
+          document.title === "Typed immediately" && document.body === "early content" &&
+          creationSession.editingView === "first-base")
+    check("accepted saves and notebook memory follow the permanent page identity",
+          creationSession.saveInFlight("onenote:real-first") && creationSession.drafts["onenote:real-first"] &&
+          !creationSession.drafts[first] && source.lastPages.n === "onenote:real-first")
+    var firstSave = mergeLane.jobs.shift()
+    firstSave.start({ done: function(result) {} })
+    check("the first save uses the remote ID and the new page's merge baseline",
+          source.commands[0].args[0] === "update" && source.commands[0].args[1] === "real-first" &&
+          JSON.parse(source.commands[0].payload).view === "first-base" &&
+          JSON.parse(source.commands[0].payload).body === "early content")
+    firstSave.settled({ title: "Typed immediately", body: "early content", view: "first-saved" })
+    check("a save accepted under a draft ID finishes under the permanent ID",
+          !creationSession.busy && !creationSession.drafts["onenote:real-first"])
+
+    creationSession.selectPath(second)
+    document.body = "conversion still running"
+    creationSession.onEdited()
+    creationSession.flushSave()
+    secondCreate.settled({ page: { id: "real-second", sectionId: "s", title: "", modified: "2" },
+                           note: { title: "", body: "", view: "second-base" }, pageListSerial: 3 })
+    document.conversions.shift()("conversion still running", true)
+    var lateSave = mergeLane.jobs.shift()
+    lateSave.start({ done: function(result) {} })
+    check("a conversion finishing after creation saves the new identity and baseline",
+          source.commands[1].args[1] === "real-second" && JSON.parse(source.commands[1].payload).view === "second-base")
+    lateSave.settled({ title: "", body: "conversion still running", view: "second-saved" })
+    var synced = [original[0], original[1], { id: "real-first", sectionId: "s", title: "Typed immediately", modified: "1" },
+                  { id: "real-second", sectionId: "s", title: "", modified: "2" }, original[2]]
+    source.applyInventory({ sections: source.onSections, pages: original, pageListSerial: 1 })
+    check("an obsolete listing cannot drop newly created pages", source.pages.length === 5)
+    source.applyInventory({ sections: source.onSections, pages: synced, pageListSerial: 3 })
+    check("OneNote page positions stay the same after sync",
+          source.pages.map(function(page) { return page.id }).join(",") === "a,b,real-first,real-second,z")
+
+    var failed = ""
+    source.create("section:s", function(result) { failed = result.path })
+    creationSession.selectPath(failed)
+    document.body = "keep this on failure"
+    creationSession.onEdited()
+    creationSession.flushSave()
+    document.conversions.shift()(document.body, true)
+    statuses = []
+    creationSession.reports = []
+    mergeLane.jobs.shift().settled({ error: "uncertain network response" })
+    check("failed creation keeps typed content editable and reports an unsaved draft",
+          document.body === "keep this on failure" && !document.readOnly && creationSession.dirty &&
+          !!creationSession.drafts[failed].error && !!source.pageAt(failed))
+    check("a failed creation with a waiting save is reported once, by that save",
+          statuses.length === 0 && creationSession.reports.length === 1 &&
+          creationSession.reports[0] === creationSession.drafts[failed].error &&
+          creationSession.reports[0].indexOf("uncertain network response") >= 0 &&
+          creationSession.reports[0].indexOf("delete this draft") >= 0)
+    creationSession.flushSave()
+    document.conversions.shift()(document.body, true)
+    check("a failed creation is never blindly replayed by autosave",
+          mergeLane.jobs.length === 0 && creationSession.dirty && !creationSession.busy)
+    var removed = null
+    creationSession.remove(failed, function(result) { removed = result })
+    check("a failed local draft can be deleted without contacting Microsoft", removed && !removed.error && !source.pageAt(failed))
+    creationSession.selectPath("")
+
+    var unattended = ""
+    source.create("section:s", function(result) { unattended = result.path })
+    statuses = []
+    mergeLane.jobs.shift().settled({ error: "throttled" })
+    check("a failed creation nobody waits on is said once on the status line",
+          statuses.length === 1 && statuses[0].indexOf("throttled") >= 0)
+    source.remove(unattended, function(result) {})
+
+    var deleting = "", deleteResult = null
+    source.create("section:s", function(result) { deleting = result.path })
+    source.remove(deleting, function(result) { deleteResult = result })
+    check("a draft disappears immediately when deleted during creation",
+          deleteResult.pending && source.sections[0].notes.every(function(note) { return note.path !== deleting }))
+    mergeLane.jobs.shift().settled(null)
+    check("deleting an unsent creation removes its draft and settles the delete",
+          deletionOutcomes[deleting] && !deletionOutcomes[deleting].error && !source.pageAt(deleting))
+
+    var uncertain = "", uncertainDelete = null
+    source.create("section:s", function(result) { uncertain = result.path })
+    source.remove(uncertain, function(result) { uncertainDelete = result })
+    mergeLane.jobs.shift().settled({ error: "Microsoft may have accepted the request" })
+    check("an uncertain creation cannot be reported as a successful remote delete",
+          uncertainDelete.pending && !!deletionOutcomes[uncertain].error && !!source.pageAt(uncertain) &&
+          source.sections[0].notes.some(function(note) { return note.path === uncertain }))
+    source.remove(uncertain, function(result) {})
+
+    var racing = ""
+    source.create("section:s", function(result) { racing = result.path })
+    var racingCreate = mergeLane.jobs.shift()
+    var deletion = null, discardedSave = 0
+    source.save(racing, "Title", "text before delete", function(result) { discardedSave++ }, {})
+    creationSession.selectPath(racing)
+    creationSession.remove(racing, function(result) {
+      deletion = result
+      creationSession.selectPath("")
+    })
+    racingCreate.settled({ page: { id: "real-delete", sectionId: "s", title: "" },
+                          note: { title: "", body: "", view: "delete-base" }, pageListSerial: 4 })
+    var queuedDelete = mergeLane.jobs.shift()
+    check("deleting during creation discards deferred saves and deletes the permanent page",
+          discardedSave === 1 && queuedDelete.options.key === "page:real-delete" &&
+          queuedDelete.options.mode === "replace" && mergeLane.jobs.length === 0)
+    check("a pending deletion follows the permanent identity without locking the editor",
+          !!creationSession.pendingDeletions["onenote:real-delete"] && !creationSession.locked)
+    queuedDelete.settled({ pageListSerial: 5 })
+    check("a draft deleted during creation cannot reappear after sync",
+          deletion.pending && !deletionOutcomes["onenote:real-delete"].error && !source.pageAt(racing) && mergeLane.jobs.length === 0)
+    check("the permanent delete releases its provisional recovery context", !creationSession.busy)
+
+    creationSession.editor = editor
+    var editorDraft = ""
+    source.create("section:s", function(result) { editorDraft = result.path })
+    creationSession.selectPath(editorDraft)
+    editor.insertFormattedText(0, 0, "immediate typing", {})
+    editor.setCursorPosition(5)
+    var documentHtml = editor.documentHtml(), noteToken = editor.noteToken
+    mergeLane.jobs.shift().settled({ page: { id: "real-editor", sectionId: "s", title: "" },
+                                    note: { title: "", body: "", view: "editor-base" }, pageListSerial: 6 })
+    check("the real editor retains its document and caret when creation finishes",
+          editor.plainText() === "immediate typing" && editor.documentHtml() === documentHtml &&
+          editor.cursorPosition() === 5 && editor.noteToken === noteToken)
+    editor.undo()
+    check("typing before remote creation remains undoable", editor.plainText() === "")
+    editor.redo()
+    check("typing before remote creation remains redoable", editor.plainText() === "immediate typing")
+    creationSession.selectPath("")
+    creationSession.editor = document
+    source.destroy()
+    creationSession.source = null
+  }
+
+  function oneNoteDeletionCases() {
+    var source = creatingOneNoteFactory.createObject(test, { ms: oneNoteAccount })
+    creationSession.source = source
+    var completions = [], statuses = []
+    source.statusRequested.connect(function(text) { statuses.push(text) })
+    source.noteDeletionFinished.connect(function(path, result) {
+      completions.push({ path: path, result: result })
+      creationSession.finishDeletion(path, result)
+    })
+    source.onSections = [{ id: "s", name: "Section", notebookId: "n", notebook: "Notebook" },
+                         { id: "other", name: "Other", notebookId: "n", notebook: "Notebook" }]
+    source.expanded = ["s", "other"]
+    var pages = ["a", "b", "c", "d"].map(function(id) {
+      return { id: id, title: id.toUpperCase(), sectionId: "s", modified: "1" }
+    }).concat([{ id: "x", title: "X", sectionId: "other", modified: "1" }])
+    source.pages = pages
+    source.rq = mergeLane
+    mergeLane.jobs.shift().settled({ sections: source.onSections, pages: pages })
+    pages.forEach(function(page) {
+      source.cacheBody(source.pathOf(page.id), { title: page.title, body: "body " + page.id,
+                       view: page.id + "-base", editable: true })
+    })
+    creationSession.selectPath("onenote:b")
+    document.title = "Unsaved title"
+    document.body = "unsaved text before deletion"
+    creationSession.onEdited()
+    var accepted = null, replies = 0
+    creationSession.remove("onenote:b", function(result) {
+      accepted = result
+      replies++
+      creationSession.selectPath("onenote:c")
+    })
+    check("OneNote deletion removes the row and opens the next note immediately",
+          accepted.pending && replies === 1 && creationSession.currentPath === "onenote:c" &&
+          source.sections[0].notes.map(function(note) { return note.path }).join(",") === "onenote:a,onenote:c,onenote:d,onenote:x")
+    check("remote deletion drains in the background while the editor stays usable",
+          creationSession.busy && !creationSession.locked && !document.readOnly && document.body === "body c" &&
+          mergeLane.jobs.length === 1 && mergeLane.jobs[0].options.flush)
+    var duplicate = null
+    creationSession.reports = []
+    creationSession.remove("onenote:b", function(result) { duplicate = result })
+    check("a repeated delete cannot replace the original recovery document",
+          !!duplicate.error && creationSession.pendingDeletions["onenote:b"].document.body === "unsaved text before deletion" &&
+          mergeLane.jobs.length === 1)
+    check("the session reports a refused delete once",
+          creationSession.reports.join("|") === duplicate.error)
+    source.applyInventory({ sections: source.onSections, pages: pages })
+    source.rebuild()
+    check("refreshing during deletion does not bring its row back",
+          source.sections[0].notes.every(function(note) { return note.path !== "onenote:b" }))
+    statuses = []
+    creationSession.reports = []
+    mergeLane.jobs.shift().settled({ error: "delete refused" })
+    check("a failed remote delete is reported once, by the session",
+          statuses.length === 0 && creationSession.reports.join("|") === "OneNote: delete refused")
+    check("a failed delete restores its original position without interrupting the current note",
+          source.sections[0].notes.map(function(note) { return note.path }).join(",") === "onenote:a,onenote:b,onenote:c,onenote:d,onenote:x" &&
+          creationSession.currentPath === "onenote:c" && document.body === "body c" && replies === 1 && !creationSession.busy)
+    check("failed deletion retains the unsaved document and its editing baseline",
+          creationSession.drafts["onenote:b"].document.body === "unsaved text before deletion" &&
+          creationSession.drafts["onenote:b"].document.title === "Unsaved title" &&
+          creationSession.drafts["onenote:b"].view === "b-base" && !!creationSession.failureFor(["onenote"]))
+    creationSession.selectPath("onenote:b")
+    check("reopening a restored note shows its unsaved text for editing",
+          creationSession.dirty && !document.readOnly && document.body === "unsaved text before deletion")
+    creationSession.flushSave()
+    document.conversions.shift()(document.body, true)
+    mergeLane.jobs.shift().settled({ title: document.title, body: document.body, view: "b-saved" })
+    check("the restored note can be saved normally", !creationSession.busy && !creationSession.drafts["onenote:b"])
+    creationSession.remove("onenote:b", function(result) {
+      creationSession.selectPath("onenote:a")
+    })
+    source.applyInventory({ sections: source.onSections, pages: pages.filter(function(page) { return page.id !== "b" }) })
+    mergeLane.jobs.shift().settled({ pageListSerial: 1 })
+    source.applyInventory({ sections: source.onSections, pages: pages })
+    source.rebuild()
+    check("a successful deletion stays removed through stale listings and clears recovery state",
+          !source.pageAt("onenote:b") && !source.bodies.b && !creationSession.busy &&
+          !creationSession.pendingDeletions["onenote:b"])
+
+    creationSession.remove("onenote:a", function(result) {
+      creationSession.selectPath("onenote:d")
+    })
+    creationSession.remove("onenote:c", function(result) {})
+    var deleteA = mergeLane.jobs.shift(), deleteC = mergeLane.jobs.shift()
+    source.applyInventory({ sections: source.onSections, pages: [pages[3], pages[4]], pageListSerial: 1 })
+    source.rebuild()
+    check("several pending deletes remain hidden even when a listing omits them",
+          source.sections[0].notes.map(function(note) { return note.path }).join(",") === "onenote:d,onenote:x")
+    deleteC.settled({ error: "C refused" })
+    deleteA.settled({ error: "A refused" })
+    check("delete failures arriving out of order restore the original section order",
+          source.sections[0].notes.map(function(note) { return note.path }).join(",") === "onenote:a,onenote:c,onenote:d,onenote:x" &&
+          creationSession.currentPath === "onenote:d" && !creationSession.busy)
+    var cancelled = null
+    source.remove("onenote:c", function(result) { cancelled = result })
+    mergeLane.jobs.shift().settled(null)
+    check("a cancelled remote delete restores the note and reports failure",
+          cancelled.pending && !!completions[completions.length - 1].result.error &&
+          source.sections[0].notes.some(function(note) { return note.path === "onenote:c" }))
+    check("each remote deletion has exactly one completion", completions.length === 5)
+    var unlisted = null
+    source.remove("onenote:unlisted", function(result) { unlisted = result })
+    var unlistedDelete = mergeLane.jobs.shift()
+    check("a page the listing has not reached is still deleted",
+          unlisted.pending && unlistedDelete.options.key === "page:unlisted")
+    unlistedDelete.settled({ error: "not found" })
+    check("a failed delete of an unlisted page restores no row",
+          !source.pageAt("onenote:unlisted") && completions[completions.length - 1].result.error === "not found")
+    creationSession.selectPath("")
+    creationSession.source = null
+    source.destroy()
+  }
+
+  // A sign-out cancels a queued creation. The provisional page stays, so
+  // the unsaved text the host keeps for it can still be reached and deleted
+  // — otherwise it would refuse every close with no way to clear it.
+  function oneNoteAccountChangeCases() {
+    var source = creatingOneNoteFactory.createObject(test, { ms: creationAccount })
+    creationSession.source = source
+    source.noteDeletionFinished.connect(function(path, result) {
+      creationSession.finishDeletion(path, result)
+    })
+    source.onSections = [{ id: "s", name: "Section", notebookId: "n", notebook: "Notebook" }]
+    var listed = [{ id: "a", sectionId: "s", title: "A" }]
+    source.pages = listed
+    source.rq = mergeLane
+    mergeLane.jobs.shift().settled({ sections: source.onSections, pages: listed })
+    var draft = ""
+    source.create("section:s", function(result) { draft = result.path })
+    var creation = mergeLane.jobs.shift()
+    creationSession.selectPath(draft)
+    document.body = "typed before signing out"
+    creationSession.onEdited()
+    creationSession.flushSave()
+    document.conversions.shift()(document.body, true)
+    creationAccount.signedIn = false
+    creationAccount.signedOut()
+    creation.settled(null)
+    check("signing out keeps a provisional page and its unsaved text reachable",
+          source.pages.length === 1 && !!source.pageAt(draft) && !!creationSession.drafts[draft].error &&
+          document.body === "typed before signing out")
+    var discarded = null
+    creationSession.remove(draft, function(result) { discarded = result })
+    check("a draft whose creation the sign-out cancelled can still be deleted",
+          discarded && !discarded.error && !source.pageAt(draft) && !creationSession.busy &&
+          !creationSession.failureFor(["onenote"]))
+    creationSession.selectPath("")
+    creationSession.source = null
+    source.destroy()
+  }
+
   Component.onCompleted: {
     backend.install()
     try {
+      if (Platform.env("NOTE_NOTE_TEST_NOTES_ONLY")) {
+        sessionCases()
+        mergeCases()
+        oneNoteCases()
+        oneNoteCreationCases()
+        oneNoteDeletionCases()
+        oneNoteAccountChangeCases()
+        report()
+        return
+      }
       editorCases()
       sessionCases()
       mergeCases()
       lifecycleCases()
       pureCases()
       oneNoteCases()
+      oneNoteCreationCases()
+      oneNoteDeletionCases()
+      oneNoteAccountChangeCases()
       orderCases()
       listingRaceCases()
       laneProviderCases()

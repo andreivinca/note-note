@@ -119,6 +119,7 @@ def main():
                    NOTE_NOTE_TEST_INVALID_TOOLS=invalid_tools.as_uri(),
                    NOTE_NOTE_TEST_PLUGIN_TOOLS=plugin_tools.as_uri(),
                    NOTE_NOTE_TEST_TOOLS_ONLY="1" if "--tools" in sys.argv else "",
+                   NOTE_NOTE_TEST_NOTES_ONLY="1" if "--notes" in sys.argv else "",
                    NOTE_NOTE_TEST_STANDALONE="1" if standalone else "",
                    QT_QUICK_BACKEND="software",
                    QT_QPA_PLATFORM="offscreen", QT_QPA_PLATFORMTHEME="generic", QT_FORCE_STDERR_LOGGING="1")

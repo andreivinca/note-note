@@ -60,20 +60,45 @@ LaneProvider {
   // Graph does not reliably bump a page's lastModifiedDateTime, so the open
   // page is re-read on poll and reported when its text differs.
   signal noteChanged(string path)
+  signal notePathChanged(string previous, string next, var view)
+  signal noteDeletionFinished(string path, var result)
   signal searchChanged()
 
   property var onSections: []    // [{ id, name, notebook, notebookId }]
   property var onNotebooks: []
+  // Canonical page order includes pending deletions; visible rows hide them
+  // until the remote result settles, so rollback retains their positions.
   property var pages: []         // [{ id, sectionId, title, modified }]
   property var bodies: ({})      // id -> cached content and Python view token
   property var loadVersions: ({})
   property var saveVersions: ({})
+  // Provisional pages and pending deletes outlive an account change: each
+  // settles through the lane, and a failed creation keeps the user's text
+  // until they delete it. These three maps are replaced, never mutated.
+  property var pendingPages: ({})  // draft id -> page, deferred operations and create result
+  property var pageAliases: ({})   // draft id -> Graph id, for callbacks captured before creation
+  property var pendingDeletes: ({}) // page id -> hidden row and its original order
+  property int nextDraft: 0
   property var expanded: []      // notebook/section ids the user opened
   property bool searchInventoryReady: false
   property bool searchInventoryComplete: false
   readonly property bool ready: ms && ms.signedIn && ms.hasScope("Notes.ReadWrite")
 
-  function idOf(path) { return path.substring(root.id.length + 1) }
+  function withEntry(map, key, value) {
+    var next = Object.assign({}, map)
+    next[key] = value
+    return next
+  }
+  function withoutEntry(map, key) {
+    var next = Object.assign({}, map)
+    delete next[key]
+    return next
+  }
+
+  function idOf(path) {
+    var id = path.substring(root.id.length + 1)
+    return root.pageAliases[id] || id
+  }
   function pathOf(id) { return root.id + ":" + id }
   function pageAt(path) {
     var id = idOf(path)
@@ -160,7 +185,7 @@ LaneProvider {
       }
       for (var p = 0; p < root.pages.length; p++) {
         var pg = root.pages[p]
-        if (pg.sectionId !== sec.id) {
+        if (pg.sectionId !== sec.id || root.pendingDeletes[pg.id]) {
           continue
         }
         rows.push({ kind: "note", path: pathOf(pg.id), title: pg.title, preview: "", level: level + 1, fixed: true, version: pg.modified || "", modified: pg.modified || "" })
@@ -194,13 +219,14 @@ LaneProvider {
   // count on the tab) must see the closed ones too.
   function rebuild() {
     var account = accountRows(), books = account ? [] : bookList()
+    var visiblePages = root.pages.filter(function(page) { return !root.pendingDeletes[page.id] })
     if (root.notebookTabs && books.length > 0) {
       // A tab per notebook. No colour: each takes a pastel from its own
       // name, which is what tells Work from Personal apart (the logo keeps
       // them OneNote's); the account footer appears on every tab, since any of
       // them is equally the account's.
       root.sections = books.map(function(b) {
-        var pgs = root.pages.filter(function(p) { var sec = root.sectionAt(p.sectionId); return sec && sec.notebookId === b.id })
+        var pgs = visiblePages.filter(function(p) { var sec = root.sectionAt(p.sectionId); return sec && sec.notebookId === b.id })
         return { key: b.id, name: b.name, count: pgs.length, notes: noteList(pgs),
                  rows: bookRows(b.id, 0), footerActions: accountActions(b.id) }
       })
@@ -227,8 +253,8 @@ LaneProvider {
           : { kind: "action", path: "refresh", title: root.listingError ? "Could not load notebooks — retry" : "No notebooks found — refresh", icon: "󰑐" })
       }
     }
-    root.sections = [{ key: "onenote", name: "OneNote", color: "#7719AA", count: root.pages.length,
-                       notes: noteList(root.pages), rows: rows, footerActions: account ? [] : accountActions() }]
+    root.sections = [{ key: "onenote", name: "OneNote", color: "#7719AA", count: visiblePages.length,
+                       notes: noteList(visiblePages), rows: rows, footerActions: account ? [] : accountActions() }]
     root.updated()
   }
 
@@ -571,7 +597,14 @@ LaneProvider {
       root.onSections = result.sections
     }
     if (Array.isArray(result.pages)) {
-      root.pages = result.pages
+      var pages = result.pages
+      for (var id in root.pendingPages) {
+        pages = root.appendPage(pages, root.pendingPages[id].page)
+      }
+      for (var deletedId in root.pendingDeletes) {
+        pages = root.restorePage(pages, root.pendingDeletes[deletedId])
+      }
+      root.pages = pages
       root.searchInventoryReady = result.inventoryReady !== false
       root.searchInventoryComplete = result.inventoryComplete === true
     }
@@ -660,7 +693,7 @@ LaneProvider {
     inventoryReady: root.searchInventoryReady
     inventoryComplete: root.searchInventoryComplete
     session: root.ms ? root.ms.cacheSession : ""
-    pages: root.pages
+    pages: root.pages.filter(function(page) { return !root.pendingPages[page.id] && !root.pendingDeletes[page.id] })
     queue: root.rq
     run: root.runLocal
     preferredSections: {
@@ -704,8 +737,7 @@ LaneProvider {
       root.searchInventoryComplete = false
       root.onSections = []
       root.onNotebooks = []
-      root.pages = []
-      root.bodies = ({})
+      root.clearListedPages()
       root.loadVersions = ({})
       root.saveVersions = ({})
     }
@@ -713,8 +745,7 @@ LaneProvider {
       root.supersedeOrderPass()
       root.onSections = []
       root.onNotebooks = []
-      root.pages = []
-      root.bodies = ({})
+      root.clearListedPages()
       root.loadVersions = ({})
       root.clearCache()
       // Nothing queued belongs to the account that just left. The rate
@@ -731,6 +762,21 @@ LaneProvider {
     function onUpdated() {
       root.refresh()
     }
+  }
+
+  // What the account listed goes with the account. A provisional page stays,
+  // with its text: the host may hold unsaved edits for its path, and only
+  // this row lets the user reach them. It reappears in its section when that
+  // is listed again; a queued creation cancelled by a sign-out fails it.
+  function clearListedPages() {
+    var bodies = {}
+    for (var id in root.pendingPages) {
+      bodies[id] = root.bodies[id]
+    }
+    root.pages = root.pages.filter(function(page) {
+      return !!root.pendingPages[page.id]
+    })
+    root.bodies = bodies
   }
 
   // ── pages ───────────────────────────────────────────────────────────
@@ -752,6 +798,14 @@ LaneProvider {
 
   function load(path, cb) {
     var id = idOf(path), cached = root.bodies[id], pg = pageAt(path)
+    if (root.pendingDeletes[id]) {
+      cb({ error: "The note is being deleted." })
+      return
+    }
+    if (root.pendingPages[id]) {
+      cb(cached)
+      return
+    }
     if (cached && cached.view && (!pg || cached.version === (pg.modified || ""))) {
       cb(root.cacheBody(path, cached))
       return
@@ -799,12 +853,36 @@ LaneProvider {
   // out loud (business-requirements.md), never silently.
   function save(path, title, body, cb, options) {
     var id = idOf(path)
+    if (root.pendingDeletes[id]) {
+      cb({ error: "The note is being deleted." })
+      return
+    }
     if (root.noteReadOnly(path)) {
       cb({ error: "This notebook is shared with you as read-only." })
       return
     }
     if (!root.rq) {
       cb({ error: "not ready" })
+      return
+    }
+    var pending = root.pendingPages[id]
+    if (pending) {
+      if (pending.operations.some(function(operation) { return operation.remove })) {
+        cb({ error: "The note is being deleted." })
+        return
+      }
+      pending.page = Object.assign({}, pending.page, { title: title })
+      root.bodies[id] = { title: title, body: body, editable: true }
+      root.pages = root.pages.map(function(page) { return page.id === id ? pending.page : page })
+      root.rebuild()
+      if (pending.error) {
+        cb({ error: pending.error })
+      } else {
+        // Keep one current document during a slow create or a cooldown,
+        // just as the lane replaces queued saves of an existing page.
+        root.finishPendingOperations(pending, {})
+        pending.operations.push({ title: title, body: body, callback: cb, options: options })
+      }
       return
     }
     // The session captures this token with the displayed document. Provider
@@ -845,6 +923,18 @@ LaneProvider {
       })
   }
 
+  function appendPage(pages, page) {
+    var next = pages.filter(function(row) { return row.id !== page.id })
+    var last = next.length - 1
+    for (var i = 0; i < next.length; i++) {
+      if (next[i].sectionId === page.sectionId) {
+        last = i
+      }
+    }
+    next.splice(last + 1, 0, page)
+    return next
+  }
+
   function create(target, cb) {
     if (!root.ready || !root.rq || target.indexOf("section:") !== 0) {
       if (cb) {
@@ -852,54 +942,194 @@ LaneProvider {
       }
       return
     }
-    root.statusRequested("Creating a OneNote page…")
     var section = target.substring(8)
-    // Not deduped: two Ctrl+Ns mean two pages. During a cooldown this fails
-    // fast rather than being sent, which is what stops the "page created
-    // while throttled 404s for ever" poisoning (docs/testing.md).
-    root.rq.enqueue({ key: "create:" + target, mode: "append", priority: 0, owner: root, flush: true, label: "new page" },
+    if (!root.sectionAt(section) || !root.bookWritable(root.sectionAt(section).notebookId)) {
+      if (cb) {
+        cb({ error: "This section is not available for new pages." })
+      }
+      return
+    }
+    var id = "draft-" + Date.now() + "-" + (++root.nextDraft)
+    var pending = { page: { id: id, sectionId: section, title: "", modified: "" },
+                    operations: [], error: "", handle: null }
+    root.pendingPages = root.withEntry(root.pendingPages, id, pending)
+    root.bodies[id] = { title: "", body: "", editable: true }
+    root.inventoryRevision++
+    root.pages = root.appendPage(root.pages, pending.page)
+    root.revealPath(root.pathOf(id))
+    root.rebuild()
+    // Every Ctrl+N gets its own draft immediately. Remote creates in one
+    // section stay ordered, so their final positions match the draft rows.
+    pending.handle = root.rq.enqueue({ key: "create:" + target, mode: "append", priority: 0, owner: root, flush: true, label: "new page" },
       function(ctx) { root.runScript(["create", section, "-"], JSON.stringify({ title: "", body: "" }), ctx) },
       function(r) {
-        root.statusRequested("")
-        if (!r) {
-          if (cb) {
-            cb({ error: "the window closed before the page was made" })
-          }
-          return
-        }
-        if (r.error) {
-          if (cb) {
-            cb({ error: r.error })
-          }
-          return
-        }
-        root.pages = [r.page].concat(root.pages)
-        pageInventory.serial = Math.max(pageInventory.serial, r.pageListSerial || 0)
-        root.bodies[r.page.id] = Object.assign({}, r.note, { editable: true, version: r.page.modified || "" })
-        var sec = root.sectionAt(r.page.sectionId), exp = root.expanded.slice()
-        if (sec && exp.indexOf(sec.notebookId) < 0) {
-          exp.push(sec.notebookId)
-        }
-        if (exp.indexOf(r.page.sectionId) < 0) {
-          exp.push(r.page.sectionId)
-        }
-        root.expanded = exp
-        root.rebuild()
-        root.persistRequested()
-        if (cb) {
-          cb({ path: root.pathOf(r.page.id) })
-        }
+        root.finishCreation(id, pending, r || { error: "the page creation was cancelled", cancelled: true })
       })
+    if (cb) {
+      cb({ path: root.pathOf(id) })
+    }
+  }
+
+  function finishPendingOperations(pending, result, removed) {
+    var operations = pending.operations
+    pending.operations = []
+    for (var i = 0; i < operations.length; i++) {
+      if (operations[i].callback) {
+        operations[i].callback(operations[i].remove && removed ? {} : result)
+      }
+    }
+  }
+
+  function discardPendingPage(id) {
+    root.pendingPages = root.withoutEntry(root.pendingPages, id)
+    delete root.bodies[id]
+    root.pages = root.pages.filter(function(page) { return page.id !== id })
+    root.rebuild()
+  }
+
+  function finishCreation(id, pending, result) {
+    if (result.error) {
+      // Never re-sent: Graph may have made the page and lost the answer.
+      pending.error = "The OneNote page could not be created: " + result.error +
+                      " — copy its text elsewhere, then delete this draft"
+      var removed = result.cancelled === true && pending.operations.some(function(operation) { return operation.remove })
+      if (removed) {
+        root.discardPendingPage(id)
+      } else if (pending.operations.length === 0) {
+        // Waiting saves and deletes report the failure themselves; with
+        // none, the status line is the only place left to say it.
+        root.statusRequested(pending.error)
+      }
+      root.finishPendingOperations(pending, { error: pending.error }, removed)
+      return
+    }
+    var page = result.page
+    var path = root.pathOf(page.id)
+    var cached = root.bodies[id]
+    var note = result.note
+    root.pageAliases = root.withEntry(root.pageAliases, id, page.id)
+    root.inventoryRevision++
+    pageInventory.serial = Math.max(pageInventory.serial, result.pageListSerial || 0)
+    root.pendingPages = root.withoutEntry(root.pendingPages, id)
+    delete root.bodies[id]
+    root.bodies[page.id] = Object.assign({}, cached, { view: note.view, version: page.modified || "" })
+    // A listing can discover the real page before its create response arrives.
+    // Replace the draft in place and remove that duplicate, retaining typed text.
+    root.pages = root.pages.filter(function(row) { return row.id !== page.id }).map(function(row) {
+      return row.id === id ? Object.assign({}, page, { title: cached.title }) : row
+    })
+    var deletion = root.pendingDeletes[id]
+    if (deletion) {
+      deletion.page = Object.assign({}, page, { title: cached.title })
+      root.pendingDeletes = root.withEntry(root.withoutEntry(root.pendingDeletes, id), page.id, deletion)
+    }
+    var remembered = {}
+    for (var book in root.lastPages) {
+      remembered[book] = root.lastPages[book] === root.pathOf(id) ? path : root.lastPages[book]
+    }
+    root.lastPages = remembered
+    root.notePathChanged(root.pathOf(id), path, note.view)
+    var operations = pending.operations
+    pending.operations = []
+    for (var i = 0; i < operations.length; i++) {
+      var operation = operations[i]
+      if (operation.remove) {
+        root.sendDelete(page.id, operation.deletion)
+      } else {
+        root.save(path, operation.title, operation.body, operation.callback,
+                  Object.assign({}, operation.options || {}, { view: note.view }))
+      }
+    }
+    root.rebuild()
+    root.persistRequested()
   }
 
   function remove(path, cb) {
     var id = idOf(path)
-    if (!root.rq) {
+    if (!root.rq || root.pendingDeletes[id]) {
       if (cb) {
-        cb({ error: "not ready" })
+        cb({ error: root.pendingDeletes[id] ? "The note is already being deleted." : "not ready" })
       }
       return
     }
+    var pending = root.pendingPages[id]
+    if (pending && pending.error) {
+      root.discardPendingPage(id)
+      if (cb) {
+        cb({})
+      }
+      return
+    }
+    // A page the listing has not reached yet is deleted all the same: it
+    // has no row to hide, and no position to restore it to.
+    var page = root.pageAt(path)
+    var order = page ? root.pages.filter(function(row) {
+      return row.sectionId === page.sectionId
+    }).map(function(row) { return row.id }) : []
+    var deletion = { page: page, order: order }
+    root.pendingDeletes = root.withEntry(root.pendingDeletes, id, deletion)
+    root.inventoryRevision++
+    root.rebuild()
+    if (cb) {
+      cb({ pending: true })
+    }
+    if (pending) {
+      root.finishPendingOperations(pending, {})
+      pending.operations.push({ remove: true, deletion: deletion, callback: function(result) {
+        root.finishDeletion(root.idOf(path), deletion, result)
+      } })
+      pending.handle.cancel()
+    } else {
+      root.sendDelete(id, deletion)
+    }
+  }
+
+  function restorePage(pages, deletion) {
+    var page = deletion.page
+    if (!page || pages.some(function(row) { return row.id === page.id })) {
+      return pages
+    }
+    var next = pages.slice()
+    var ids = next.map(function(row) { return row.id })
+    var order = deletion.order.map(function(id) { return root.pageAliases[id] || id })
+    var position = order.indexOf(page.id)
+    for (var i = position + 1; i < order.length; i++) {
+      var after = ids.indexOf(order[i])
+      if (after >= 0) {
+        next.splice(after, 0, page)
+        return next
+      }
+    }
+    for (var j = position - 1; j >= 0; j--) {
+      var before = ids.indexOf(order[j])
+      if (before >= 0) {
+        next.splice(before + 1, 0, page)
+        return next
+      }
+    }
+    return root.appendPage(next, page)
+  }
+
+  // The host reports the outcome: it holds the note's unsaved text, and
+  // says the failure along with restoring it.
+  function finishDeletion(id, deletion, result) {
+    if (root.pendingDeletes[id] !== deletion) {
+      return
+    }
+    root.pendingDeletes = root.withoutEntry(root.pendingDeletes, id)
+    root.inventoryRevision++
+    if (result.error) {
+      root.pages = root.restorePage(root.pages, deletion)
+    } else {
+      root.pages = root.pages.filter(function(page) { return page.id !== id })
+      pageInventory.serial = Math.max(pageInventory.serial, result.pageListSerial || 0)
+      delete root.bodies[id]
+    }
+    root.noteDeletionFinished(root.pathOf(id), result)
+    root.rebuild()
+  }
+
+  function sendDelete(id, deletion) {
     // The page's own key, and replace: a delete supersedes a save of the same
     // page that has not gone yet (there is nothing left to save it into), and
     // queues behind one that has — per-key order means no resurrection, and
@@ -907,19 +1137,7 @@ LaneProvider {
     root.rq.enqueue({ key: "page:" + id, mode: "replace", priority: 0, owner: root, flush: true, label: "delete" },
       function(ctx) { root.runScript(["delete", id], "", ctx) },
       function(r) {
-        if (!r || r.error) {
-          if (cb) {
-            cb({ error: r ? r.error : "the delete was cancelled" })
-          }
-          return
-        }
-        root.pages = root.pages.filter(function(p) { return p.id !== id })
-        pageInventory.serial = Math.max(pageInventory.serial, r.pageListSerial || 0)
-        delete root.bodies[id]
-        root.rebuild()
-        if (cb) {
-          cb({})
-        }
+        root.finishDeletion(id, deletion, r || { error: "the delete was cancelled" })
       })
   }
 
@@ -946,6 +1164,9 @@ LaneProvider {
       return
     }
     var mine = currentPath && currentPath.indexOf(root.id + ":") === 0
+    if (mine && (root.pendingPages[root.idOf(currentPath)] || root.pendingDeletes[root.idOf(currentPath)])) {
+      return
+    }
     if (mine) {
       root.rq.enqueue({ key: "check:" + currentPath, mode: "dedupe", priority: 1, owner: root, label: "check" },
         function(ctx) { root.runScript(["page", root.idOf(currentPath), "--check"], "", ctx) },

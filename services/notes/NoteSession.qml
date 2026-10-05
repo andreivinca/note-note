@@ -24,10 +24,55 @@ Item {
   property var saveEpoch: ({})
   property var savesPending: ({})
   property var drafts: ({})
-  readonly property bool busy: Object.keys(session.savesPending).length > 0
+  property var pathAliases: ({})
+  property var pendingDeletions: ({})
+  readonly property bool busy: Object.keys(session.savesPending).length > 0 || Object.keys(session.pendingDeletions).length > 0
   readonly property string notDisplayable: "This note could not be displayed — it has not been changed"
 
+  function resolvedPath(path) {
+    return session.pathAliases[path] || path
+  }
+
+  // Creating a remote note replaces its provisional identity, without
+  // loading the document again or changing the caret and undo history.
+  // Callbacks accepted under the old identity still settle the same draft.
+  function replacePath(previous, next, view) {
+    session.pathAliases[previous] = next
+    var maps = [session.saveEpoch, session.drafts]
+    for (var i = 0; i < maps.length; i++) {
+      if (previous in maps[i]) {
+        maps[i][next] = maps[i][previous]
+        delete maps[i][previous]
+      }
+    }
+    var pending = Object.assign({}, session.savesPending)
+    if (previous in pending) {
+      pending[next] = pending[previous]
+      delete pending[previous]
+    }
+    session.savesPending = pending
+    var deletions = Object.assign({}, session.pendingDeletions)
+    if (previous in deletions) {
+      deletions[next] = deletions[previous]
+      delete deletions[previous]
+      deletions[next].view = deletions[next].view || view || null
+    }
+    session.pendingDeletions = deletions
+    var draft = session.drafts[next]
+    if (draft && !draft.view) {
+      draft.view = view || null
+    }
+    if (session.loadingPath === previous) {
+      session.loadingPath = next
+    }
+    if (session.currentPath === previous) {
+      session.currentPath = next
+      session.editingView = session.editingView || view || null
+    }
+  }
+
   function showConflict(path, conflict) {
+    path = session.resolvedPath(path)
     if (path !== session.currentPath || session.saveInFlight(path)) {
       return
     }
@@ -71,6 +116,7 @@ Item {
   }
 
   function selectPath(path) {
+    path = session.resolvedPath(path)
     if (session.locked || path === session.currentPath || (path && !session.providerFor(path))) {
       return
     }
@@ -144,7 +190,7 @@ Item {
         session.noteUnavailable(provider.name + ": " + result.error)
         return
       }
-      session.loadedVersion = result.version || session.versionFor(path)
+      session.loadedVersion = result.version || session.versionFor(session.resolvedPath(path))
       editor.documentBase = result.base || ""
       editor.setNote(result.title || "", result.body || "", function(shown) {
         if (!session.ownsLoad(path, generation)) {
@@ -157,7 +203,7 @@ Item {
         if (view) {
           editor.restoreViewState(view)
         }
-        session.editingView = result.view || null
+        session.editingView = result.view || (session.resolvedPath(path) !== path ? session.editingView : null)
         session.noteReady(result.editable === false, result.reason || "")
         if (result.recovered) {
           session.dirty = true
@@ -188,7 +234,7 @@ Item {
   }
 
   function ownsLoad(path, generation) {
-    return session.currentPath === path && session.noteLoadSeq === generation
+    return session.currentPath === session.resolvedPath(path) && session.noteLoadSeq === generation
   }
 
   // `reason` is the provider's own words for why the note is read-only, said
@@ -238,10 +284,11 @@ Item {
   }
 
   function saveInFlight(path) {
-    return (session.savesPending[path] || 0) > 0
+    return (session.savesPending[session.resolvedPath(path)] || 0) > 0
   }
 
   function countSave(path, delta) {
+    path = session.resolvedPath(path)
     var count = (session.savesPending[path] || 0) + delta
     var pending = Object.assign({}, session.savesPending)
     if (count > 0) {
@@ -254,20 +301,28 @@ Item {
 
   // Used only after the user confirms deleting this note.
   function cancelPendingSave(path) {
+    path = session.resolvedPath(path)
     if (path) {
       session.saveEpoch[path] = (session.saveEpoch[path] || 0) + 1
       delete session.drafts[path]
     }
   }
 
+  // The session reports every delete it does not complete, whether refused
+  // here or failed by the provider, so its callers act on success only.
   function remove(path, callback) {
+    path = session.resolvedPath(path)
+    if (session.pendingDeletions[path]) {
+      session.refuseRemoval("The note is already being deleted", callback)
+      return
+    }
     if (session.locked) {
-      callback({ error: "A note operation is still finishing" })
+      session.refuseRemoval("A note operation is still finishing", callback)
       return
     }
     var provider = session.providerFor(path)
     if (!provider) {
-      callback({ error: "The notebook is not available" })
+      session.refuseRemoval("The notebook is not available", callback)
       return
     }
     var current = path === session.currentPath
@@ -276,12 +331,16 @@ Item {
     var unsaved = current ? session.dirty || session.saveInFlight(path) : !!session.drafts[path]
     var readOnly = editor.readOnly
     session.cancelPendingSave(path)
+    var deletions = Object.assign({}, session.pendingDeletions)
+    deletions[path] = { document: recovery, view: recoveryView, unsaved: unsaved,
+                        epoch: session.saveEpoch[path] }
+    session.pendingDeletions = deletions
     session.locked = true
     editor.readOnly = true
     provider.remove(path, function(result) {
-      if (result.error && recovery && unsaved) {
-        session.drafts[path] = { document: recovery, view: recoveryView,
-            error: result.error, epoch: session.saveEpoch[path] }
+      path = session.resolvedPath(path)
+      if (!result.pending) {
+        session.finishDeletion(path, result)
       }
       if (current) {
         session.dirty = !!result.error && unsaved
@@ -290,6 +349,35 @@ Item {
       session.locked = false
       callback(result)
     })
+  }
+
+  function refuseRemoval(message, callback) {
+    session.report(message)
+    callback({ error: message })
+  }
+
+  // An optimistic delete releases the editor immediately, but keeps its
+  // recovery document until the provider confirms the remote outcome.
+  function finishDeletion(path, result) {
+    path = session.resolvedPath(path)
+    var recovery = session.pendingDeletions[path]
+    if (!recovery) {
+      return
+    }
+    if (result.error) {
+      if (recovery.document && recovery.unsaved && !session.drafts[path]) {
+        session.drafts[path] = { document: recovery.document, view: recovery.view,
+            error: result.error, epoch: recovery.epoch }
+        if (path === session.currentPath) {
+          session.dirty = true
+        }
+      }
+      var provider = session.providerFor(path)
+      session.report((provider ? provider.name + ": " : "") + result.error)
+    }
+    var deletions = Object.assign({}, session.pendingDeletions)
+    delete deletions[path]
+    session.pendingDeletions = deletions
   }
 
   function flushSave(resolution) {
@@ -309,6 +397,7 @@ Item {
     session.loadedVersion = ""
     session.countSave(path, 1)
     editor.requestMarkdown(function(body, ok) {
+      path = session.resolvedPath(path)
       if (session.saveEpoch[path] !== epoch) {
         session.countSave(path, -1)
         return
@@ -324,6 +413,7 @@ Item {
   }
 
   function finishSave(path, draft, result) {
+    path = session.resolvedPath(path)
     var showConflict = false
     if (session.drafts[path] === draft) {
       if (result.error) {

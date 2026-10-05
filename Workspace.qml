@@ -731,7 +731,7 @@ Item {
     // without the host having to reach back and cancel it.
     if (p.saveRequested) {
       p.saveRequested.connect(function(path) {
-        if (path === root.currentPath) {
+        if (session.resolvedPath(path) === root.currentPath) {
           root.flushSave()
         }
       })
@@ -739,9 +739,27 @@ Item {
 
     if (p.noteChanged) {
       p.noteChanged.connect(function(path) {
+        path = session.resolvedPath(path)
         if (path === root.currentPath && !root.dirty && !root.saveInFlight(path) && !root.loadingNote) {
           root.reloadCurrent()
         }
+      })
+    }
+
+    if (p.notePathChanged) {
+      p.notePathChanged.connect(function(previous, next, view) {
+        session.replacePath(previous, next, view)
+        root.replaceRememberedNote(previous, next)
+        if (root.deletePath === previous) {
+          root.deletePath = next
+        }
+        root.invalidateContentSearch(p)
+      })
+    }
+
+    if (p.noteDeletionFinished) {
+      p.noteDeletionFinished.connect(function(path, result) {
+        session.finishDeletion(path, result)
       })
     }
 
@@ -888,6 +906,24 @@ Item {
       }
     }
     next[key] = path
+    root.lastNotes = next
+    saveState()
+  }
+
+  // A provisional note that gained its permanent path stays the note its
+  // tabs open with. Replaced wholesale, as above.
+  function replaceRememberedNote(previous, path) {
+    var keys = Object.keys(root.lastNotes).filter(function(key) {
+      return root.lastNotes[key] === previous
+    })
+    if (keys.length === 0) {
+      return
+    }
+
+    var next = Object.assign({}, root.lastNotes)
+    for (var i = 0; i < keys.length; i++) {
+      next[keys[i]] = path
+    }
     root.lastNotes = next
     saveState()
   }
@@ -1886,9 +1922,9 @@ Item {
         }
       }
     }
+    // The session reports a delete that fails or is refused.
     session.remove(path, function(result) {
       if (result.error) {
-        showStatus(p.name + ": " + result.error)
         return
       }
       if (wasCurrent) {

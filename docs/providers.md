@@ -260,10 +260,23 @@ to the running instance and `rebuild()` is called.
   tabs open on the note last chosen in them, which is what the host remembers
   for everyone (a provider that implements `defaultNote` is not remembered by
   the host as well: the entry would never be read).
-- `create(target, cb)` → `cb({ path, error })`
+- `create(target, cb)` → `cb({ path, error })`. A provider may list an editable
+  provisional note and answer immediately, then create its remote page in the
+  background. Keep saves and deletes behind that creation, retain the draft on
+  failure, and use `notePathChanged` when the permanent identity arrives.
+  Keep a provisional note through an account change too: the host may hold
+  unsaved text for its path, and its row is the only way back to it. Report a
+  failed creation to the saves and deletes waiting on it; with none waiting,
+  on the status line.
 - `remove(path, cb)` → `cb({ error })`. A delete the lane never sent — cancelled
   by a sign-out or the provider going — answers `{ error }` like an unsent
   save: nothing removed the note, and `{}` would show it as gone.
+  For immediate deletion, hide the row and answer `cb({ pending: true })`.
+  Keep the row's content and order while the remote request runs; on failure,
+  restore the row. Report the final outcome with `noteDeletionFinished`, after
+  the remote request settles — an account change does not settle it. A note
+  that has no row yet is deleted all the same. The host reports every failed
+  delete, so do not report one on the status line as well.
 - `createSection(name, cb)` → `cb({ key, target, error })`. `key` is the new
   section's key; the host opens it as the active tab. `target` is optional — the
   create target for a first note in it (the same string your `new` row carries),
@@ -338,6 +351,20 @@ to the running instance and `rebuild()` is called.
   A provider that is not configured should show a `Set up…` action row in its
   section and open the view from `action(id)`; a `Settings…` row can reopen it.
 - `persistRequested()` — ask the host to persist `saveState()`.
+- `notePathChanged(string previous, string next, var view)` (optional) — a
+  provisional note acquired its permanent path and editing baseline. Replace
+  its provider row and cached body before emitting this, then emit `updated()`.
+  The host transfers the open note and pending saves without reloading the
+  editor, preserving its content, caret and undo history. Callbacks already
+  accepted under the previous path still settle the same draft. Update paths
+  in the provider's own saved state too.
+- `noteDeletionFinished(string path, var result)` (optional) — settle a delete
+  previously accepted with `{ pending: true }`, using `{}` on success or
+  `{ error }` on failure. Emit this exactly once, after restoring the provider
+  row on failure and before `updated()`. The host keeps the deleted note's
+  unsaved document until this arrives, restores its draft on failure, and
+  drains pending deletes before closing or replacing the provider. The user
+  can continue editing other notes while the request runs.
 - `saveRequested(string path)` (optional) — write that note now: the host
   takes the editor's text and calls your `save()` with it. Emit it whenever
   your schedule says so, having been told by `noteEdited(path)`.
