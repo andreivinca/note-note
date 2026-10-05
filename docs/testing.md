@@ -592,30 +592,53 @@ inotifywait -m -e close_write,moved_to --format '%e %f' ~/Notes   # writes are a
    and `dirty` is true again — the converter never started, and that is still
    an answer.
 
-## Checklist for a UI change
+## Testing inline audio
 
 `python3 tests/audio_selftest.py` runs the inline recording player through
 real Qt playback with silent audio. It checks Play/Stop, mouse seeking,
 playback across layout changes, completion, note switching, missing recordings
 and the editor's fallback without a native inspector. Add
 `--recording /path/to/cached-recording.3gp` to exercise a phone recording or
-`--screenshot /tmp/audio-player.png` to capture the player. OneNote conversion
-and cache boundaries are covered by
-`python3 plugins/org.note-note.onenote/audio_selftest.py`. The player suite also
-checks typing, undo and save/reload of an editable note. The provider suites
+`--screenshot /tmp/audio-player.png` to capture the player. The player suite
+also checks typing, undo and save/reload of an editable note. A second run
+gives the player a playback component that cannot load, as on a system
+without the Qt Multimedia QML module: the note still opens and edits, and the
+player says why it cannot play. `tests/test_regressions.py` keeps
+`ui/AudioPlayback.qml` the only QML file importing Qt Multimedia, since any
+other importer would stop the editor loading where the module is missing.
+
+Audio clipboard regressions use Qt's actual copy, cut and paste path. Copies
+receive distinct instance IDs through save/reload, and playback works after
+pasting into another note; a recording cut and pasted back within its note
+keeps its ID, so the save moves it rather than uploading a copy. A recording
+that is not a local file is fetched only when Play is pressed: the suite
+answers for the host, and checks that opening the note asks for nothing, that
+a failed fetch is shown and retried by Play, that a cancelled fetch does not
+start playing, and that a fetched recording plays again without another fetch.
+
+OneNote conversion, fetching and upload boundaries are covered by
+`python3 plugins/org.note-note.onenote/audio_selftest.py`: page reads that
+name recordings by their Graph resource and fetch none, instance IDs that
+follow the resource across reads, a play that fetches once into the private
+cache with the bearer token and never from an untrusted source, copies of
+recordings never played fetched to be uploaded, and acknowledged uploads that
+become the copy's resource under its ID. Uploads read nothing but Graph
+resources, so pasted markup cannot make a save upload a local file. The provider suites
 check resource retention while editing text, distinct recordings with the
 same filename, table-cell edits, concurrent recording additions, deletion,
 multipart recreation with identical bytes, upload limits and resource aliases.
-Audio clipboard regressions use Qt's actual copy and paste path, then verify
-distinct instance IDs through save/reload and playback after pasting into
-another note. Provider regressions copy audio
-before, after and inline with the original, save subsequent text edits without
-another upload, keep both source and destination notes saveable after a paste,
-and recover a legacy draft with the former false conflict.
+Provider regressions copy audio before, after and inline with the original,
+save subsequent text edits without another upload, keep both source and
+destination notes saveable after a paste, refuse a recording that is not a
+OneNote resource while keeping the draft, and recover a draft from earlier
+builds, which named recordings by downloaded files, without losing its text
+or copying its recording.
 Phone attachment fixtures also omit generated object IDs, as the live API
 does. These check insertion through the containing layout, reuse of its
 boundary line breaks, and subsequent deletion through a copied object's
 data-id. Known pasted images retain their display width during normalization.
+
+## Checklist for a UI change
 
 1. `qmllint` clean, `py_compile` clean, `ruff` silent, `qthtml/selftest.py`
    green — and, if anything touched requests, `ratelimit_selftest.py` and

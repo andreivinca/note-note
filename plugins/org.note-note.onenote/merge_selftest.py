@@ -1,6 +1,5 @@
 """OneNote merge integration, with a scripted server and private temporary state."""
 import contextlib
-import hashlib
 import html
 import io
 import json
@@ -83,14 +82,19 @@ class ImageConversionTests(unittest.TestCase):
 
 class SaveTests(unittest.TestCase):
     def recording(self, name="phone", title="Audio Recording.3gp"):
-        """A cached attachment served by the scripted page endpoint."""
+        """An attachment served by the scripted page endpoint, whose bytes a
+        save can fetch to copy or recreate it."""
         source = "https://graph.microsoft.com/v1.0/me/onenote/resources/%s/$value" % name
-        path = Path(onenote.ONENOTE_AUDIO_DIR) / (hashlib.sha1(source.encode()).hexdigest() + ".3gp")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(("synthetic audio " + name).encode())
-        self.audio_paths[source] = path.as_uri()
+        self.store_recording(source, ("synthetic audio " + name).encode())
         return ('<object id="object:%s" data="%s" type="video/3gpp" '
                 'data-attachment="%s" style="width:120px"></object>' % (name, source, html.escape(title)))
+
+    def store_recording(self, source, data):
+        """The bytes Graph serves for a recording, where the patched fetch finds them."""
+        path = Path(onenote.recording_cache_path(source, "Audio Recording.3gp"))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        self.audio_paths[source] = "file://" + str(path)
 
     def audio_page(self, contents):
         self.remote = ('<html><head><title>Title</title></head><body><div id="div:audio">'
@@ -105,10 +109,7 @@ class SaveTests(unittest.TestCase):
         for name, mime, data in parts:
             self.audio_uploads.append((name, mime, data))
             source = "https://graph.microsoft.com/v1.0/me/onenote/resources/%s/$value" % name
-            path = Path(onenote.ONENOTE_AUDIO_DIR) / (hashlib.sha1(source.encode()).hexdigest() + ".3gp")
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(data)
-            self.audio_paths[source] = path.as_uri()
+            self.store_recording(source, data)
             references["name:" + name] = source
         expanded = json.dumps(commands)
         for reference, source in references.items():
@@ -128,18 +129,20 @@ class SaveTests(unittest.TestCase):
         self.assertIn('id="object:phone"', self.remote)
         self.assertEqual(onenote.normalize_note(self.load()), onenote.normalize_note(result))
 
-    def test_inserted_audio_uses_backend_upload_and_survives_reload(self):
+    def test_audio_outside_the_recording_cache_is_refused_and_the_draft_kept(self):
+        # Pasted markup can name any local file; a save must never upload it.
         self.audio_page('<p id="p:text">Text</p>')
         loaded = self.load()
         path = Path(self.temp.name) / "New recording.3gp"
-        path.write_bytes(b"new recording bytes")
+        path.write_bytes(b"private bytes")
         audio_markup = '<audio src="%s" title="New recording.3gp"></audio>' % path.as_uri()
         with patch.object(onenote, "patch_page", side_effect=self.upload_audio_patch):
             result = self.save(note(loaded["body"] + "\n\n" + audio_markup), loaded["view"])
-        self.assertTrue(result.get("ok"), result)
-        self.assertEqual([(mime, data) for _, mime, data in self.audio_uploads], [("video/3gpp", b"new recording bytes")])
-        self.assertEqual(onenote.normalize_note(self.load()), onenote.normalize_note(result))
-        self.assertIn('id="p:text"', self.remote)
+        self.assertIn("did not come from OneNote", result.get("error", ""))
+        self.assertEqual(self.audio_uploads, [])
+        self.assertEqual(self.operations(), [])
+        with self.store() as journal:
+            self.assertIn("New recording.3gp", journal.recover()["body"])
 
     def test_copied_recording_saves_and_subsequent_edits_keep_both_resources(self):
         for placement in ("before", "middle", "after", "inline"):
@@ -206,33 +209,30 @@ class SaveTests(unittest.TestCase):
         self.assertEqual(next(ET.fromstring(self.remote).iter("object")).get("data"), original_resource)
         self.assertIn('id="object:phone"', self.remote)
 
-    def test_legacy_copy_with_false_conflict_is_recovered_without_losing_draft(self):
-        original = self.recording()
-        copied = self.recording("old-copy")
-        old_copy = next(iter(ET.fromstring("<root>" + copied + "</root>"))).get("data")
-        original_path = self.audio_paths[next(iter(self.audio_paths))]
-        copy_path = self.audio_paths[old_copy]
-        Path(onenote.file_path_of(copy_path)).write_bytes(Path(onenote.file_path_of(original_path)).read_bytes())
-        self.audio_page('<p id="p:text">Text</p>' + original + copied)
-        legacy_audio = '<audio src="%s" title="Audio Recording.3gp"></audio>' % copy_path
-        legacy_base = note("Text\n\n" + legacy_audio + "\n\n" + legacy_audio)
-        legacy_draft = note(legacy_base["body"].replace("Text", "Unsaved text"))
+    def test_draft_naming_downloaded_recordings_is_recovered_and_saved(self):
+        # Earlier builds downloaded recordings with the page and named them
+        # by their cached files. Such a draft keeps its text; the recording
+        # it did not change is the page's own, and is neither lost nor copied.
+        self.audio_page('<p id="p:text">Text</p>' + self.recording())
+        downloaded = '<audio src="file:///cache/%s.3gp" title="Audio Recording.3gp" data-id="nn-audio-legacy-%s-1"></audio>' % (
+            "a" * 64, "a" * 64)
+        base = note("Text\n\n" + downloaded)
+        draft = note("Unsaved text\n\n" + downloaded)
         with MergeStore(self.temp.name, "onenote", "test-account", "page") as journal:
-            view = journal.open(legacy_base)["view"]
-            journal.stage(view, legacy_draft)
-            remote_body = legacy_base["body"].replace(copy_path, original_path, 1)
-            conflict = journal.prepare(note(remote_body))
-            self.assertTrue(conflict["conflict"], "the old resource alias must reproduce the false conflict")
+            view = journal.open(base)["view"]
+            journal.stage(view, draft)
         recovered = self.load()
         self.assertTrue(recovered.get("recovered"), recovered)
-        self.assertNotIn("conflict", recovered)
-        self.assertTrue(recovered.get("retry"), recovered)
         self.assertIn("Unsaved text", recovered["body"])
-        result = self.save(legacy_draft, view)
+        with patch.object(onenote, "patch_page", side_effect=self.upload_audio_patch):
+            result = self.save(draft, view)
         self.assertTrue(result.get("ok"), result)
         self.assertIn("Unsaved text", self.remote)
-        self.assertEqual(len(list(ET.fromstring(self.remote).iter("object"))), 2)
+        self.assertEqual(len(list(ET.fromstring(self.remote).iter("object"))), 1)
+        self.assertIn('id="object:phone"', self.remote)
         self.assertFalse(self.audio_uploads)
+        with self.store() as journal:
+            self.assertIsNone(journal.recover())
 
     def test_text_edits_preserve_recording_and_neighbouring_elements(self):
         attachment = self.recording()

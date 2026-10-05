@@ -299,7 +299,9 @@ Required:
 
 Optional: `createSection(name, cb)` → `cb({ key, target?, error? })`;
 `search(query, cb)` → `cb({ paths })` of notes whose **body** matches (titles
-are matched by the host); `revealPath(path)` to unfold a note's row;
+are matched by the host); `recording(source, title, cb)` → `cb({ url })` with
+a private `file://` copy of an `<audio src>`, fetched only when Play is pressed;
+`revealPath(path)` to unfold a note's row;
 `storageLabel(path)`; `defaultNote(sectionKey)`; `noteOpened(path)`;
 `noteEdited(path)` with signal `saveRequested(path)` to choose the save
 schedule (without them the host saves 1.5 s after typing stops);

@@ -96,8 +96,9 @@ def main():
             "Run `./bin/note-note` from this directory, or copy `bin/` and `share/`\n"
             "into the same installation prefix, such as `~/.local/`. Keep both together.\n\n"
             "This native build uses your system libraries. It needs a compatible\n"
-            "Qt runtime (Quick, Quick Controls 2, Network, DBus, Multimedia, SVG and Wayland/X11),\n"
-            "Python 3.9+ and inotify-tools. ImageMagick is optional for large images.\n"
+            "Qt runtime (Quick, Quick Controls 2, Network, DBus, SVG and Wayland/X11),\n"
+            "Python 3.9+ and inotify-tools. Qt Multimedia is optional for playing\n"
+            "recordings, and ImageMagick for large images.\n"
             "It is not a self-contained cross-distribution bundle.\n\n"
             f"Sources: https://github.com/andreivinca/note-note/tree/{commit}\n")
         # Test the installed, stripped layout, including resource lookup,
@@ -114,7 +115,8 @@ def main():
         (plugin / "INSTALL.md").write_text(
             "# Note Note Omarchy plugin\n\n"
             f"Release {version}. Requires Omarchy 4 / Quickshell, Python 3.9+,\n"
-            "inotify-tools, wl-clipboard and the Qt Multimedia QML module.\n\n"
+            "inotify-tools and wl-clipboard. The Qt Multimedia QML module is optional:\n"
+            "it plays OneNote recordings; without it notes with recordings still open.\n\n"
             f"Place this directory at `~/.config/omarchy/plugins/{manifest['id']}`\n"
             f"and enable it with `omarchy plugin enable {manifest['id']}`.\n\n"
             "The archive contains the shared application and Omarchy host, without\n"

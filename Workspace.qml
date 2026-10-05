@@ -2665,6 +2665,14 @@ Item {
             onStatusRequested: function(text) {
               root.showStatus(text)
             }
+            onRecordingRequested: function(source, title, answer) {
+              var p = root.providerOf(root.currentPath)
+              if (p && typeof p.recording === "function") {
+                p.recording(source, title, answer)
+              } else {
+                answer({ error: "this notebook cannot play recordings" })
+              }
+            }
           }
 
           // ---- view bar

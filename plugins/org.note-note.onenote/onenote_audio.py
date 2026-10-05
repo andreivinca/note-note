@@ -1,56 +1,29 @@
-"""Stable recording instances backed by a shared, private playback cache.
+"""Stable instance IDs for the recordings of a note.
 
-Two attachment objects can contain identical audio. Their playback bytes may
-be shared, but their editing identities and Graph resources must stay separate.
-Legacy notes without instance IDs are normalized by content and occurrence so
-old recovery drafts remain comparable with recordings already copied on Graph.
+A note names each recording by its Graph resource, and its bytes are fetched
+only when someone plays it, so identity never depends on the audio. An
+attachment that Graph returns without a data-id is identified by its resource
+and its occurrence on the page. A copy pasted in the editor keeps its
+original's resource until a save uploads it; the upload's acknowledged
+resource then replaces the original's under the copy's ID.
 """
 import hashlib
-import re
-from pathlib import Path
-from urllib.parse import unquote, urlsplit
 
 import audio
-import fileio
 
 
 class RecordingIdentity:
-    def __init__(self, directory, max_bytes, prune=None):
-        self.directory = Path(directory)
-        self.max_bytes = max_bytes
-        self.occurrences = {}
-        self.prune = prune
+    """Instance IDs for the recordings of one note, assigned in document order."""
 
-    def resolve(self, source, title, identifier=""):
-        """Return the canonical playback URL and this object's stable ID."""
-        try:
-            parsed = urlsplit(source)
-        except ValueError:
-            parsed = urlsplit("")
-        canonical = source
+    def __init__(self, uploaded=None):
+        self.uploaded = uploaded or {}       # instance ID -> its Graph resource
+        self.occurrences = {}
+
+    def resolve(self, source, identifier=""):
+        """Return the recording's Graph resource and its stable instance ID."""
+        if audio.valid_identifier(identifier):
+            return self.uploaded.get(identifier, source), identifier
         digest = hashlib.sha256(source.encode()).hexdigest()
-        if parsed.scheme == "file" and not parsed.netloc and parsed.path.startswith("/"):
-            path = Path(unquote(parsed.path))
-            if path.parent == self.directory and re.fullmatch(r"[a-f0-9]{64}", path.stem):
-                digest = path.stem
-            else:
-                try:
-                    with path.open("rb") as stream:
-                        data = stream.read(self.max_bytes + 1)
-                except OSError:
-                    data = b""
-                if data and len(data) <= self.max_bytes:
-                    digest = hashlib.sha256(data).hexdigest()
-                    suffix = path.suffix.lower()
-                    cached = self.directory / (digest + suffix)
-                    self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-                    if not cached.is_file():
-                        fileio.write_atomic(str(cached), data, mode=0o600)
-                        if self.prune:
-                            self.prune()
-                    canonical = cached.as_uri()
-        if not audio.valid_identifier(identifier):
-            count = self.occurrences.get(digest, 0) + 1
-            self.occurrences[digest] = count
-            identifier = "nn-audio-legacy-%s-%d" % (digest, count)
-        return canonical, identifier
+        count = self.occurrences.get(digest, 0) + 1
+        self.occurrences[digest] = count
+        return source, "nn-audio-legacy-%s-%d" % (digest, count)

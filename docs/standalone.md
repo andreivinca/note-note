@@ -49,13 +49,16 @@ Remaining provider processes stop after writes finish, before the host exits.
 ## Build and run
 
 Build dependencies: CMake 3.21+, C++17 compiler, Qt 6.8+ development files for
-Quick, Quick Controls 2, Network, DBus and Multimedia. Tests additionally use Qt Test,
-the QtTest QML module and `dbus-run-session`. Use `-DBUILD_TESTING=OFF` for a
+Quick, Quick Controls 2, Network and DBus. Tests additionally use Qt Test,
+the QtTest QML module and `dbus-run-session`; recording playback is tested
+when Qt Multimedia is installed. Use `-DBUILD_TESTING=OFF` for a
 production-only build.
 
-Runtime dependencies: Qt Quick, Quick Controls 2 and Qt Multimedia QML modules, Qt's
+Runtime dependencies: Qt Quick and Quick Controls 2 QML modules, Qt's
 Wayland or X11 platform plugin, SVG image support, Python 3.9+ and
-inotify-tools. ImageMagick is optional for scaling large pasted images.
+inotify-tools. The Qt Multimedia QML module is optional: it plays OneNote
+recordings, and without it notes with recordings still open and edit.
+ImageMagick is optional for scaling large pasted images.
 Python libraries are vendored; no runtime pip installation is needed.
 The bundled symbol font supplies toolbar icons on desktops without Nerd Fonts.
 

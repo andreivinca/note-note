@@ -13,8 +13,10 @@ from urllib.parse import quote, unquote, urlsplit
 
 from htmltree import parse
 
+# The space a recording takes in the editor's document; ui/AudioPlayer.qml
+# draws the player at this size over the transparent placeholder.
 DISPLAY_WIDTH = 360
-DISPLAY_HEIGHT = 112
+DISPLAY_HEIGHT = 56
 DISPLAY_MARKER = "notenote-audio="
 PLACEHOLDER = Path(__file__).with_name("audio-placeholder.svg").as_uri()
 AUDIO_ELEMENT = r"""<audio\b(?:[^>"']|"[^"]*"|'[^']*')*>\s*</audio\s*>"""

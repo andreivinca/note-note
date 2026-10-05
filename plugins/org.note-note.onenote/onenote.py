@@ -8,6 +8,7 @@
                                            --incremental: return the tree before fetching page lists
   onenote.py list-step <file|->       -> one page-list response for {"sectionId", "interactive"?}
   onenote.py page <id> [--check]        -> {"title","body"(markdown),"editable","view"}
+  onenote.py recording <src> <title>    -> {"url"}: a recording's playable file, fetched to play it
   onenote.py update <id> <file>         -> reads {"title","body","view","resolution"?}
   onenote.py create <sectionId> <file>  -> {"ok":true,"page":{...}}
   onenote.py delete <id>
@@ -68,6 +69,8 @@ MAX_ORDER_CACHE = 1024 * 1024
 MAX_PAGE_HTML = 4 * 1024 * 1024   # a page's content
 MAX_IMAGE = 20 * 1024 * 1024      # one cached image
 MAX_AUDIO = 100 * 1024 * 1024     # one existing recording
+MAX_AUDIO_CACHE_BYTES = 400 * 1024 * 1024
+MAX_AUDIO_CACHE_FILES = 100
 # Graph's 4 MB request limit counts text and every binary part. Unchanged
 # recordings need no upload, but copied/recreated media share these bounds.
 MAX_UPLOAD = 3 * 1024 * 1024      # one uploaded image or recording
@@ -662,7 +665,7 @@ def cmd_onenote_list(cached, max_age=0, force=False, incremental=False):
     listing.fetched = discovered
     listing.warnings = warnings
     listing.notebook_progress = None
-    todo =[sct for sct in sections if listing.stale(sct, force)]
+    todo = [sct for sct in sections if listing.stale(sct, force)]
 
     # Pages are listed per section: the account-wide /me/onenote/pages call
     # refuses accounts with many sections (docs/engine-notes.md). Each call
@@ -830,14 +833,40 @@ def cmd_section_order():
 # is untrusted and must not be able to send our token (or any request)
 # anywhere else. Anything else is shown as text, not loaded.
 RESOURCE_PATH_RE = re.compile(notebook_inventory.ROOT_PATH.pattern + r"resources/[A-Za-z0-9!._-]+/\$value$")
-# A page's resources share a wall-clock budget and a request count. Each
-# resource cache is bounded too, so a page full of unique attachments can
-# neither hold a fetch open nor fill the disk.
-PAGE_RESOURCE_BUDGET_SECONDS = 45
-MAX_PAGE_RESOURCES = 40
+
+
+class FetchBudget:
+    """What one command may spend fetching one kind of resource: a request
+    count and a wall-clock deadline. A page read spends the image budget on
+    its pictures; recordings are fetched only when played, or when a save
+    copies their bytes, under a budget of their own. Each resource cache is
+    bounded too, so a page full of unique attachments can neither hold a
+    fetch open nor fill the disk."""
+
+    def __init__(self, seconds, requests):
+        self.seconds = seconds
+        self.requests = requests
+        self.deadline = 0.0      # monotonic; 0 until a command starts it
+        self.used = 0
+
+    def start(self):
+        self.deadline = time.monotonic() + self.seconds
+        self.used = 0
+
+    def spent(self):
+        return self.used >= self.requests or bool(self.deadline and time.monotonic() > self.deadline)
+
+    def until(self):
+        """The deadline one fetch must finish by."""
+        return self.deadline or time.monotonic() + self.seconds
+
+
 MAX_CACHE_BYTES = 200 * 1024 * 1024
 MAX_CACHE_FILES = 400
-_page_resource_budget = [0.0, 0]        # [deadline (monotonic), resources fetched]
+_image_budget = FetchBudget(seconds=45, requests=40)
+# A recording is fetched while its player waits, so it may take longer than
+# a picture; the provider process itself is stopped after ten minutes.
+_recording_budget = FetchBudget(seconds=300, requests=MAX_UPLOAD_PARTS)
 
 
 _image_opener = urllib.request.build_opener(provider_io.NoRedirect)
@@ -903,55 +932,50 @@ def known_image(url):
     return index.get("staged", {}).get(path)
 
 
+# A note names each recording by its Graph resource. The index keeps what a
+# save needs to know about those resources without reading their pages:
+# `resources` maps one to its title and MIME type, and `instances` maps a
+# recording ID to the resource behind it. A copy keeps its original's
+# resource in the editor until the page reloads, so the upload a save
+# acknowledged is found here by the copy's ID (RecordingIdentity).
+MAX_RECORDING_INDEX = 500
+
+
+def recording_identity():
+    return RecordingIdentity(load_json(AUDIO_INDEX, {}).get("instances", {}))
+
+
+def remember_recording_index(resources=(), instances=()):
+    """Add (resource, details) and (ID, resource) pairs; the newest are kept."""
+    index = load_json(AUDIO_INDEX, {})
+    known = {"resources": dict(index.get("resources", {})), "instances": dict(index.get("instances", {}))}
+    for name, pairs in (("resources", resources), ("instances", instances)):
+        for key, value in pairs:
+            known[name].pop(key, None)
+            known[name][key] = value
+        known[name] = dict(list(known[name].items())[-MAX_RECORDING_INDEX:])
+    if known != {"resources": index.get("resources"), "instances": index.get("instances")}:
+        save_private(AUDIO_INDEX, known)
+
+
 def remember_recordings(recordings):
-    """Keep resource identities and acknowledged upload aliases for audio."""
-    if not recordings:
+    """The details and instance of each recording a page read shows."""
+    playable = [recording for recording in recordings if image_allowed(recording["src"])]
+    if not playable:
         return
-    index = load_json(AUDIO_INDEX, {})
-    files = index.get("files", {})
-    instances = index.get("instances", {})
-    for recording in recordings:
-        local = recording.get("local", "")
-        if not local.startswith("file://"):
-            continue
-        path = file_path_of(local)
-        entry = {key: recording[key] for key in ("src", "title", "mime")}
-        entry["local"] = local
-        if recording.get("id"):
-            instances[recording["id"]] = entry
-        if os.path.dirname(path) == ONENOTE_AUDIO_DIR:
-            files.setdefault(os.path.basename(path), entry)
-    index["files"] = {name: entry for name, entry in files.items()
-                      if os.path.isfile(os.path.join(ONENOTE_AUDIO_DIR, name))}
-    index["staged"] = dict(list((path, entry) for path, entry in index.get("staged", {}).items()
-                                if os.path.isfile(path))[-128:])
-    index["instances"] = dict(list((identifier, entry) for identifier, entry in instances.items()
-                                   if os.path.isfile(file_path_of(entry.get("local", ""))))[-500:])
-    save_private(AUDIO_INDEX, index)
+    remember_recording_index(
+        resources=[(item["src"], {"title": item["title"], "mime": item["mime"]}) for item in playable],
+        instances=[(item["id"], item["src"]) for item in playable if item.get("id")])
 
 
-def known_recording(url, identifier=""):
-    if not url.startswith("file://"):
-        return None
-    path = file_path_of(url)
-    index = load_json(AUDIO_INDEX, {})
-    if identifier and identifier in index.get("instances", {}):
-        return index["instances"][identifier]
-    if os.path.dirname(path) == ONENOTE_AUDIO_DIR:
-        entry = index.get("files", {}).get(os.path.basename(path))
-        if entry:
-            return entry
-    return index.get("staged", {}).get(path)
+def known_recording(src):
+    """The title and MIME type a page read recorded for a Graph resource."""
+    return load_json(AUDIO_INDEX, {}).get("resources", {}).get(src)
 
 
-def remember_staged(staged, html):
-    """Match upload aliases by the data-id written with each image.
-
-    Patch order and document order can differ. Only an exact, unique marker
-    can associate a local paste with its acknowledged OneNote resource.
-    """
-    kinds = {upload.get("kind", "image") for upload in staged.values()}
-    indexes = {kind: load_json(AUDIO_INDEX if kind == "audio" else IMAGE_INDEX, {}) for kind in kinds}
+def acknowledged_uploads(staged, html):
+    """(upload, Graph resource) for each upload whose data-id marks exactly
+    one resource in the page that the save produced."""
     resources = {}
     for node in onenote_patch.walk(onenote_patch.parse(html)):
         if node.tag in {"img", "object"} and node.attrs.get("data-id"):
@@ -959,31 +983,45 @@ def remember_staged(staged, html):
             resources.setdefault(node.attrs["data-id"], []).append(source)
     for upload in staged.values():
         sources = resources.get(upload["dataId"], [])
-        if len(sources) != 1 or not image_allowed(sources[0]):
-            continue
-        kind = upload.get("kind", "image")
-        index = indexes[kind]
-        directory = ONENOTE_AUDIO_DIR if kind == "audio" else ONENOTE_IMG_DIR
-        path, src = upload["path"], sources[0]
-        entry = {"src": src, "width": upload["width"]} if kind == "image" else {
-            "src": src, "title": upload["title"], "mime": upload["mime"], "local": "file://" + path,
-        }
-        if kind == "audio":
-            index.setdefault("instances", {})[upload["dataId"]] = entry
-            # Playback bytes can be shared by the original and its copies.
-            # A copy must never overwrite the original resource's identity.
-            if os.path.dirname(path) == directory:
-                index.setdefault("files", {}).setdefault(os.path.basename(path), entry)
-            else:
-                index.setdefault("staged", {}).setdefault(path, entry)
-        elif os.path.dirname(path) == directory:
-            index.setdefault("files", {})[os.path.basename(path)] = entry
+        if len(sources) == 1 and image_allowed(sources[0]):
+            yield upload, sources[0]
+
+
+def remember_staged(staged, html):
+    """Match upload aliases by the data-id written with each upload.
+
+    Patch order and document order can differ. Only an exact, unique marker
+    can associate a local paste with its acknowledged OneNote resource.
+    """
+    acknowledged = list(acknowledged_uploads(staged, html))
+    images = [(upload, src) for upload, src in acknowledged if upload["kind"] == "image"]
+    recordings = [(upload, src) for upload, src in acknowledged if upload["kind"] == "audio"]
+    if any(upload["kind"] == "image" for upload in staged.values()):
+        remember_uploaded_images(images)
+    if recordings:
+        remember_uploaded_recordings(recordings)
+
+
+def remember_uploaded_images(uploads):
+    index = load_json(IMAGE_INDEX, {})
+    files, pastes = index.get("files", {}), index.get("staged", {})
+    for upload, src in uploads:
+        path, entry = upload["path"], {"src": src, "width": upload["width"]}
+        if os.path.dirname(path) == ONENOTE_IMG_DIR:
+            files[os.path.basename(path)] = entry
         else:
-            index.setdefault("staged", {})[path] = entry
-    for kind, index in indexes.items():
-        index["staged"] = dict(list((p, e) for p, e in index.get("staged", {}).items()
-                                    if os.path.isfile(p))[-128:])
-        save_private(AUDIO_INDEX if kind == "audio" else IMAGE_INDEX, index)
+            pastes[path] = entry
+    index["files"] = files
+    index["staged"] = dict(list((p, e) for p, e in pastes.items() if os.path.isfile(p))[-128:])
+    save_private(IMAGE_INDEX, index)
+
+
+def remember_uploaded_recordings(uploads):
+    """An uploaded copy is a new resource under the copy's own ID; the
+    original it was copied from keeps its resource and ID."""
+    remember_recording_index(
+        resources=[(src, {"title": upload["title"], "mime": upload["mime"]}) for upload, src in uploads],
+        instances=[(upload["dataId"], src) for upload, src in uploads])
 
 
 def prune_resource_cache(directory, max_bytes, max_files):
@@ -1022,7 +1060,49 @@ def cached_image(src, width=0):
     rescale or re-encode. `width` is only recorded (via the caller) so a save
     can write the same display width back into the page.
     """
-    return cached_page_resource(src, ONENOTE_IMG_DIR, MAX_IMAGE, MAX_CACHE_BYTES, MAX_CACHE_FILES)
+    return cached_graph_file(src, image_cache_path(src), MAX_IMAGE, _image_budget,
+                           lambda: prune_resource_cache(ONENOTE_IMG_DIR, MAX_CACHE_BYTES, MAX_CACHE_FILES))
+
+
+def cached_audio(src, title):
+    """A recording's playable file, fetched through Graph the first time
+    someone plays it (cmd_onenote_recording) or a save copies its bytes.
+    Opening or checking a page never fetches a recording."""
+    return cached_graph_file(src, recording_cache_path(src, title), MAX_AUDIO, _recording_budget,
+                           lambda: prune_resource_cache(ONENOTE_AUDIO_DIR, MAX_AUDIO_CACHE_BYTES, MAX_AUDIO_CACHE_FILES))
+
+
+def cached_graph_file(src, path, max_bytes, budget, prune):
+    """A Graph resource as a private file:// URL, fetched into `path` when it
+    is not there yet; None when the source is not Graph's resource endpoint
+    or the fetch fails."""
+    if not image_allowed(src):
+        return None
+    try:
+        if os.path.getsize(path) > 0:
+            return "file://" + path
+        os.remove(path)                  # a failed fetch left a stub
+    except OSError:
+        pass
+    data = fetch_page_resource(src, max_bytes, budget)
+    if data is None:
+        return None
+    # Committed whole and private (fileio.write_atomic): a reader never
+    # meets half a resource.
+    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+    fileio.write_atomic(path, data, mode=0o600)
+    prune()
+    return "file://" + path
+
+
+def image_cache_path(src):
+    import hashlib
+    return os.path.join(ONENOTE_IMG_DIR, hashlib.sha1(src.encode()).hexdigest())
+
+
+def recording_cache_path(src, title):
+    import hashlib
+    return os.path.join(ONENOTE_AUDIO_DIR, hashlib.sha256(src.encode()).hexdigest() + audio_suffix(title))
 
 
 def audio_suffix(title):
@@ -1030,46 +1110,22 @@ def audio_suffix(title):
     return suffix if suffix in AUDIO_MIME_BY_SUFFIX else ""
 
 
-def resource_cache_path(src, directory, suffix=""):
-    import hashlib
-    return os.path.join(directory, hashlib.sha1(src.encode()).hexdigest() + suffix)
+def fetch_page_resource(src, max_bytes, budget):
+    """Fetch a bounded, private Graph resource without following redirects;
+    the bytes, or None when the budget is spent or the request fails.
 
-
-def recording_identity():
-    return RecordingIdentity(ONENOTE_AUDIO_DIR, MAX_AUDIO,
-        lambda: prune_resource_cache(ONENOTE_AUDIO_DIR, 400 * 1024 * 1024, 100))
-
-
-def cached_audio(src, title):
-    """Download an existing recording with the same Graph boundary as images."""
-    return cached_page_resource(src, ONENOTE_AUDIO_DIR, MAX_AUDIO, 400 * 1024 * 1024, 100, audio_suffix(title))
-
-
-def cached_page_resource(src, directory, max_bytes, cache_bytes, cache_files, suffix=""):
-    """Fetch a bounded, private Graph resource without following redirects.
-
-    Images and recordings share the page's request count and time budget.
     Nothing from the document is handed to Qt as an authenticated remote URL.
     """
-    if not image_allowed(src):
+    if not image_allowed(src) or budget.spent():
         return None
-    if _page_resource_budget[1] >= MAX_PAGE_RESOURCES or (_page_resource_budget[0] and time.monotonic() > _page_resource_budget[0]):
-        return None                      # the page's resource budget is spent
-    os.makedirs(directory, mode=0o700, exist_ok=True)
-    path = resource_cache_path(src, directory, suffix)
-    try:
-        if os.path.getsize(path) > 0:
-            return "file://" + path
-        os.remove(path)                  # a failed fetch left a stub
-    except OSError:
-        pass
     # No revoked-grant pass of its own, for the reason the listing pool has
-    # none: the only caller is `cmd_onenote_page`, whose `graph_raw` fetch of
-    # the page content has already met any 401 and forced the refresh.
+    # none: a page read's `graph_raw` fetch of the content has already met
+    # any 401 and forced the refresh, and a recording is played or copied
+    # from a page that was read. A grant revoked since then shows as a
+    # failed download until the next read signs the account out.
     req = urllib.request.Request(src, headers={"Authorization": "Bearer " + access_token()})
     pause = 0.0        # a throttle met here, recorded once the slot is released
     try:
-        deadline = _page_resource_budget[0] or (time.monotonic() + PAGE_RESOURCE_BUDGET_SECONDS)
         # A resource is a Graph request like any other and is paced like one:
         # forty of them is what a picture-heavy page costs, and that is most
         # of a minute's budget on its own.
@@ -1077,17 +1133,13 @@ def cached_page_resource(src, directory, max_bytes, cache_bytes, cache_files, su
                             reserve=msgraph.settings.background_reserve):
             with _image_opener.open(req, timeout=20) as r:
                 # Bounded in size and in time: a TimeoutError is an OSError, caught below.
-                data = provider_io.read_bounded(r, max_bytes, deadline)
+                data = provider_io.read_bounded(r, max_bytes, budget.until())
                 if not data:
                     # Graph serves a just-written resource as 200 with an
                     # empty body; caching that would poison the page for good.
                     raise OverflowError("empty resource response")
-        _page_resource_budget[1] += 1
-        # Committed whole and private (fileio.write_atomic): a reader never
-        # meets half a resource.
-        fileio.write_atomic(path, data, mode=0o600)
-        prune_resource_cache(directory, cache_bytes, cache_files)
-        return "file://" + path
+        budget.used += 1
+        return data
     except ratelimit.Throttled:
         pass                       # the pacer already knows; nothing to record
     except urllib.error.HTTPError as e:
@@ -1096,10 +1148,11 @@ def cached_page_resource(src, directory, max_bytes, cache_bytes, cache_files, su
     except (urllib.error.URLError, OSError, OverflowError):
         pass
     if pause:
-        # The rest of this page's images would earn the same answer, and so
-        # would the next process: record it once and let them all fail fast.
-        # The page still loads — it shows the alt text — and the incomplete
-        # image list keeps a save from writing it back (remember_images).
+        # The rest of this page's resources would earn the same answer, and
+        # so would the next process: record it once and let them all fail
+        # fast. The page still loads — an image shows its alt text, a
+        # recording its unavailable player — and the missing resource keeps
+        # a save from writing the page back (remember_images, read_page).
         ratelimit.report_throttle(msgraph.settings.rate_key, pause)
     return None
 
@@ -1144,9 +1197,7 @@ def normalize_note(note):
         known = known_image(url)
         width = (known or {}).get("width", 0)
         if known and known.get("src"):
-            import hashlib
-            name = hashlib.sha1(known["src"].encode()).hexdigest()
-            cached = os.path.join(ONENOTE_IMG_DIR, name)
+            cached = image_cache_path(known["src"])
             if os.path.isfile(cached):
                 return "file://" + cached, width
         return url, width
@@ -1154,7 +1205,7 @@ def normalize_note(note):
     identity = recording_identity()
 
     def audio_ref(url, title, identifier=""):
-        url, identifier = identity.resolve(url, title, identifier)
+        url, identifier = identity.resolve(url, identifier)
         return onenote_md.audio.markup(url, title, identifier)
 
     html = onenote_md.markdown_to_onenote_html(note["body"], image_ref, audio_ref)
@@ -1193,9 +1244,16 @@ def merge_store(page_id):
                       normalize=normalize_note, stale_seconds=120)
 
 
+def recording_resource(src, title):
+    """A page names a recording by its Graph resource; nothing is fetched."""
+    return src if image_allowed(src) else None
+
+
 def read_page(page_id):
-    _page_resource_budget[0] = time.monotonic() + PAGE_RESOURCE_BUDGET_SECONDS
-    _page_resource_budget[1] = 0
+    """The page as a note. Its images are fetched into the cache. Its
+    recordings are not: each is named by its Graph resource and fetched when
+    someone plays it (cmd_onenote_recording)."""
+    _image_budget.start()
     ticket = search_ticket(page_id)
     url = page_content_url(page_id) + "?includeIDs=true"
     status, html = graph_raw("GET", url)
@@ -1204,11 +1262,12 @@ def read_page(page_id):
             fail(graph_err(json.loads(html), status))
         except ValueError:
             fail("Graph error %s" % status)
-    identity = recording_identity()
-    result = onenote_md.html_to_markdown(html, cached_image, cached_audio,
-        lambda src, local, title, identifier: identity.resolve(local, title, identifier))
+    # Graph's resources are the truth here: no upload alias applies.
+    identity = RecordingIdentity()
+    result = onenote_md.html_to_markdown(html, cached_image, recording_resource,
+        lambda src, local, title, identifier: identity.resolve(local, identifier))
     if any(not recording["local"] for recording in result["recordings"]):
-        result["reason"] = "A recording could not be loaded. Open the page again before editing."
+        result["reason"] = "A recording on this page has no OneNote resource, so the page is read-only."
     remember_images(page_id, result["images"], result["editable"])
     remember_recordings(result["recordings"])
     remember_search(page_id, html, ticket)
@@ -1233,6 +1292,17 @@ def cmd_onenote_page(page_id, check=False):
             journal.check_remote(remote)
         result = normalize_note(remote) if check else journal.open(remote)
         out(dict(result, editable=remote["editable"], markdown=True, reason=remote.get("reason", "")))
+
+
+def cmd_onenote_recording(src, title):
+    """One recording's playable file, fetched when the user plays it."""
+    if not image_allowed(src):
+        fail("This recording is not a OneNote attachment")
+    _recording_budget.start()
+    url = cached_audio(src, title)
+    if not url:
+        fail("The recording could not be downloaded. Press Play to try again")
+    out({"url": url})
 
 
 MIME_BY_SUFFIX = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
@@ -1284,30 +1354,41 @@ class Uploads:
         return self.part(path, mime, 0)
 
     def audio_ref(self, url, title, identifier=""):
-        """Resolve a playable audio token to OneNote's attachment object."""
-        known = known_recording(url, identifier)
+        """Resolve a recording token, named by its Graph resource, to
+        OneNote's attachment object."""
         recording = self.recording_instances.get(identifier)
         if recording is None and not identifier:
-            recording = self.recordings.get(known["src"]) if known else None
-        if recording is None and not identifier:
-            recording = next((item for item in self.recordings.values() if item["local"] == url), None)
+            recording = self.recordings.get(url)
+        known = known_recording(url)
         mime = (recording or known or {}).get("mime", "") or AUDIO_MIME_BY_SUFFIX.get(
-            os.path.splitext(url)[1].lower()) or AUDIO_MIME_BY_SUFFIX.get(os.path.splitext(title)[1].lower())
+            os.path.splitext(title)[1].lower())
         if not mime or not re.fullmatch(r"audio/[a-z0-9.+-]+|video/3gpp", mime):
             self.error = self.error or "this recording's audio format cannot be saved to OneNote"
             return ""
         if recording and not self.upload_known:
             source = recording["src"]
             self.audio_paths[source] = url
-        elif url.startswith("file://"):
-            source = self.part(file_path_of(url), mime, 0, kind="audio", title=title,
-                               source_url=url, data_id=identifier)[0]
         else:
-            self.error = self.error or "a recording must be a local audio file before it can be saved"
-            return ""
+            source = self.recording_part(url, mime, title, identifier)
+            if not source:
+                return ""
         identity = ' data-id="%s"' % _html.escape(identifier, quote=True) if identifier else ""
         return '<object data="%s" data-attachment="%s" type="%s"%s></object>' % (
             _html.escape(source, quote=True), _html.escape(title, quote=True), _html.escape(mime, quote=True), identity)
+
+    def recording_part(self, src, mime, title, data_id):
+        """Upload a recording again with the bytes of its Graph resource: from
+        the cache when it was played, otherwise fetched now. The resource
+        comes from the note, and a paste can name any URL, so nothing but
+        Graph's resource endpoint is read; never a local file."""
+        if not image_allowed(src):
+            self.error = self.error or "a recording that did not come from OneNote cannot be saved"
+            return ""
+        local = cached_audio(src, title)
+        if not local:
+            self.error = self.error or "a recording could not be downloaded from OneNote to save its copy"
+            return ""
+        return self.part(file_path_of(local), mime, 0, kind="audio", title=title, source_url=src, data_id=data_id)[0]
 
     def part(self, path, mime, width, kind="image", title="", source_url="", data_id=""):
         label = "recording" if kind == "audio" else "image"
@@ -1349,25 +1430,36 @@ class Uploads:
         """Materialize media and label upload parts in a presentation fragment."""
         content = onenote_patch.parse(source)
         for node in onenote_patch.walk(content):
-            if node.tag not in {"img", "object"}:
-                continue
-            audio = node.tag == "object"
-            attribute = "data" if audio else "src"
-            source = node.attrs.get(attribute, "")
-            local = (self.audio_paths if audio else self.image_paths).get(source)
-            if local and not source.startswith("name:"):
-                path = file_path_of(local)
-                mime = node.attrs.get("type", "") if audio else MIME_BY_SUFFIX.get(
-                    os.path.splitext(path)[1].lower(), "image/png")
-                width = int(float(node.attrs.get("width", "0") or 0))
-                node.attrs[attribute] = self.part(path, mime, width, kind="audio" if audio else "image",
-                    title=node.attrs.get("data-attachment", ""), source_url=local,
-                    data_id=node.attrs.get("data-id", "") if audio else "")[0]
-            if node.attrs.get(attribute, "").startswith("name:"):
-                upload = self.staged.get(node.attrs[attribute][5:])
-                if upload:
-                    node.attrs["data-id"] = upload["dataId"]
+            if node.tag == "img":
+                self.materialize_image(node)
+                self.label_upload(node, "src")
+            elif node.tag == "object":
+                self.materialize_recording(node)
+                self.label_upload(node, "data")
         return onenote_patch.serialize(content)
+
+    def materialize_image(self, node):
+        source = node.attrs.get("src", "")
+        local = self.image_paths.get(source)
+        if local and not source.startswith("name:"):
+            path = file_path_of(local)
+            mime = MIME_BY_SUFFIX.get(os.path.splitext(path)[1].lower(), "image/png")
+            width = int(float(node.attrs.get("width", "0") or 0))
+            node.attrs["src"] = self.part(path, mime, width)[0]
+
+    def materialize_recording(self, node):
+        source = node.attrs.get("data", "")
+        local = self.audio_paths.get(source)
+        if local and not source.startswith("name:"):
+            node.attrs["data"] = self.recording_part(local, node.attrs.get("type", ""),
+                                                     node.attrs.get("data-attachment", ""),
+                                                     node.attrs.get("data-id", ""))
+
+    def label_upload(self, node, attribute):
+        if node.attrs.get(attribute, "").startswith("name:"):
+            upload = self.staged.get(node.attrs[attribute][5:])
+            if upload:
+                node.attrs["data-id"] = upload["dataId"]
 
 
 def multipart(commands, parts):
@@ -1414,6 +1506,7 @@ def write_page(page_id, note, remote, current):
     url = page_content_url(page_id)
     saved_html = current
     if note["body"] != normalize_note(remote)["body"]:
+        _recording_budget.start()            # the copies this save fetches
         uploads = Uploads(recordings=remote.get("recordings", []))
         runs = onenote_md.markdown_to_runs(note["body"], uploads.ref, uploads.audio_ref)
         if uploads.error:
@@ -1519,6 +1612,7 @@ def cmd_onenote_create(section_id, path):
     title = _html.escape(payload.get("title", "") or "")
     # A brand-new page has no resources of its own to keep, so everything the
     # note shows goes up as bytes — never as a reference OneNote would copy.
+    _recording_budget.start()
     uploads = Uploads(upload_known=True)
     runs = onenote_md.markdown_to_runs(payload.get("body", ""), uploads.ref, uploads.audio_ref)
     if uploads.error:
@@ -1644,6 +1738,8 @@ def main(argv):
         cmd_onenote_pages(argv[2:])
     elif cmd == "page" and len(argv) >= 3:
         cmd_onenote_page(argv[2], "--check" in argv[3:])
+    elif cmd == "recording" and len(argv) >= 4:
+        cmd_onenote_recording(argv[2], argv[3])
     elif cmd == "update" and len(argv) >= 4:
         cmd_onenote_update(argv[2], argv[3])
     elif cmd == "create" and len(argv) >= 4:
@@ -1669,7 +1765,7 @@ def main(argv):
                 pass
         out({"ok": True})
     else:
-        fail("usage: onenote.py list [--cached|--max-age S|--force]|section-order|page <id>|update <id> <file>|create <sectionId> <file>|delete <id>|create-section <notebookId> <file>|clear-cache", 2)
+        fail("usage: onenote.py list [--cached|--max-age S|--force]|section-order|page <id>|recording <src> <title>|update <id> <file>|create <sectionId> <file>|delete <id>|create-section <notebookId> <file>|clear-cache", 2)
 
 
 def run(argv):

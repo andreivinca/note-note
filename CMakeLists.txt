@@ -11,7 +11,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 include(GNUInstallDirs)
 include(CTest)
-find_package(Qt6 6.8 REQUIRED COMPONENTS Quick QuickControls2 Network DBus Multimedia)
+# Qt Multimedia is loaded at run time, by QML, to play recordings; without it
+# notes still open and edit. Found here only to know whether playback tests run.
+find_package(Qt6 6.8 REQUIRED COMPONENTS Quick QuickControls2 Network DBus OPTIONAL_COMPONENTS Multimedia)
 configure_file(packaging/build-info.json.in note-note-build.json @ONLY)
 file(RELATIVE_PATH NOTE_NOTE_DATA_FROM_BIN "${CMAKE_INSTALL_FULL_BINDIR}" "${CMAKE_INSTALL_FULL_DATADIR}/note-note")
 
@@ -32,7 +34,7 @@ add_library(note-note-app STATIC
     hosts/standalone/processbackend.cpp hosts/standalone/processbackend.h
     ${NOTE_NOTE_NATIVE_SOURCES}
 )
-target_link_libraries(note-note-app PUBLIC Qt6::Quick Qt6::QuickControls2 Qt6::Network Qt6::Multimedia note-note-theme)
+target_link_libraries(note-note-app PUBLIC Qt6::Quick Qt6::QuickControls2 Qt6::Network note-note-theme)
 # The executable knows its resources by their place next to it and by the
 # install prefix, never by the tree it was built from: a release binary
 # carries nothing about the build machine, and a build-tree run names the
@@ -100,10 +102,12 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/tabstrip_selftest.py)
     add_test(NAME onenote-audio COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/plugins/org.note-note.onenote/audio_selftest.py)
-    add_test(NAME audio-playback COMMAND ${Python3_EXECUTABLE}
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests/audio_selftest.py)
-    set_tests_properties(audio-playback PROPERTIES
-        ENVIRONMENT "NOTE_NOTE_HARNESS=$<TARGET_FILE:note-note-harness>" TIMEOUT 60)
+    if(Qt6Multimedia_FOUND)
+        add_test(NAME audio-playback COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/audio_selftest.py)
+        set_tests_properties(audio-playback PROPERTIES
+            ENVIRONMENT "NOTE_NOTE_HARNESS=$<TARGET_FILE:note-note-harness>" TIMEOUT 120)
+    endif()
     set_tests_properties(native-extensions PROPERTIES
         ENVIRONMENT "NOTE_NOTE_HARNESS=$<TARGET_FILE:note-note-harness>" TIMEOUT 120)
     set_tests_properties(native-transitions PROPERTIES

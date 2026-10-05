@@ -17,6 +17,9 @@ Window {
   property bool ready: false
   property string fixture: Platform.env("NOTE_NOTE_AUDIO_FIXTURE")
   property string screenshot: Platform.env("NOTE_NOTE_AUDIO_SCREENSHOT")
+  // Set when the application tree's playback component cannot load, as on
+  // a system without the Qt Multimedia QML module (audio_selftest.py).
+  property bool withoutMultimedia: Platform.env("NOTE_NOTE_AUDIO_WITHOUT_MULTIMEDIA") === "1"
 
   Native.Backend { id: backend }
   Markdown.Markdown { id: markdown }
@@ -35,6 +38,21 @@ Window {
     background: "#1e1e2e"
     accent: "#89b4fa"
     onEdited: window.edits++
+    // The host's part: the sources asked for, answered after a moment with
+    // whatever the test set in fetchAnswer.
+    onRecordingRequested: function(source, title, answer) {
+      window.fetches = window.fetches.concat([source])
+      fetchReply.answer = answer
+      fetchReply.start()
+    }
+  }
+  property var fetches: []
+  property var fetchAnswer: null
+  Timer {
+    id: fetchReply
+    property var answer: null
+    interval: 300
+    onTriggered: answer(window.fetchAnswer)
   }
   Component.onCompleted: {
     backend.install()
@@ -73,7 +91,8 @@ Window {
     function test_01_play_stop_seek_and_layout() {
       var player = load("Before\n\n" + body("Audio Recording.3gp") + "\n\nAfter", "Audio Recording.3gp")
       verify(player.width > 200)
-      verify(player.height > 80)
+      // The space the document reserves (audio.py) is the player's own size.
+      compare(player.height, player.implicitHeight)
       verify(!player.failure)
       var button = findChild(player, "audioPlayStop")
       mouseClick(button)
@@ -314,27 +333,140 @@ Window {
       load(source, "Recording from another note")
       compare(savedBody(), savedSource)
     }
+
+    function count(text, expression) {
+      return (text.match(expression) || []).length
+    }
+
+    function test_08_cut_and_paste_moves_a_recording_with_its_identity() {
+      var moved = body("Moved recording").replace("></audio>", ' data-id="nn-audio-moved"></audio>')
+      load("Before\n\n" + moved + "\n\nAfter", "Moved recording")
+      editor.readOnly = false
+      var area = findChild(editor, "noteBody")
+      var position = editor.plainText().indexOf("￼")
+      verify(position >= 0)
+      area.select(position, position + 1)
+      area.cut()
+      editor.focusBody()
+      area.cursorPosition = area.length
+      keyClick(Qt.Key_Return)
+      keyClick(Qt.Key_Return)
+      editor.paste()
+      var objects = findChild(editor, "audioObjects")
+      tryCompare(objects, "count", 1, 5000)
+      var saved = savedBody()
+      compare(count(saved, /data-id="nn-audio-moved"/g), 1)
+      verify(saved.indexOf("After") < saved.indexOf("nn-audio-moved"), saved)
+      area.cursorPosition = 0
+      editor.paste()
+      tryCompare(objects, "count", 2, 5000)
+      var copied = savedBody()
+      compare(count(copied, /<audio\b/g), 2)
+      compare(count(copied, /data-id="nn-audio-moved"/g), 1)
+      editor.setNote("Next", "Plain text")
+    }
+
+    function showRemote(title) {
+      var source = "https://graph.microsoft.com/v1.0/me/onenote/resources/" + title + "/$value"
+      editor.setNote(title, '<audio src="' + source + '" title="' + title + '"></audio>')
+      tryVerify(function() {
+        var player = findChild(editor, "audioPlayer")
+        return player !== null && player.recordingTitle === title
+      }, 5000)
+      return findChild(editor, "audioPlayer")
+    }
+
+    function test_09_remote_recordings_are_fetched_only_when_played() {
+      window.fetches = []
+      window.fetchAnswer = { error: "the recording could not be downloaded. Press Play to try again" }
+      var edits = window.edits
+      var player = showRemote("Remote")
+      wait(400)
+      compare(window.fetches.length, 0, "opening the note fetched a recording")
+      compare(player.status, "")
+      verify(findChild(player, "audioPlayStop").enabled)
+      verify(!findChild(player, "audioSeek").enabled)
+      player.toggle()
+      verify(player.fetching)
+      compare(player.status, "Downloading…")
+      tryVerify(function() {
+        return player.status === "The recording could not be downloaded. Press Play to try again"
+      }, 3000)
+      verify(!player.fetching && !player.playing)
+      window.fetchAnswer = { url: window.fixture }
+      player.toggle()
+      tryVerify(function() {
+        return player.playing && player.position > 100
+      }, 5000)
+      compare(window.fetches.length, 2)
+      player.stop()
+      player.toggle()
+      tryVerify(function() {
+        return player.playing
+      }, 2000)
+      compare(window.fetches.length, 2, "a fetched recording was fetched again")
+      player.stop()
+
+      player = showRemote("Cancelled")
+      player.toggle()
+      verify(player.fetching)
+      player.toggle()
+      verify(!player.fetching)
+      wait(600)
+      verify(!player.playing, "a cancelled download started playing")
+      compare(window.edits, edits, "fetching or playing edited the note")
+      editor.setNote("Next", "Plain text")
+    }
+
+    function test_without_multimedia_notes_still_open_and_edit() {
+      var shown = false
+      editor.setNote("Untitled", "Before\n\n" + body("Recording") + "\n\nAfter", function(ok) {
+        verify(ok)
+        shown = true
+      })
+      tryVerify(function() {
+        return shown && findChild(editor, "audioPlayer") !== null
+      }, 5000)
+      var player = findChild(editor, "audioPlayer")
+      compare(player.failure, "Playback needs Qt Multimedia")
+      verify(!findChild(player, "audioPlayStop").enabled)
+      verify(!findChild(player, "audioSeek").enabled)
+      player.toggle()
+      verify(!player.playing)
+      editor.readOnly = false
+      editor.focusBody()
+      findChild(editor, "noteBody").cursorPosition = 0
+      keyClick("X")
+      tryVerify(function() {
+        return window.edits > 0
+      }, 3000)
+      var saved = savedBody()
+      verify(saved.indexOf("XBefore") >= 0, saved)
+      verify(saved.indexOf(body("Recording")) >= 0, saved)
+    }
   }
 
   Timer {
     interval: 20
     running: window.ready
     onTriggered: {
-      var currentTest = "play_stop_seek_and_layout"
+      var tests = window.withoutMultimedia ? ["test_without_multimedia_notes_still_open_and_edit"] : [
+        "test_01_play_stop_seek_and_layout",
+        "test_02_end_and_note_switch_stop_playback",
+        "test_03_fallback_and_unavailable_recording",
+        "test_04_only_one_recording_plays_at_a_time",
+        "test_05_edit_undo_save_and_reload_preserve_recording",
+        "test_06_copy_paste_assigns_distinct_recording_instances",
+        "test_07_copy_paste_into_another_note_preserves_playback",
+        "test_08_cut_and_paste_moves_a_recording_with_its_identity",
+        "test_09_remote_recordings_are_fetched_only_when_played",
+      ]
+      var currentTest = ""
       try {
-        checks.test_01_play_stop_seek_and_layout()
-        currentTest = "end_and_note_switch"
-        checks.test_02_end_and_note_switch_stop_playback()
-        currentTest = "fallback_and_unavailable"
-        checks.test_03_fallback_and_unavailable_recording()
-        currentTest = "single_recording_playback"
-        checks.test_04_only_one_recording_plays_at_a_time()
-        currentTest = "editing_and_save"
-        checks.test_05_edit_undo_save_and_reload_preserve_recording()
-        currentTest = "copy_and_paste"
-        checks.test_06_copy_paste_assigns_distinct_recording_instances()
-        currentTest = "copy_into_another_note"
-        checks.test_07_copy_paste_into_another_note_preserves_playback()
+        for (var index = 0; index < tests.length; index++) {
+          currentTest = tests[index]
+          checks[currentTest]()
+        }
         console.log("<<<AUDIO_DONE>>>")
       } catch (error) {
         console.error("AUDIO_FAIL:", currentTest, error.stack)

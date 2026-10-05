@@ -432,6 +432,17 @@ class Content(unittest.TestCase):
         self.assertEqual(eval(re.search(r"clipboardAnswerBytes: ([^\n]+)", backend)[1]), clipboard.MAX_IMAGE_ANSWER)
         self.assertIn("maxOutputBytes: backend.clipboardAnswerBytes", backend)
 
+    def test_only_the_playback_component_imports_qt_multimedia(self):
+        # Qt Multimedia is optional: the Omarchy shell does not install it.
+        # A QML file importing a missing module fails to load, and so does
+        # every file that uses it — the whole note editor. Only the player's
+        # Loader target may import it (tests/audio_selftest.py runs without).
+        folders = ("design", "examples", "extensions", "hosts", "plugins", "services", "ui")
+        sources = [ROOT / "Workspace.qml"] + [path for folder in folders for path in (ROOT / folder).rglob("*.qml")]
+        importers = [path.relative_to(ROOT).as_posix() for path in sources
+                     if re.search(r"^\s*import\s+QtMultimedia\b", path.read_text(), re.M)]
+        self.assertEqual(importers, ["ui/AudioPlayback.qml"])
+
     def test_document_dialect_agrees_across_adapters(self):
         js = (ROOT / "ui/Dialect.js").read_text()
         for name in ("QUOTE_PX", "CODE_PAD_PX", "MAX_IMAGE_DISPLAY", "LINE_HEIGHT_PCT",

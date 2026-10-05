@@ -1,10 +1,16 @@
 import QtQuick
 import QtQuick.Controls as Controls
-import QtMultimedia
 import "../design"
 import "../design/controls" as DesignControls
 
-Rectangle {
+// An inline recording: a round Play/Stop button beside the title, with the
+// seek bar and the time beneath the title. It draws no surface of its own,
+// so it reads as part of the note around it.
+//
+// A recording that is not a local file, such as a OneNote attachment, is
+// fetched only when Play is pressed: the player asks for it (fetchRequested)
+// and plays the private file the editor answers with (`fetched`).
+Item {
   id: root
 
   property url audioSource
@@ -13,32 +19,77 @@ Rectangle {
   property color foreground: Color.menu.text
   property color backgroundColor: Color.menu.background
   property color accent: Color.accent
-  readonly property bool playing: media.playbackState === MediaPlayer.PlayingState
-  readonly property int position: media.position
-  readonly property int duration: media.duration
-  readonly property bool seekable: media.seekable
-  readonly property string failure: !media.source.toString() ? "Recording unavailable"
-    : media.error !== MediaPlayer.NoError ? "Cannot play this recording" : ""
+  // The answer to fetchRequested: { url } with a private file:// URL, or
+  // { error } when it could not be fetched; null before anyone asked.
+  property var fetched: null
+  // Play was pressed and the recording is being fetched for it.
+  property bool fetching: false
+  // Qt only ever plays a local file: a remote attachment is fetched into the
+  // private cache by the provider, and Qt never receives a bearer token or a
+  // URL from page content.
+  readonly property bool localFile: root.audioSource.toString().indexOf("file://") === 0
+  readonly property url playableSource: root.localFile ? root.audioSource
+    : root.fetched && root.fetched.url && root.fetched.url.indexOf("file://") === 0 ? root.fetched.url : ""
+  // Null when Qt Multimedia is not installed (AudioPlayback.qml).
+  readonly property var media: playback.status === Loader.Ready ? playback.item : null
+  readonly property bool playing: root.media !== null && root.media.playing
+  readonly property int position: root.media ? root.media.position : 0
+  readonly property int duration: root.media ? root.media.duration : 0
+  readonly property bool seekable: root.media !== null && root.media.seekable
+  // What keeps this recording from playing at all; Play is disabled.
+  readonly property string failure: root.media === null ? "Playback needs Qt Multimedia"
+    : !root.audioSource.toString() ? "Recording unavailable"
+    : root.playableSource.toString() && root.media.failed ? "Cannot play this recording" : ""
+  // What the line beneath the title says in place of the seek bar. A failed
+  // fetch is said here, and Play tries again.
+  readonly property string status: root.failure ? root.failure
+    : root.fetching ? "Downloading…"
+    : root.fetched && root.fetched.error ? root.fetched.error : ""
+  // Where the title, seek bar and time begin, right of the button.
+  readonly property real detailsX: playButton.width + 14
   signal started()
+  signal fetchRequested()
 
+  // Mirrors DISPLAY_WIDTH and DISPLAY_HEIGHT in services/markdown/audio.py:
+  // the space the note's document reserves for the player.
   implicitWidth: 360
-  implicitHeight: 112
-  radius: Style.controlRadius
-  color: Qt.tint(root.backgroundColor, Util.alpha(root.foreground, 0.04))
-  border.width: 1
-  border.color: Util.alpha(root.foreground, 0.14)
+  implicitHeight: 56
 
   function stop() {
-    media.stop()
-    media.position = 0
+    root.fetching = false
+    if (root.media) {
+      root.media.rewind()
+    }
   }
 
   function toggle() {
-    if (root.playing) {
+    if (root.playing || root.fetching) {
       root.stop()
     } else if (root.playbackAllowed && !root.failure) {
       root.started()
-      media.play()
+      if (root.playableSource.toString()) {
+        root.media.play()
+      } else {
+        root.fetching = true
+        root.fetchRequested()
+      }
+    }
+  }
+
+  onFetchedChanged: {
+    if (root.fetched && root.fetched.error) {
+      root.fetching = false
+    }
+  }
+  // The fetched file arrives as the player's new source; play it if Play is
+  // still what was asked for.
+  Connections {
+    target: root.media
+    function onSourceChanged() {
+      if (root.fetching && root.media.source.toString()) {
+        root.fetching = false
+        root.media.play()
+      }
     }
   }
 
@@ -53,74 +104,92 @@ Rectangle {
     }
   }
   onAudioSourceChanged: root.stop()
-  Component.onDestruction: media.stop()
+  Component.onDestruction: root.stop()
 
-  MediaPlayer {
-    id: media
-    // OneNote resources are fetched into the private cache by the provider.
-    // Qt never receives a bearer token or a URL from remote page content.
-    source: root.audioSource.toString().indexOf("file://") === 0 ? root.audioSource : ""
-    audioOutput: AudioOutput {}
-    onMediaStatusChanged: {
-      if (mediaStatus === MediaPlayer.EndOfMedia) {
-        root.stop()
-      }
-    }
+  Loader {
+    id: playback
+    source: "AudioPlayback.qml"
   }
-
-  Text {
-    x: 12
-    y: 10
-    width: parent.width - 24
-    height: 18
-    text: root.recordingTitle
-    textFormat: Text.PlainText
-    elide: Text.ElideRight
-    color: root.foreground
-    font.family: Style.font.menuFamily
-    font.pixelSize: Style.font.body
+  Binding {
+    target: root.media
+    property: "source"
+    value: root.playableSource
+    when: root.media !== null
   }
 
   DesignControls.Button {
     id: playButton
     objectName: "audioPlayStop"
-    x: 12
-    y: 34
+    y: (parent.height - height) / 2
     width: 40
     height: 40
+    radius: width / 2
     focusable: true
     enabled: root.playbackAllowed && !root.failure
-    tooltipText: root.playing ? "Stop recording" : "Play recording"
+    tooltipText: root.fetching ? "Cancel download" : root.playing ? "Stop playback" : "Play recording"
     foreground: root.foreground
     accent: root.accent
-    backgroundColor: Util.alpha(root.accent, 0.12)
+    backgroundColor: root.accent
+    hoverColor: Qt.lighter(root.accent, 1.12)
+    pressedColor: Qt.darker(root.accent, 1.12)
     onClicked: root.toggle()
 
+    // The glyphs take the note's background colour, which stands out on the
+    // accent fill in light and dark themes alike.
     contentItem: Item {
+      Connections {
+        target: root
+        function onBackgroundColorChanged() {
+          playGlyph.requestPaint()
+          spinner.requestPaint()
+        }
+      }
       Rectangle {
         visible: root.playing
         anchors.centerIn: parent
         width: 12
         height: 12
-        color: root.accent
+        radius: 2
+        color: root.backgroundColor
       }
       Canvas {
-        id: playGlyph
-        visible: !root.playing
+        id: spinner
+        visible: root.fetching
         anchors.centerIn: parent
-        width: 14
-        height: 16
+        width: 18
+        height: 18
         onVisibleChanged: requestPaint()
-        Connections {
-          target: root
-          function onAccentChanged() {
-            playGlyph.requestPaint()
-          }
-        }
         onPaint: {
           var context = getContext("2d")
           context.clearRect(0, 0, width, height)
-          context.fillStyle = root.accent
+          context.strokeStyle = root.backgroundColor
+          context.lineWidth = 2.5
+          context.lineCap = "round"
+          context.beginPath()
+          context.arc(width / 2, height / 2, width / 2 - 2, 0, Math.PI * 1.5)
+          context.stroke()
+        }
+        RotationAnimator on rotation {
+          running: spinner.visible
+          from: 0
+          to: 360
+          duration: 900
+          loops: Animation.Infinite
+        }
+      }
+      Canvas {
+        id: playGlyph
+        visible: !root.playing && !root.fetching
+        // A triangle's visual centre sits left of its box's centre.
+        anchors.centerIn: parent
+        anchors.horizontalCenterOffset: 1
+        width: 14
+        height: 16
+        onVisibleChanged: requestPaint()
+        onPaint: {
+          var context = getContext("2d")
+          context.clearRect(0, 0, width, height)
+          context.fillStyle = root.backgroundColor
           context.beginPath()
           context.moveTo(1, 1)
           context.lineTo(13, 8)
@@ -132,55 +201,52 @@ Rectangle {
     }
   }
 
-  Item {
-    id: waveform
-    x: 68
-    y: 34
-    width: Math.max(0, parent.width - x - 12)
-    height: 40
-    visible: !root.failure
-    // Decorative, fixed square bars; playback progress is the seek bar below.
-    Repeater {
-      model: Math.floor(waveform.width / 8)
-      Rectangle {
-        required property int index
-        x: index * 8
-        y: (waveform.height - height) / 2
-        width: 4
-        height: 8 + ((index * 7 + index % 5 * 9) % 9) * 4
-        color: Util.alpha(root.foreground, 0.35)
-      }
-    }
+  Text {
+    x: root.detailsX
+    y: 6
+    width: Math.max(0, parent.width - x)
+    height: 20
+    text: root.recordingTitle
+    textFormat: Text.PlainText
+    elide: Text.ElideRight
+    verticalAlignment: Text.AlignVCenter
+    color: root.foreground
+    font.family: Style.font.menuFamily
+    font.pixelSize: Style.font.body
   }
 
   Text {
-    x: 68
-    y: 44
-    width: Math.max(0, parent.width - x - 12)
+    x: root.detailsX
+    y: 30
+    width: Math.max(0, parent.width - x)
     height: 20
-    visible: !!root.failure
-    text: root.failure
+    visible: !!root.status
+    text: root.status
     textFormat: Text.PlainText
     elide: Text.ElideRight
+    verticalAlignment: Text.AlignVCenter
     color: Util.alpha(root.foreground, 0.65)
     font.family: Style.font.menuFamily
-    font.pixelSize: Style.font.body
+    font.pixelSize: Style.font.bodySmall
   }
 
   Controls.Slider {
     id: seek
     objectName: "audioSeek"
-    x: 12
-    y: 79
-    width: Math.max(0, parent.width - 112)
-    height: 24
+    x: root.detailsX
+    y: 30
+    width: Math.max(0, time.x - x - 12)
+    height: 20
+    leftPadding: 0
+    rightPadding: 0
+    visible: !root.status
     from: 0
     to: Math.max(1, root.duration)
     value: root.position
     enabled: root.playbackAllowed && root.seekable && root.duration > 0 && !root.failure
     live: true
     Accessible.name: "Recording position"
-    onMoved: media.position = Math.round(value)
+    onMoved: root.media.position = Math.round(value)
 
     background: Rectangle {
       x: seek.leftPadding
@@ -208,15 +274,26 @@ Rectangle {
     }
   }
 
+  // Sized for the longest label this recording shows, so the seek bar keeps
+  // its length while the position counts up.
+  TextMetrics {
+    id: timeExtent
+    font: time.font
+    text: root.timeLabel(root.duration) + " / " + root.timeLabel(root.duration)
+  }
   Text {
-    x: parent.width - width - 12
-    y: 83
-    width: 88
-    height: 18
-    text: root.failure ? "" : root.timeLabel(seek.pressed ? seek.value : root.position) + " / " + root.timeLabel(root.duration)
+    id: time
+    x: parent.width - width
+    y: 30
+    width: Math.ceil(timeExtent.advanceWidth)
+    height: 20
+    visible: !root.status
+    // A recording that was not fetched yet has no known length.
+    text: root.duration > 0 ? root.timeLabel(seek.pressed ? seek.value : root.position) + " / " + root.timeLabel(root.duration)
+      : "--:--"
     textFormat: Text.PlainText
-    elide: Text.ElideRight
     horizontalAlignment: Text.AlignRight
+    verticalAlignment: Text.AlignVCenter
     color: Util.alpha(root.foreground, 0.65)
     font.family: Style.font.menuFamily
     font.pixelSize: Style.font.bodySmall

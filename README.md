@@ -79,9 +79,10 @@ Qt runtime. See [Flatpak installation and builds](docs/flatpak.md).
 After installing the build tools listed there, run `./build-flatpak.sh`
 to create a bundle and checksum under `build/dist/<version>/`.
 
-Building and running natively requires Linux, Qt **6.8 or newer** (Quick, Quick Controls 2, Network, Multimedia and
+Building and running natively requires Linux, Qt **6.8 or newer** (Quick, Quick Controls 2, Network and
 SVG image support), Python **3.9 or newer**, and `inotifywait` from
-inotify-tools. Building also requires CMake 3.21+, a C++17 compiler and Qt
+inotify-tools. Qt Multimedia is optional: it plays OneNote recordings.
+Building also requires CMake 3.21+, a C++17 compiler and Qt
 Test when tests are enabled. No Omarchy or Quickshell installation is needed.
 
 ```bash
@@ -218,10 +219,18 @@ select it. The display styling leaves saved Markdown and cursor spacing
 unchanged. Type a space to continue with ordinary text after a URL. A new
 list item starts with ordinary text.
 Existing OneNote audio attachments, including phone recordings in 3GP format,
-show an inline player with Play/Stop, a decorative square waveform and a seek
-bar. Stop returns to the beginning. Switching notes stops playback. You can
+show an inline player: a round Play/Stop button beside the recording's title,
+with a seek bar and the time beneath it. Opening a page downloads none of its
+recordings: one is downloaded the first time you press Play, and plays from
+the cache after that. Stop returns to the beginning. Switching notes stops playback. You can
 edit notes containing recordings; ordinary text edits retain the original
-attachment. Recording and insertion tools are not provided yet.
+attachment. Pasting a recording copies it, and a copy is uploaded again: a
+save can upload at most 3 MB per recording, under Graph's 4 MB request limit.
+Pasting back a recording cut from the same note moves it, keeping its
+attachment, unless the cut was saved first: then it is uploaded again, within
+the same limit. Without Qt Multimedia, notes with
+recordings still open and edit; the player says that playback needs it.
+Recording and insertion tools are not provided yet.
 Local and OneNote notes support tables inside table cells, including
 **Insert → Insert month → Insert current month**. Place the caret in a cell before inserting;
 row and column tools act on the table containing the caret.

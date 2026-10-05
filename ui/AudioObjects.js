@@ -27,16 +27,46 @@ function newIdentifier() {
   })
 }
 
-function copiedHtml(html) {
+// A host's answer to a recording fetch, as the player reads it: { url } or
+// { error } with a sentence to show beneath the recording's title.
+function fetchAnswer(answer) {
+  if (answer && answer.url) {
+    return { url: answer.url }
+  }
+  var error = (answer && answer.error) || "the recording could not be downloaded"
+  return { error: error.charAt(0).toUpperCase() + error.slice(1) }
+}
+
+// The instance IDs among a document's images, as a set: { id: true }.
+function identifiers(images) {
+  var found = {}
+  for (var index = 0; index < images.length; index++) {
+    var value = recording(images[index].source)
+    if (value && value.id) {
+      found[value.id] = true
+    }
+  }
+  return found
+}
+
+// A pasted recording is a copy and gets a new instance ID, unless it puts
+// back one that this note held and no longer holds: that is a move, and the
+// recording keeps its identity and therefore its OneNote resource.
+// `present` and `held` are ID sets: the document now, and since it was shown.
+function pastedHtml(html, present, held) {
+  var taken = Object.assign({}, present)
   return html.replace(/(<img\b[^>]*\bsrc=")([^"]*)(")/gi, function(match, before, source, after) {
     var value = recording(source)
     if (!value) {
       return match
     }
-    value.id = newIdentifier()
+    if (!value.id || taken[value.id] || !held[value.id]) {
+      value.id = newIdentifier()
+    }
+    taken[value.id] = true
     var marker = source.indexOf("#notenote-audio=")
-    var copied = source.substring(0, marker) + "#notenote-audio=" + encodeURIComponent(JSON.stringify(value))
-    return before + copied + after
+    var pasted = source.substring(0, marker) + "#notenote-audio=" + encodeURIComponent(JSON.stringify(value))
+    return before + pasted + after
   })
 }
 

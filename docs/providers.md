@@ -272,6 +272,12 @@ to the running instance and `rebuild()` is called.
 - `action(id, value, sectionKey)` — footer actions include input and section
   context; inline actions supply only the id. Extra arguments can be ignored.
 - `toggleTree(id)`
+- `recording(source, title, cb)` (optional) — fetch one recording for
+  playback, when someone presses Play on it; never fetch recordings with a
+  note. `source` is the `<audio src>` the note holds; answer
+  `cb({ url })` with a private `file://` copy of its bytes, or
+  `cb({ error })`. A provider without it cannot play recordings that are not
+  local files, and the player says so.
 - `revealPath(path)` (optional) — unfold whatever tree state hides this
   note's row, and rebuild, so the row exists on screen. The host calls it
   when a search ends on a note, then scrolls to the row; a provider whose

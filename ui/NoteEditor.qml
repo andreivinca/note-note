@@ -231,6 +231,10 @@ Item {
   signal edited()
   // A short message for the host's status line.
   signal statusRequested(string text)
+  // Play was pressed on a recording that is not a local file. The host has
+  // the note's provider fetch it and calls answer({ url }) with a private
+  // file:// URL, or answer({ error }), exactly once.
+  signal recordingRequested(string source, string title, var answer)
 
   property bool settingText: false
   // Conversions are asynchronous, so a note that arrives while an earlier one
@@ -268,8 +272,7 @@ Item {
   // A setNote that a newer one overtook never calls its `shown`: the editor
   // now belongs to the newer note, and so does the host's state.
   function setNote(t, body, shown) {
-    audioModel.clear()
-    root.activeAudioPlayer = null
+    root.resetAudio()
     editing.clearPending()
     var token = ++root.noteToken
     settingText = true
@@ -300,8 +303,7 @@ Item {
   }
 
   function restoreDocument(snapshot) {
-    audioModel.clear()
-    root.activeAudioPlayer = null
+    root.resetAudio()
     editing.clearPending()
     var token = ++root.noteToken
     root.settingText = true
@@ -438,7 +440,7 @@ Item {
       var to = Math.max(area.selectionStart, area.selectionEnd)
       var before = area.length, added = 0
       atomic(function() {
-        area.insert(to, AudioObjects.copiedHtml(Dialect.documentHtml(html)))
+        area.insert(to, AudioObjects.pastedHtml(Dialect.documentHtml(html), root.audioIdentifiers(), root.audioHeld))
         added = area.length - before
         if (from !== to) {
           area.remove(from, to)
@@ -1159,7 +1161,54 @@ Item {
   // [{ position, x, y, width, height }] in the editor's own coordinates.
   property var imageBoxes: []
   property var activeAudioPlayer: null
+  // The recording IDs this note has held since it was shown, as a set. A
+  // paste of one of them that the note no longer holds is a move, not a
+  // copy (AudioObjects.pastedHtml).
+  property var audioHeld: ({})
+  // The host's answers for recordings this note fetched to play, by source:
+  // { url } with a private file, or { error }. Reassigned, never mutated, so
+  // the players' bindings see each answer.
+  property var audioFetches: ({})
   ListModel { id: audioModel }
+
+  function resetAudio() {
+    audioModel.clear()
+    root.activeAudioPlayer = null
+    root.audioHeld = ({})
+    root.audioFetches = ({})
+  }
+
+  // A recording that is not a local file is fetched when it is played, never
+  // when the note opens. An answer for a note no longer shown is dropped.
+  function fetchRecording(source, title) {
+    var token = root.noteToken
+    root.setAudioFetch(source, null)
+    root.recordingRequested(source, title, function(answer) {
+      if (token !== root.noteToken) {
+        return
+      }
+      root.setAudioFetch(source, AudioObjects.fetchAnswer(answer))
+    })
+  }
+
+  function setAudioFetch(source, answer) {
+    var fetches = Object.assign({}, root.audioFetches)
+    if (answer) {
+      fetches[source] = answer
+    } else {
+      delete fetches[source]
+    }
+    root.audioFetches = fetches
+  }
+
+  // The recording IDs in the document right now; decorations can lag.
+  function audioIdentifiers() {
+    if (nativeBlocks.item) {
+      return AudioObjects.identifiers(nativeBlocks.item.images())
+    }
+    return AudioObjects.identifiers(AudioObjects.imagesFromHtml(area.getFormattedText(0, area.length),
+                                                                area.getText(0, area.length)))
+  }
 
   function updateAudioObjects(images) {
     if (root.audioDocumentToken !== root.noteToken) {
@@ -1172,6 +1221,9 @@ Item {
       var recording = AudioObjects.recording(image.source)
       if (!recording) {
         continue
+      }
+      if (recording.id) {
+        root.audioHeld[recording.id] = true
       }
       var identity = JSON.stringify([recording.source, recording.title])
       var occurrence = occurrences[identity] || 0
@@ -2191,7 +2243,9 @@ Item {
               backgroundColor: root.background
               accent: root.accent
               playbackAllowed: root.hasNote && !root.loading && !root.showingNotice && root.visible
+              fetched: root.audioFetches[audioSource] || null
               onStarted: root.audioStarted(audioPlayer)
+              onFetchRequested: root.fetchRecording(String(audioSource), recordingTitle)
               Component.onDestruction: {
                 if (root.activeAudioPlayer === audioPlayer) {
                   root.activeAudioPlayer = null

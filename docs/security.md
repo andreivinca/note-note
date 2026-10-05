@@ -136,22 +136,34 @@ applies in reverse (`services/clipboard/clipboard.py`,
   bytes and, given a deadline, in time; every transport reads through it, and
   `provider_io.NoRedirect` is the one opener that refuses to follow a
   redirect with a token or a signed URL.
-- Cap how many items a single operation may fetch (40 images and recordings combined per page).
+- Cap how many items a single operation may fetch (40 images per page read;
+  a save fetches at most the 4 recordings it can upload).
 - Prune caches by count *and* by total bytes (400 files / 200 MiB), oldest
   first.
 
-Existing OneNote recordings use the same authenticated resource endpoint,
-redirect refusal and 45-second page budget as images. Recordings are capped at
-100 MiB each; their private cache holds at most 100 files / 400 MiB. Qt receives
-local file URLs for playback, never a bearer token or a remote attachment URL.
+Existing OneNote recordings use the same authenticated resource endpoint and
+redirect refusal as images, but no page read fetches one: a note names each
+recording by its Graph resource, and its bytes are fetched only when someone
+presses Play (`onenote.py recording`), or when a save must upload a copy of
+it. A play has 300 seconds, within the provider process's ten minutes.
+Recordings are capped at 100 MiB each in a private cache of at most
+100 files / 400 MiB, named by the SHA-256 of their resource. Qt receives the
+cached file's local URL for playback, never a bearer token or a remote
+attachment URL.
+
+A save reads recording bytes only from a Graph resource: the cache entry the
+provider keeps for it, or the resource itself. Note markup names a recording
+by URL, and a pasted fragment can name any file, so a recording URL that is
+not Graph's resource endpoint is never opened: the save is refused and the
+draft kept, and note content cannot upload a local file.
 Text edits retain independently targeted audio objects without sending their
 bytes again. Recreated or copied recordings use multipart uploads with the
 same count, per-file and total request limits as images. A missing or oversized
 upload blocks the save and keeps the draft.
-Recording instances have separate IDs even when their cached bytes are
-identical. Clipboard copies receive new IDs; upload acknowledgement updates
-only that instance's Graph reference. Playback copies share a private content
-cache, within the same count and size limits.
+Recording instances have separate IDs even when their bytes are identical. A
+pasted recording receives a new ID, unless it puts back one its note held and
+no longer holds, which is a move; upload acknowledgement records the new
+resource under that instance's ID only.
 
 OneNote content search stores decrypted, normalized page text in
 `~/.cache/omarchy/note-note-onenote-search.json`. The cache is limited to

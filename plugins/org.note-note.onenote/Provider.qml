@@ -778,6 +778,20 @@ LaneProvider {
       })
   }
 
+  // A recording is fetched when someone plays it, never with its page: the
+  // answer is { url } with the private cached file, or { error }.
+  function recording(source, title, cb) {
+    if (!root.rq) {
+      cb({ error: "not ready" })
+      return
+    }
+    root.rq.enqueue({ key: "recording:" + source, mode: "dedupe", priority: 0, owner: root, label: "recording" },
+      function(ctx) { root.runScript(["recording", source, title], "", ctx) },
+      function(result) {
+        cb(result || { error: "the recording was not downloaded — the window closed" })
+      })
+  }
+
   // A save the lane never sent. Superseded means a newer save of the same
   // note carries this one's intent and answers for it: `{}`. Cancelled — the
   // lane emptied on sign-out, or this provider going — means nobody will, and
