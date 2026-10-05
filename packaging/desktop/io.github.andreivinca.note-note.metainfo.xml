@@ -34,6 +34,16 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.0.35" date="2026-10-05">
+      <description>
+        <p>A new OneNote page opens for typing at once, before OneNote has made
+        it, and what you type is saved to the page as soon as it exists.
+        Deleting a note removes it immediately and opens the next one; if
+        OneNote refuses the delete, the note comes back in its place with any
+        unsaved text. A page OneNote could not create keeps its text until you
+        copy it elsewhere and delete it, even across a sign-out.</p>
+      </description>
+    </release>
     <release version="1.0.34" date="2026-10-05">
       <description>
         <p>OneNote audio recordings, including phone recordings, play inline with
