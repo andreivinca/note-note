@@ -2,6 +2,7 @@ import "../../services/platform"
 import QtQuick
 import "../../services/processes"
 import "../../services/requests"
+import "../../services/notes/ordering.js" as Ordering
 
 // Local notebooks: folders under ~/Notes (or $NOTE_NOTE_DIR) holding Markdown
 // files with a tiny title front-matter. Notes directly in the root show up as
@@ -24,7 +25,7 @@ Item {
   readonly property bool canImages: true
   readonly property bool canCreate: true
   readonly property bool canDelete: true
-  readonly property bool canReorder: true
+  readonly property bool canReorder: false
   readonly property bool canCreateSection: true
   readonly property var microsoftScopes: []
 
@@ -129,14 +130,16 @@ Item {
   // notebook gone.
   property var folded: []
 
-  function notebookRows(nb, level, fixed) {
+  function notebookRows(nb, level) {
     var rows = []
     for (var i = 0; i < root.notes.length; i++) {
       var n = root.notes[i]
       if (n.key !== nb.key) {
         continue
       }
-      rows.push({ kind: "note", path: n.path, title: n.title, preview: n.preview, level: level, fixed: fixed, version: n.version || "", modified: Math.floor(Number(n.version || 0) / 1000000) })
+      rows.push({ kind: "note", path: n.path, title: n.title, preview: n.preview, level: level,
+                  reorder: root.orderWritable(nb.key) ? { scope: nb.key, id: n.path } : null,
+                  version: n.version || "", modified: Math.floor(Number(n.version || 0) / 1000000) })
     }
     if (level > 0) {
       rows.push({ kind: "new", path: "section:" + nb.key, level: level })
@@ -144,9 +147,9 @@ Item {
     return rows
   }
   // Two shapes, one setting (notebookTabs): a binder tab per notebook
-  // folder, or one "Notes" tab holding the folders as fold-out trees. In the
-  // single tab the note rows are fixed: a drag across trees would be a move
-  // between notebooks, which is a different feature, not a reorder.
+  // folder, or one "Notes" tab holding the folders as fold-out trees. Either
+  // way each notebook's notes are their own reorder group, so a drag never
+  // moves a note into another notebook.
   function rebuild() {
     if (root.notebookTabs) {
       var out = []
@@ -154,7 +157,7 @@ Item {
         var nb = root.notebooks[b]
         // No colour: a notebook takes its own from its name, so Work and
         // Personal never look alike.
-        out.push({ key: nb.key, name: nb.name, rows: notebookRows(nb, 0, false),
+        out.push({ key: nb.key, name: nb.name, rows: notebookRows(nb, 0),
                    footerActions: notebookActions() })
       }
       root.sections = out
@@ -164,7 +167,7 @@ Item {
         var book = root.notebooks[t], open = root.folded.indexOf(book.key) < 0
         rows.push({ kind: "tree", path: "book:" + book.key, title: book.name, level: 0, expanded: open })
         if (open) {
-          rows = rows.concat(notebookRows(book, 1, true))
+          rows = rows.concat(notebookRows(book, 1))
         }
       }
       // Folded trees hide note rows, so the tab's count and the searchable
@@ -504,9 +507,18 @@ Item {
     return root.notes.map(function(note) { return note.key === sectionKey ? mine[next++] : note })
   }
 
-  function setOrder(sectionKey, paths) {
+  function reorder(sectionKey, paths, callback) {
     if (!orderWritable(sectionKey)) {
-      refuseOrderWrite()
+      callback({ error: "the notes could not all be listed, so the order was not saved" })
+      return
+    }
+    var current = root.notes.filter(function(note) {
+      return note.key === sectionKey
+    }).map(function(note) {
+      return note.path
+    })
+    if (!Ordering.isPermutation(current, paths)) {
+      callback({ error: "the notes changed — try reordering again" })
       return
     }
     var file = dirOf(sectionKey) + "/.order"
@@ -517,7 +529,7 @@ Item {
     }, function(result) {
       root.notes = reorderNotes(sectionKey, paths)
       rebuild()
-    })
+    }, callback)
   }
 
   // ── watching: inotify while the app is open (event-driven, no polling) ──

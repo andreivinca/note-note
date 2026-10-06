@@ -1,6 +1,6 @@
 # Testing and development
 
-The aggregate runner exercises all twenty-one suites without real accounts or note
+The aggregate runner exercises all required suites without real accounts or note
 contents:
 
 ```bash
@@ -38,6 +38,23 @@ executable defaults to `build/note-note-harness` and can be selected with
 `NOTE_NOTE_HARNESS`. `tests/standalone_selftest.py` takes the product binary
 and finds the harness beside it (or `--harness`).
 See [standalone development](standalone.md) for installed-layout checks.
+
+Provider-defined ordering has two targeted suites:
+
+```bash
+python3 tests/ordering_selftest.py
+python3 plugins/org.note-note.onenote/page_order_selftest.py
+```
+
+The QML fixture sends actual pointer drags through the shared sidebar,
+including future tree/subtree groups, scope boundaries, pending writes,
+Escape cancellation and edge scrolling. The transition suite checks
+optimistic projection, refreshes, callbacks, rollback, legacy compatibility
+and OneNote's permission/hierarchy declarations. The Python suite checks
+native Graph metadata, public identity joins, revision ancestry, conditional
+writes, subpage preservation and credential boundaries. These tests use no
+real tokens. The separate live app-credential round trip and its limitations
+are recorded in [OneNote page order](onenote-page-order.md).
 
 It requires Python, Qt's `qml6`, Quickshell (`qs`), `inotifywait`, the Omarchy
 shell components and the built native inspector (`sh cpp/build.sh`). Missing

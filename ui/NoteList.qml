@@ -1,18 +1,21 @@
 import QtQuick
 import QtQml.Models
+import "../services/notes/ordering.js" as Ordering
 import "../design"
 import "../design/controls"
 
 // The active notebook: header, note previews or provider tree, and actions.
 //
 // Model rows carry { kind, notebook, path, title, preview }:
-//   kind "note"        a note (fixed: true → not draggable)
+//   kind "note"        a note
 //   kind "new"         the "+ New note…" row of a notebook
 //   kind "action"      a clickable row: `path` is the action id, `title` its
 //                      label, `icon` its glyph
 //   kind "tree"        an expandable group inside a notebook (OneNote
 //                      notebook / section): `path` is its id, `expanded`
 //                      its state; rows are indented by `level`
+// Any row with a `reorder` group (services/notes/ordering.js) can be dragged
+// among the rows of that group; the rest keep their slots.
 Item {
   id: root
 
@@ -20,6 +23,11 @@ Item {
   // the main list goes empty — not merely invisible, or every match would be
   // built twice, once with drag areas and buttons nobody can see.
   property var model: []
+  property var pendingReorders: ({})
+  property var dragSlot: null
+  property bool movingDrag: false
+  onModelChanged: root.cancelDrag()
+  onFilteringChanged: root.cancelDrag()
   property var footerActions: []
   property string currentPath: ""
   // The keyboard cursor when it rests on a section row instead of the open
@@ -79,9 +87,7 @@ Item {
   signal actionRequested(string id)
   signal footerActionRequested(var action, string value)
   signal deleteRequested(string path)
-  // `paths` is the notebook's notes in the order the drag left them on
-  // screen — the model has not heard about the moves yet (see visualModel).
-  signal reorderFinished(string notebook, var paths)
+  signal reorderFinished(var group, var ids)
 
   // Air between rows. A slot is a control's height plus this, and the card
   // sits inside the slot with this much between it and its neighbours, so
@@ -116,18 +122,109 @@ Item {
     var max = Math.max(0, listView.contentHeight - listView.height)
     listView.contentY = listView.originY + Math.max(0, Math.min(y, max))
   }
-  // The notebook's notes in the order now on screen. A drag moves delegates
-  // while the model stands still, so until the host writes the order back
-  // this walk of the visual items is the only record of it.
-  function orderedPaths(notebook) {
-    var paths = []
+  function visualRows() {
+    var rows = []
     for (var i = 0; i < visualModel.items.count; i++) {
-      var d = visualModel.items.get(i).model.modelData
-      if (d.kind === "note" && d.notebook === notebook) {
-        paths.push(d.path)
+      rows.push(visualModel.items.get(i).model.modelData)
+    }
+    return rows
+  }
+
+  // Move the dragged row's block to the slot of the group member at visual
+  // index `to`. Linear in the rows: the edge scroll calls this every tick.
+  function moveDrag(to) {
+    if (!root.dragSlot || root.movingDrag) {
+      return
+    }
+    var from = root.dragSlot.visualIndex, count = visualModel.items.count
+    if (from < 0 || to < 0 || from >= count || to >= count || from === to) {
+      return
+    }
+    var group = root.dragSlot.modelData.reorder
+    var target = visualModel.items.get(to).model.modelData.reorder
+    if (!Ordering.sameGroup(group, target)) {
+      return
+    }
+    // The rows as now on screen, and the model index each one shows.
+    var rows = [], indices = []
+    for (var i = 0; i < count; i++) {
+      var entry = visualModel.items.get(i).model
+      rows.push(entry.modelData)
+      indices.push(entry.index)
+    }
+    var order = Ordering.ids(rows, group)
+    var source = order.indexOf(group.id), destination = order.indexOf(target.id)
+    order.splice(source, 1)
+    order.splice(destination, 0, group.id)
+    var positions = Ordering.arrangement(rows, group, order)
+    if (!positions) {
+      return
+    }
+    root.movingDrag = true
+    root.arrangeVisual(positions.map(function(position) {
+      return indices[position]
+    }))
+    root.movingDrag = false
+  }
+
+  function cancelDrag() {
+    var slot = root.dragSlot
+    root.dragSlot = null
+    if (slot) {
+      slot.cancelDrag()
+    }
+  }
+
+  Shortcut {
+    sequence: "Escape"
+    enabled: !!root.dragSlot
+    onActivated: {
+      root.cancelDrag()
+      root.restoreVisualOrder()
+    }
+  }
+
+  function arrangeVisual(indices) {
+    for (var i = 0; i < indices.length; i++) {
+      for (var j = i; j < visualModel.items.count; j++) {
+        if (visualModel.items.get(j).model.index === indices[i]) {
+          if (j !== i) {
+            visualModel.items.move(j, i)
+          }
+          break
+        }
       }
     }
-    return paths
+  }
+
+  function restoreVisualOrder() {
+    var indices = []
+    for (var i = 0; i < visualModel.items.count; i++) {
+      indices.push(i)
+    }
+    root.arrangeVisual(indices)
+  }
+
+  // Scrolls while the dragged row is held against the top or bottom edge.
+  // The row it then lands on is found under the same point the DropAreas
+  // see, the row's drag hot spot, so the timer and a mouse move never pick
+  // different slots for one position.
+  Timer {
+    interval: 30
+    repeat: true
+    running: !!root.dragSlot
+    onTriggered: {
+      var point = root.dragSlot.dragPointY()
+      var edge = Math.min(Style.space(48), listView.height / 4)
+      var distance = point < edge ? point - edge
+        : (point > listView.height - edge ? point - listView.height + edge : 0)
+      if (!distance) {
+        return
+      }
+      root.setScrollOffset(root.scrollOffset() + Math.max(-Style.space(12), Math.min(distance / 4, Style.space(12))))
+      var y = Math.max(0, Math.min(point, listView.height - 1))
+      root.moveDrag(listView.indexAt(listView.width / 2, listView.contentY + y))
+    }
   }
 
   function activateFooterAction(provider, path) {
@@ -185,8 +282,22 @@ Item {
         objectName: "notebookHeaderCount"
         anchors.left: parent.left
         anchors.leftMargin: root.pagePadding + root.textInset
+        anchors.right: orderStatus.visible ? orderStatus.left : parent.right
+        anchors.rightMargin: orderStatus.visible ? Style.spacing.sm : root.pagePadding + root.textInset
+        elide: Text.ElideRight
         text: root.noteCount + (root.noteCount === 1 ? " note" : " notes")
         color: Style.secondaryText(root.foreground, 0.45)
+        font.pixelSize: Style.font.bodySmall
+      }
+      HeaderLabel {
+        id: orderStatus
+        anchors.right: parent.right
+        anchors.rightMargin: root.pagePadding + root.textInset
+        text: "Saving order…"
+        visible: root.model.some(function(row) {
+          return row.reorder && !!root.pendingReorders[Ordering.key(row.reorder)]
+        })
+        color: Style.secondaryText(root.foreground, 0.65)
         font.pixelSize: Style.font.bodySmall
       }
       Rectangle {
@@ -263,10 +374,19 @@ Item {
             // than its ink, which pushes its visible edge right of the sum.
             readonly property int indent: (modelData.level || 0)
               * (Style.font.icon + Style.space(2) + Style.spacing.md - Style.spacing.sm)
-            readonly property bool draggable: isNote && !modelData.fixed
+            readonly property bool draggable: !!modelData.reorder
+              && !root.pendingReorders[Ordering.key(modelData.reorder)]
             readonly property real itemHeight: isNote ? root.rowHeight : Style.spacing.controlHeight + root.rowGap
             // Where this row sits on screen while a drag shuffles the order.
             readonly property int visualIndex: slot.DelegateModel.itemsIndex
+            function cancelDrag() {
+              row.Drag.cancel()
+              slot.DelegateModel.inPersistedItems = false
+            }
+            // Where the dragged row's hot spot is, in the list's viewport.
+            function dragPointY() {
+              return row.mapToItem(listView, row.Drag.hotSpot.x, row.Drag.hotSpot.y).y
+            }
             width: listView.width
             height: isNew && !root.hasTree ? 0 : itemHeight
             visible: height > 0
@@ -275,12 +395,10 @@ Item {
               anchors.fill: parent
               enabled: !root.filtering && slot.draggable
               onEntered: function(drag) {
-                if (drag.source.modelData.notebook !== slot.modelData.notebook) {
+                if (drag.source !== root.dragSlot) {
                   return
                 }
-                if (drag.source.visualIndex !== slot.visualIndex) {
-                  visualModel.items.move(drag.source.visualIndex, slot.visualIndex)
-                }
+                root.moveDrag(slot.visualIndex)
               }
             }
 
@@ -350,10 +468,25 @@ Item {
               MouseArea {
                 id: dragArea
                 anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
+                cursorShape: drag.active ? Qt.ClosedHandCursor : (slot.draggable ? Qt.OpenHandCursor : Qt.PointingHandCursor)
                 drag.target: (root.filtering || !slot.draggable) ? null : row
                 drag.axis: Drag.YAxis
                 drag.threshold: Style.space(6)
+                // The row stays under the pointer. Smoothed, it would follow
+                // only from where the threshold was crossed, and a fast move
+                // crosses it in one jump: the row stayed behind, on its slot.
+                drag.smoothed: false
+                // The list flicks on a press-and-drag too, and a fast move
+                // crosses its threshold before this one's: without this, a
+                // quick drag of a draggable row scrolled the list instead.
+                // Other rows, the wheel and the edge scroll still scroll it.
+                preventStealing: !!drag.target
+                drag.onActiveChanged: {
+                  if (drag.active) {
+                    root.dragSlot = slot
+                    slot.DelegateModel.inPersistedItems = true
+                  }
+                }
                 onClicked: {
                   if (slot.isNew) {
                     root.newRequested(slot.modelData.path || slot.modelData.notebook)
@@ -366,11 +499,26 @@ Item {
                   }
                 }
                 onReleased: {
-                  if (!row.Drag.active) {
+                  if (!row.Drag.active || root.dragSlot !== slot) {
+                    slot.DelegateModel.inPersistedItems = false
                     return
                   }
+                  var group = slot.modelData.reorder
+                  var ids = Ordering.ids(root.visualRows(), group)
+                  var before = Ordering.ids(root.model, group)
                   row.Drag.drop()
-                  root.reorderFinished(slot.modelData.notebook, root.orderedPaths(slot.modelData.notebook))
+                  root.dragSlot = null
+                  slot.DelegateModel.inPersistedItems = false
+                  root.restoreVisualOrder()
+                  if (JSON.stringify(ids) !== JSON.stringify(before)) {
+                    root.reorderFinished(group, ids)
+                  }
+                }
+                onCanceled: {
+                  row.Drag.cancel()
+                  root.dragSlot = null
+                  slot.DelegateModel.inPersistedItems = false
+                  root.restoreVisualOrder()
                 }
               }
 

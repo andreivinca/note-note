@@ -488,6 +488,49 @@ def test_cache_session_and_inflight_refresh(verbose):
     return failures
 
 
+def test_consent_upgrade_keeps_the_cache_session(verbose):
+    """A device-code sign-in by the account already signed in (a provider
+    asking for optional consent) keeps that account's cache session; one by
+    another account, or one whose account cannot be told, starts anew."""
+    failures = 0
+    cases = (("same account adds consent", "user-1", "user-1", True),
+             ("another account signs in", "user-1", "user-2", False),
+             ("unidentified sign-in", "user-1", None, False),
+             ("legacy sign-in identified by its own token", None, "user-1", True))
+    for name, recorded, answer, kept in cases:
+        sign_in()
+        token = msgraph.signed_in(CLIENT_ID)
+        token["cacheSession"] = "established"
+        if recorded:
+            token["userId"] = recorded
+        msgraph.save_private(msgraph.TOKENS, token)
+
+        def reply(method, url, data=None, headers=None, answer=answer, **kwargs):
+            if url.endswith("/devicecode"):
+                return 200, {"device_code": "d", "user_code": "u", "verification_uri": "v",
+                             "interval": 0, "expires_in": 60}
+            if "oauth2" in url:
+                return 200, {"access_token": "upgraded", "refresh_token": "r", "expires_in": 3600,
+                             "scope": "User.Read Notes.ReadWrite Files.ReadWrite"}
+            # The previous token, asked by a legacy sign-in, is always user-1.
+            if headers["Authorization"] == "Bearer old":
+                return 200, {"id": "user-1"}
+            if answer:
+                return 200, {"id": answer, "mail": "someone@example.com"}
+            return 401, {}
+
+        with patch.object(msgraph, "http", side_effect=reply), patch.object(msgraph.time, "sleep"):
+            with patch.object(msgraph, "out"):
+                msgraph.cmd_login()
+        saved = msgraph.signed_in(CLIENT_ID)
+        failures += check(name + (" keeps" if kept else " replaces") + " the cache session",
+                          (saved["cacheSession"] == "established") == kept and saved["access_token"] == "upgraded",
+                          "%r" % (saved,))
+    print("a consent upgrade keeps the account's cache session")
+    print("  %d checks failed" % failures if failures else "  all green")
+    return failures
+
+
 def test_the_entry_point_answers_for_the_library(verbose):
     """No function of the library writes to stdout: a failure is raised, with
     its kind, and the script's entry point is the one place it becomes the
@@ -596,6 +639,7 @@ def main():
         total += test_optional_scopes_cannot_break_required_refresh(args.verbose)
         total += test_optional_refresh_with_malformed_reply_or_omitted_scope(args.verbose)
         total += test_cache_session_and_inflight_refresh(args.verbose)
+        total += test_consent_upgrade_keeps_the_cache_session(args.verbose)
         total += test_the_entry_point_answers_for_the_library(args.verbose)
         total += test_background_admission_leaves_foreground_available(args.verbose)
         total += test_bounded_reader_holds_size_and_time(args.verbose)

@@ -43,7 +43,8 @@ class ListingTests(unittest.TestCase):
 
     def save(self, sections=None, pages=None, **kwargs):
         onenote.save_listing(dict({"sections": sections or [section("s")], "pages": pages or [],
-                                   "pageRevision": "initial"}, **kwargs))
+                                   "pageRevision": "initial",
+                                   "pageMetadataVersion": onenote.PAGE_METADATA_VERSION}, **kwargs))
 
     def step(self, response, interactive=False, sid="s"):
         self.payload.return_value = {"sectionId": sid, "interactive": interactive}

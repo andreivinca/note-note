@@ -1,4 +1,5 @@
 .pragma library
+.import "ordering.js" as Ordering
 
 // A tab's key is the provider's id and the section's own key, and this is
 // the one place that spelling is known: everything else goes through
@@ -24,7 +25,7 @@ function row(provider, key, source) {
   return { provider: provider.id, notebook: key, kind: source.kind || "note", path: source.path || "",
            title: source.title || "", hasTitle: provider.hasTitle !== false,
            preview: source.preview || "", icon: source.icon || "",
-           fixed: source.fixed === true || !provider.canReorder, level: source.level || 0,
+           reorder: Ordering.descriptor(provider, ownKey(key), source), level: source.level || 0,
            expanded: source.expanded === true, modified: source.modified || "" }
 }
 

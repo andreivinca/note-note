@@ -15,6 +15,7 @@ import "services/microsoft" as Microsoft
 import "services/requests" as Requests
 import "services/notes" as NoteServices
 import "services/notes/sidebar.js" as Sidebar
+import "services/notes/ordering.js" as Ordering
 import "services/providers" as ProviderServices
 import "services/files" as Files
 import "services/settings" as SettingsServices
@@ -175,6 +176,7 @@ Item {
   readonly property alias catalog: pluginCatalog
   // ── sidebar rows ────────────────────────────────────────────────────
   property var rows: []
+  property var pendingReorders: ({})
   property var footerActions: []
   property int revision: 0
   // Assignments to `rows`, each of which destroys and rebuilds every delegate.
@@ -849,6 +851,13 @@ Item {
 
   function retireProvider(provider) {
     root.cancelQueuedFor(provider)
+    // Its writes die with it, so their callbacks never come: a group left
+    // pending would stay locked, under "Saving order…", for good.
+    Object.keys(root.pendingReorders).forEach(function(key) {
+      if (root.pendingReorders[key].provider === provider) {
+        root.setPendingReorder(key, null)
+      }
+    })
     root.providers = root.providers.filter(function(p) {
       return p !== provider
     })
@@ -874,6 +883,80 @@ Item {
   function setRows(out) {
     root.rows = out
     root.rowWrites++
+  }
+
+  // `request` is { group, ids, provider }; null settles the group's entry.
+  function setPendingReorder(key, request) {
+    var pending = Object.assign({}, root.pendingReorders)
+    if (request) {
+      pending[key] = request
+    } else {
+      delete pending[key]
+    }
+    root.pendingReorders = pending
+  }
+
+  // A drag's result, handed to the group's provider to persist. Until it
+  // answers, the order is a pending projection over the provider's rows
+  // (projectReorders), and every publication of it goes through
+  // rebuildRows, which is what keeps the list's scroll position.
+  function reorderItems(group, ids) {
+    var provider = group ? root.providerById(group.provider) : null
+    if (!provider || root.filterText || root.closing || root.pendingReorders[Ordering.key(group)]) {
+      return
+    }
+    if (!Ordering.apply(root.rows, group, ids) || JSON.stringify(Ordering.ids(root.rows, group)) === JSON.stringify(ids)) {
+      return
+    }
+    var modern = typeof provider.reorder === "function"
+    if (!modern && (!provider.canReorder || typeof provider.setOrder !== "function")) {
+      return
+    }
+    var key = Ordering.key(group)
+    var request = { group: group, ids: ids.slice(), provider: provider }
+    root.setPendingReorder(key, request)
+    root.rebuildRows()
+    var finished = false
+    function done(result) {
+      if (finished) {
+        return
+      }
+      finished = true
+      // Retiring the provider settles its requests (retireProvider), and a
+      // newer request may hold the group by now: neither is this one's.
+      if (root.pendingReorders[key] !== request) {
+        return
+      }
+      root.setPendingReorder(key, null)
+      root.rebuildRows()
+      if (result && result.error) {
+        root.showStatus(provider.name + ": " + result.error)
+      }
+    }
+    try {
+      if (modern) {
+        provider.reorder(group.scope, ids, done)
+      } else {
+        // Compatibility for external providers implementing the 1.x hook.
+        // It has no acknowledgement: its projection stays on screen until
+        // the provider's next update, matching the previous host behavior.
+        provider.setOrder(group.scope, ids)
+        root.setPendingReorder(key, null)
+      }
+    } catch (error) {
+      done({ error: "the order could not be saved" })
+    }
+  }
+
+  function projectReorders(rows) {
+    var out = rows
+    if (!root.filterText) {
+      Object.keys(root.pendingReorders).forEach(function(key) {
+        var pending = root.pendingReorders[key]
+        out = Ordering.apply(out, pending.group, pending.ids) || out
+      })
+    }
+    return out
   }
 
   // The user chose this note: it is what its tab opens with next time. Told
@@ -1226,6 +1309,7 @@ Item {
     var keep = root.switchingTab ? 0 : list.scrollOffset(), active = activeKey()
     root.switchingTab = false
     var model = Sidebar.build(root.providers, active, root.filterText, root.contentHits)
+    model.rows = root.projectReorders(model.rows)
     var sourceProv = active ? providerOfKey(active) : null
     var tabs = model.tabs, hits = model.hits
     // The tabs themselves change rarely (a notebook made, a colour given); the
@@ -2502,6 +2586,7 @@ Item {
           currentPath: root.currentPath
           treeCursor: root.treeCursor
           filtering: root.filterText.length > 0
+          pendingReorders: root.pendingReorders
           searchBusy: root.searchBusy
           searchStatus: root.revision >= 0 ? root.activeSearchStatus() : ""
           sections: root.tabs
@@ -2539,39 +2624,8 @@ Item {
           onDeleteRequested: function(path) {
             root.requestDelete(path)
           }
-          onReorderFinished: function(key, paths) {
-            // The drag reordered delegates, not rows (see the list's
-            // visualModel): mirror the on-screen order into the model, then
-            // hand the provider the list to persist. The notebook's note rows
-            // keep their slots; only which note sits in which slot changes.
-            if (!paths.length) {
-              return
-            }
-
-            var rr = root.rows.slice(), slots = [], byPath = {}
-            for (var i = 0; i < rr.length; i++) {
-              if (rr[i].kind === "note" && rr[i].notebook === key) {
-                slots.push(i)
-                byPath[rr[i].path] = rr[i]
-              }
-            }
-            if (slots.length !== paths.length) {
-              return
-            }
-
-            for (var j = 0; j < slots.length; j++) {
-              var r = byPath[paths[j]]
-              if (!r) {
-                return
-              }
-
-              rr[slots[j]] = r
-            }
-            root.setRows(rr)
-            var p = root.providerOf(paths[0])
-            if (p && p.canReorder) {
-              p.setOrder(root.ownKey(key), paths)
-            }
+          onReorderFinished: function(group, ids) {
+            root.reorderItems(group, ids)
           }
         }
 

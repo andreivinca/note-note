@@ -178,7 +178,8 @@ class InventoryTests(unittest.TestCase):
                                {"id": "family", "name": "Family", "self": SHARED + "/notebooks/family"}],
                  "sections": [shared_section],
                  "pages": [{"id": "p", "title": "Cached shared page", "sectionId": "s"}],
-                 "sectionPages": {"s": {"modified": "stamp"}}}
+                 "sectionPages": {"s": {"modified": "stamp"}},
+                 "pageMetadataVersion": onenote.PAGE_METADATA_VERSION}
         book = {"id": "family", "displayName": "Family", "userRole": "Reader",
                 "sections": [section("s", "family")], "sectionGroups": []}
         graph = self.recent_graph([(403, {}), (status, book if status == 200 else {})],
@@ -328,7 +329,8 @@ class InventoryTests(unittest.TestCase):
         shared_section = inventory.section_record(section("s", "family"))
         cache = {"notebooks": [{"id": "family", "name": "Family Room"}], "sections": [shared_section],
                  "pages": [{"id": "p", "title": "Cached shared page", "sectionId": "s"}],
-                 "sectionPages": {"s": {"modified": "stamp"}}}
+                 "sectionPages": {"s": {"modified": "stamp"}},
+                 "pageMetadataVersion": onenote.PAGE_METADATA_VERSION}
 
         def graph(method, url, **kwargs):
             if url.startswith("/me/onenote/notebooks?"):

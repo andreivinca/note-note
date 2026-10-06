@@ -398,6 +398,7 @@ class BoundaryTests(unittest.TestCase):
     # through msgraph (load_for_session / save_for_session): `files` stands
     # in for the disk there.
     def on_disk(self, stack, files):
+        stack.enter_context(patch.object(onenote, "listing_lock", return_value=contextlib.nullcontext()))
         stack.enter_context(patch.object(onenote.msgraph, "load_json", side_effect=lambda path, default=None: files.get(path, default)))
         stack.enter_context(patch.object(onenote.msgraph, "save_private", side_effect=files.__setitem__))
 

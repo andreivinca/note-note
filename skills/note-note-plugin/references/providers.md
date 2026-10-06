@@ -235,7 +235,7 @@ Item {
 | `markdown` | bool | bodies are Markdown; false = plain text |
 | `hasTitle` | bool | notes have a separate editable title |
 | `canCreate` / `canDelete` | bool | `create()` / `remove()` work |
-| `canReorder` | bool | rows can be dragged within a section; `setOrder()` persists it |
+| `canReorder` | bool | legacy shorthand; prefer per-row `reorder` groups and the asynchronous `reorder()` hook |
 | `canCreateSection` | bool | `createSection()` works; the provider offers the action in `footerActions` |
 | `canImages` | bool | pasted pictures can be stored (default false). The editor writes `![](file:///…)` into the body and `save()` must carry it to the backend, keeping any `{width=N}` marker |
 | `tools` | list | formatting capabilities the backend can store: any of `bold italic underline strikeout highlight textColor code h1 h2 h3 p ul ol todo indent outdent quote codeblock rule link table` (`table` also covers the calendar tools), or another capability a package's tool names. Omitted = all (when `markdown`); `[]` = no toolbar. Never offer a construct the backend would flatten |
@@ -263,7 +263,7 @@ root.sections = [{
 root.updated()
 ```
 
-A row is `{ kind, path, title, preview, icon, level, expanded, version, modified }`:
+A row is `{ kind, path, title, preview, icon, level, expanded, reorder, version, modified }`:
 
 - `kind: "note"` — `path` is the note's `<id>:<anything>` path.
 - `kind: "new"` — `path` is a create target handed to `create()`.
@@ -272,6 +272,22 @@ A row is `{ kind, path, title, preview, icon, level, expanded, version, modified
 - `version` — an opaque change marker (mtime, etag). When a listing shows a
   newer version of the open, unedited note, the host reloads it.
 - `modified` — ISO 8601 with a timezone, or epoch milliseconds, for the dates shown.
+
+For ordering, declare `reorder: { scope: "opaque-group", id: "opaque-item",
+descendants: true }` on each reorderable row and implement
+`reorder(scope, ids, callback)`. A group is isolated by provider and scope,
+regardless of row kind or notebook-tab presentation. `descendants` carries
+following rows with greater `level` as a block; omit it for individual rows.
+Set `reorder: null` when the inventory or permission does not allow ordering.
+The host requires a complete unique permutation, preserves other groups,
+projects pending order across refreshes, and disables another drag in that
+group. Escape cancels and viewport edges scroll. Search results are fixed.
+Validate current backend membership before writing (`isPermutation(current,
+ids)` from `services/notes/ordering.js`), commit canonical rows, then call
+back exactly once with `{}` or `{ error }`. Track queued writes in
+`writeBusy`. Future tree/section ordering uses the same UI and hook.
+Legacy `canReorder` and `setOrder()` remain compatible but lack save callbacks;
+an explicit `reorder`, `null` included, overrides them.
 
 Footer actions are buttons pinned under the list: a click calls
 `action(path, value, sectionKey)`; with `inputPlaceholder` the row first
@@ -294,7 +310,8 @@ Required:
 | `action(id, value, sectionKey)` | a row or footer button was clicked |
 | `crumb(path)` | the line of context shown above the note |
 | `createTargetFor(path)` | where Ctrl+N creates while `path` is open, or `""` |
-| `toggleTree(id)`, `setOrder(sectionKey, paths)` | fold a tree; persist a drag order (empty bodies when unsupported) |
+| `toggleTree(id)` | fold a tree (empty body when unsupported) |
+| `reorder(scope, ids, callback)` | persist a provider-defined reorder group, then settle once with `{}` or `{ error }`; a provider without one may keep the legacy synchronous `setOrder(sectionKey, paths)` |
 | `restoreState(obj)`, `saveState()` | the provider's small persistent state, kept by the host; emit `persistRequested()` when it changes |
 
 Optional: `createSection(name, cb)` → `cb({ key, target?, error? })`;

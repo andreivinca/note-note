@@ -13,6 +13,7 @@ import "app/plugins/org.note-note.sticky" as Sticky
 import "app/plugins/org.note-note.notion" as Notion
 import "app/services/microsoft" as Microsoft
 import "app/services/notes/sidebar.js" as Sidebar
+import "app/services/notes/ordering.js" as Ordering
 import "app/services/providers/plan.js" as Plan
 import "app/services/shortcuts" as Shortcuts
 import "app/services/settings/settings.js" as Settings
@@ -32,6 +33,76 @@ ShellRoot {
   property bool watchFinished: false
   property bool editorFinished: false
   property var appHost: null
+  function hostOrderingCases() {
+    var app = test.appHost
+    var calls = [], complete = null
+    var source = { id: "ordering", name: "Ordering", sections: [{ key: "s", name: "Notes", rows: [
+      { kind: "note", path: "ordering:a", title: "A", reorder: { scope: "group", id: "a" } },
+      { kind: "note", path: "ordering:b", title: "B", reorder: { scope: "group", id: "b" } }
+    ] }], reorder: function(scope, ids, callback) {
+      calls.push({ scope: scope, ids: ids })
+      complete = callback
+    } }
+    app.providers = [source]
+    app.activeSection = "ordering/s"
+    app.filterText = ""
+    app.rebuildRows()
+    var group = app.rows[0].reorder
+    var published = app.revision
+    app.reorderItems(group, ["b", "a"])
+    check("host sends opaque provider group and item IDs", calls.length === 1 && calls[0].scope === "group"
+          && calls[0].ids.join(",") === "b,a")
+    check("a pending order is published by rebuildRows, which keeps the list's scroll position",
+          app.revision > published)
+    check("pending order projects without mutating provider rows", app.rows[0].path === "ordering:b"
+          && source.sections[0].rows[0].path === "ordering:a")
+    app.rebuildRows()
+    check("inventory refresh preserves an in-flight order", app.rows[0].path === "ordering:b")
+    app.reorderItems(group, ["a", "b"])
+    check("host admits only one pending write per group", calls.length === 1)
+    complete({ error: "write failed" })
+    check("failed reorder returns to canonical rows and reports the error", app.rows[0].path === "ordering:a"
+          && Object.keys(app.pendingReorders).length === 0 && app.statusText.indexOf("write failed") >= 0)
+    complete({})
+    check("reorder callback settles once", app.rows[0].path === "ordering:a")
+    app.reorderItems(group, ["b", "b"])
+    check("host rejects duplicate and partial order requests", calls.length === 1)
+    app.reorderItems(group, ["b", "a"])
+    source.sections[0].rows.reverse()
+    complete({})
+    check("successful reorder publishes provider canonical order", app.rows[0].path === "ordering:b"
+          && Object.keys(app.pendingReorders).length === 0)
+    var legacyCalls = []
+    var legacy = { id: "legacy", name: "Legacy", canReorder: true, sections: [{ key: "notes", rows: [
+      { kind: "note", path: "legacy:a", title: "A" }, { kind: "note", path: "legacy:b", title: "B" }
+    ] }], setOrder: function(scope, paths) {
+      legacyCalls.push({ scope: scope, paths: paths })
+    } }
+    app.providers = [legacy]
+    app.activeSection = "legacy/notes"
+    app.rebuildRows()
+    app.reorderItems(app.rows[0].reorder, ["legacy:b", "legacy:a"])
+    check("legacy providers retain optimistic ordering until their next update", app.rows[0].path === "legacy:b"
+          && legacyCalls[0].scope === "notes" && legacyCalls[0].paths.join(",") === "legacy:b,legacy:a"
+          && Object.keys(app.pendingReorders).length === 0)
+    var retiring = Qt.createQmlObject('import QtQuick; QtObject { property string id: "retiring";'
+      + ' property string name: "Retiring"; property var sections: [{ key: "s", name: "Notes", rows: ['
+      + ' { kind: "note", path: "retiring:a", title: "A", reorder: { scope: "group", id: "a" } },'
+      + ' { kind: "note", path: "retiring:b", title: "B", reorder: { scope: "group", id: "b" } }] }];'
+      + ' property var settle: null; function reorder(scope, ids, callback) { settle = callback } }', test)
+    app.providers = [retiring]
+    app.activeSection = "retiring/s"
+    app.rebuildRows()
+    app.reorderItems(app.rows[0].reorder, ["b", "a"])
+    var orphaned = retiring.settle
+    app.retireProvider(retiring)
+    check("retiring a provider releases the groups its unanswered writes held",
+          Object.keys(app.pendingReorders).length === 0)
+    orphaned({ error: "late answer" })
+    check("a retired provider's late answer reports nothing", app.statusText.indexOf("late answer") < 0)
+    app.providers = []
+    app.rebuildRows()
+  }
   function hostSearchCases() {
     var app = test.appHost
     var source = { id: "cachetest", sections: [], replies: [], search: function(query, callback) { this.replies.push(callback) } }
@@ -772,7 +843,9 @@ ShellRoot {
     property bool configured: true
     property bool signedIn: true
     property bool loggingIn: false
+    property bool requestingOptional: false
     property bool filesRead: false
+    property bool filesWrite: false
     property string account: "test"
     property string cacheSession: ""
     property var env: ({})
@@ -780,7 +853,10 @@ ShellRoot {
     signal updated()
     signal signedOut()
     signal statusFailed(string error)
-    function hasScope(scope) { return scope === "Notes.ReadWrite" || (scope === "Files.Read" && filesRead) }
+    function hasScope(scope) {
+      return scope === "Notes.ReadWrite" || (scope === "Files.Read" && filesRead)
+        || (scope === "Files.ReadWrite" && filesWrite)
+    }
     function relogin() { destructiveLogins++ }
   }
   OneNote.Provider { id: oneNote; ms: oneNoteAccount }
@@ -1112,6 +1188,44 @@ ShellRoot {
     probeAccount.refresh()
   }
   function oneNoteCases() {
+    var orderingSource = oneNoteFactory.createObject(test, { ms: oneNoteAccount })
+    var orderingBook = "0-0000000000000001!1", orderingSection = "0-0000000000000001!2"
+    orderingSource.onNotebooks = [{ id: orderingBook, name: "Book", userRole: "Owner" }]
+    orderingSource.onSections = [{ id: orderingSection, name: "Section", notebookId: orderingBook }]
+    orderingSource.expanded = [orderingSection]
+    orderingSource.pages = [{ id: "a", sectionId: orderingSection, title: "A", clientId: "a", level: 0 },
+                            { id: "child", sectionId: orderingSection, title: "Child", clientId: "child", level: 1 },
+                            { id: "b", sectionId: orderingSection, title: "B", clientId: "b", level: 0 }]
+    orderingSource.rebuild()
+    check("OneNote offers optional page ordering consent without changing normal sign-in scopes",
+          orderingSource.accountActions(orderingBook).some(function(action) { return action.path === "enable-page-order" })
+          && orderingSource.microsoftScopes.indexOf("Files.ReadWrite") < 0)
+    check("OneNote page drags require explicit write consent", !orderingSource.bookRows(orderingBook, 0)[1].reorder)
+    oneNoteAccount.filesWrite = true
+    var orderingRows = orderingSource.bookRows(orderingBook, 0)
+    check("OneNote declares section page groups and keeps subpage hierarchy",
+          orderingRows[0].reorder === undefined && orderingRows[1].reorder.scope === "pages:" + orderingSection
+          && orderingRows[1].reorder.descendants && !orderingRows[2].reorder && orderingRows[2].level === 2
+          && orderingRows[3].reorder.scope === orderingRows[1].reorder.scope)
+    orderingSource.pages[0].clientId = ""
+    check("incomplete OneNote identities disable ordering", !orderingSource.pageOrderingAvailable(orderingSource.onSections[0]))
+    orderingSource.pages[0].clientId = "a"
+    orderingSource.onNotebooks = [{ id: orderingBook, name: "Book", userRole: "Reader" }]
+    check("read-only OneNote notebooks cannot expose reorder capabilities", !orderingSource.pageOrderingAvailable(orderingSource.onSections[0]))
+    orderingSource.onNotebooks = [{ id: orderingBook, name: "Book", userRole: "Contributor" }]
+    check("notebooks shared from another account cannot expose reorder capabilities",
+          !orderingSource.pageOrderingAvailable(orderingSource.onSections[0]))
+    oneNoteAccount.filesWrite = false
+    check("notebooks shared from another account do not ask for page ordering consent",
+          !orderingSource.accountActions(orderingBook).some(function(action) { return action.path === "enable-page-order" }))
+    orderingSource.onNotebooks = [{ id: orderingBook, name: "Book", userRole: "Owner" }]
+    oneNoteAccount.loggingIn = true
+    check("an ordinary sign-in in progress is not page ordering's to cancel",
+          orderingSource.accountActions(orderingBook).filter(function(action) {
+            return action.path === "enable-page-order"
+          })[0].title === "Enable page ordering…")
+    oneNoteAccount.loggingIn = false
+    orderingSource.destroy()
     var creations = []
     var creationHost = {
       currentPath: "local:/notes/Other/note.md", treeCursor: "",
@@ -1705,6 +1819,7 @@ ShellRoot {
           test.hostSearchCases()
           test.hostFooterCases()
           test.hostColourCases()
+          test.hostOrderingCases()
         }
         test.completionChecks.forEach(function(check) { check() })
         test.check("runner releases every process", runner.active === 0)

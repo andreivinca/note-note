@@ -145,6 +145,10 @@ The [desktop Application interface](https://learn.microsoft.com/en-us/office/cli
 exposes the notebook hierarchy through OneNote on Windows. That requires a
 running Windows OneNote host outside this Linux provider.
 
-OneNote on the web also has internal browser-session APIs. No authenticated
-browser debugging endpoint was available during this investigation, so those
-requests and their ordering payloads have not been inspected.
+OneNote on the web also has internal revision APIs. A HAR captured on
+2026-10-06 exposed notebook-level section order, but notebook-opening and
+folder-revision requests with app-generated authorization were rejected
+(operation codes 14 and 6). A renewable replacement for this reader has not
+been established. Page order is now read directly with Graph's `pagelevel=true`;
+page writes use a separately verified app-authenticated revision path, described
+in [OneNote page order](onenote-page-order.md).

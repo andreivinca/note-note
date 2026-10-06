@@ -10,6 +10,10 @@ Item {
   property var queue: null
   property var run: null
   property var pendingSections: []
+  // Sections whose cached list predates the page metadata listings now
+  // carry (onenote.py, Listing.outdated). One is fetched again once it is
+  // open; a closed one waits instead of spending the account's budget.
+  property var outdatedSections: []
   property var retryAt: ({})
   property var preferredSections: []
   property var jobs: []
@@ -30,6 +34,7 @@ Item {
     }
   }
   onQueueChanged: schedule()
+  onPreferredSectionsChanged: schedule()
   Component.onDestruction: reset()
 
   function reset() {
@@ -46,6 +51,7 @@ Item {
       }
     }
     root.pendingSections = []
+    root.outdatedSections = []
     root.retryAt = ({})
     root.resumeAt = 0
     root.serial = 0
@@ -60,19 +66,32 @@ Item {
       return true
     }
     root.pendingSections = result.pendingSections
+    root.outdatedSections = result.outdatedSections || []
     root.retryAt = result.sectionRetryAt || ({})
     root.schedule()
     return true
   }
 
+  // The sections to fetch, in order: open ones first, then the rest of the
+  // pending ones. An outdated section is due only while it is open.
+  function candidates() {
+    var open = root.preferredSections.filter(function(sid) {
+      return root.pendingSections.indexOf(sid) >= 0 || root.outdatedSections.indexOf(sid) >= 0
+    })
+    return open.concat(root.pendingSections.filter(function(sid) {
+      return open.indexOf(sid) < 0
+    }))
+  }
+
   function schedule() {
-    if (!root.ready || !root.queue || !root.run || !root.pendingSections.length || root.jobs.length) {
+    var due = root.candidates()
+    if (!root.ready || !root.queue || !root.run || !due.length || root.jobs.length) {
       return
     }
     var now = Date.now()
     var wake = Infinity
-    for (var i = 0; i < root.pendingSections.length; i++) {
-      var sid = root.pendingSections[i]
+    for (var i = 0; i < due.length; i++) {
+      var sid = due[i]
       wake = Math.min(wake, Math.max(root.resumeAt, (root.retryAt[sid] || 0) * 1000))
     }
     nextStep.interval = Math.max(100, Math.min(3600000, wake - now))
@@ -96,10 +115,10 @@ Item {
         root.schedule()
         return
       }
-      var candidates = root.preferredSections.concat(root.pendingSections)
-      for (var i = 0; i < candidates.length; i++) {
-        var sid = candidates[i]
-        if (root.pendingSections.indexOf(sid) >= 0 && (root.retryAt[sid] || 0) * 1000 <= Date.now()) {
+      var due = root.candidates()
+      for (var i = 0; i < due.length; i++) {
+        var sid = due[i]
+        if ((root.retryAt[sid] || 0) * 1000 <= Date.now()) {
           root.request(sid, false, false)
           return
         }
@@ -109,6 +128,9 @@ Item {
   }
 
   function request(sid, interactive, refresh) {
+    // An outdated list is complete, only older, so it is not pending: it is
+    // fetched again from the top, as a refresh is.
+    refresh = refresh || root.outdatedSections.indexOf(sid) >= 0
     if (!root.ready || !root.queue || !root.run || (!refresh && root.pendingSections.indexOf(sid) < 0)) {
       return
     }

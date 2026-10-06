@@ -100,6 +100,10 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/extensions_selftest.py)
     add_test(NAME native-tabstrip COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/tabstrip_selftest.py)
+    add_test(NAME native-ordering COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/ordering_selftest.py)
+    add_test(NAME onenote-page-order COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/plugins/org.note-note.onenote/page_order_selftest.py)
     add_test(NAME onenote-audio COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/plugins/org.note-note.onenote/audio_selftest.py)
     if(Qt6Multimedia_FOUND)
@@ -114,4 +118,6 @@ if(BUILD_TESTING)
         ENVIRONMENT "NOTE_NOTE_HARNESS=$<TARGET_FILE:note-note-harness>" TIMEOUT 240)
     set_tests_properties(native-tabstrip PROPERTIES
         ENVIRONMENT "NOTE_NOTE_HARNESS=$<TARGET_FILE:note-note-harness>" TIMEOUT 90)
+    set_tests_properties(native-ordering PROPERTIES
+        ENVIRONMENT "NOTE_NOTE_HARNESS=$<TARGET_FILE:note-note-harness>" TIMEOUT 60)
 endif()

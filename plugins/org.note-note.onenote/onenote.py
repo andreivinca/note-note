@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""OneNote provider (Notes.ReadWrite; Files.Read is optional for section order).
+"""OneNote provider (Notes.ReadWrite; optional OneDrive ordering permissions).
 
   onenote.py list [--cached|--max-age S|--force] [--incremental] -> {"sections":[{id,name,notebook,notebookId,modified}],
                                            "pages":[{id,sectionId,title,modified}]}
@@ -7,6 +7,7 @@
                                            --force: fetch every section, ignoring the per-section timestamps
                                            --incremental: return the tree before fetching page lists
   onenote.py list-step <file|->       -> one page-list response for {"sectionId", "interactive"?}
+  onenote.py reorder-pages <file|->   -> save {"sectionId", "expected", "order"} and return confirmed inventory
   onenote.py page <id> [--check]        -> {"title","body"(markdown),"editable","view"}
   onenote.py recording <src> <title>    -> {"url"}: a recording's playable file, fetched to play it
   onenote.py update <id> <file>         -> reads {"title","body","view","resolution"?}
@@ -40,6 +41,8 @@ from onenote_audio import RecordingIdentity  # noqa: E402
 from notemerge import MergeStore, StaleRemote, snapshot  # noqa: E402
 import search_index  # noqa: E402
 import notebook_inventory  # noqa: E402
+import page_order  # noqa: E402
+import web_session  # noqa: E402
 
 # OneNote's own Graph budget, shared with no other provider: a throttle here
 # parks OneNote and leaves Sticky Notes listing. Microsoft's delegated OneNote
@@ -49,8 +52,9 @@ import notebook_inventory  # noqa: E402
 # Optional consent stays out of the required refresh scopes, including when
 # an older, still-loaded UI supplies the previous combined scope list.
 msgraph.configure("graph-onenote", [(60, 100), (3600, 350)],
-                  scopes=" ".join(scope for scope in msgraph.settings.scopes.split() if scope != "Files.Read"),
-                  optional_scopes="Files.Read")
+                  scopes=" ".join(scope for scope in msgraph.settings.scopes.split()
+                                  if scope not in ("Files.Read", "Files.ReadWrite")),
+                  optional_scopes="Files.Read Files.ReadWrite")
 
 ONENOTE_CACHE = os.path.join(CACHE_DIR, "note-note-onenote.json")
 # The custom section order the last pass established (cmd_section_order):
@@ -61,6 +65,11 @@ ONENOTE_AUDIO_DIR = os.path.join(CACHE_DIR, "note-note-onenote-audio")
 # This provider's limits: what it will read from Graph and keep around.
 MAX_SECTIONS = 500
 INVENTORY_VERSION = 2
+PAGE_METADATA_VERSION = 1
+# Seconds before each Graph listing that confirms a saved page order. Graph
+# trails the revision service by a few seconds; three listings bound what
+# one drag spends of the shared budget, and no wait follows the last.
+ORDER_CONFIRM_DELAYS = (1, 2, 4)
 READ_ONLY_REASON = "This notebook is shared with you as read-only."
 MAX_PAGES = 3000
 MAX_LIST_BODY = 4 * 1024 * 1024   # one page of a listing
@@ -134,8 +143,8 @@ def cached_resource(collection, resource_id):
                  if value.get("id") == resource_id), {})
 
 
-def resource_read_only(collection, resource_id):
-    """Resolve a page or section's current notebook permission from the inventory."""
+def notebook_record(collection, resource_id):
+    """A notebook, or a page or section's notebook, as the inventory has it ({} if unknown)."""
     cache = load_listing() or {}
 
     def find(kind, identifier):
@@ -146,12 +155,29 @@ def resource_read_only(collection, resource_id):
         resource = find("sections", resource.get("sectionId"))
     if collection in ("pages", "sections"):
         resource = find("notebooks", resource.get("notebookId"))
-    return str(resource.get("userRole", "")).lower() in ("reader", "none")
+    return resource
+
+
+def resource_read_only(collection, resource_id):
+    """Resolve a page or section's current notebook permission from the inventory."""
+    return str(notebook_record(collection, resource_id).get("userRole", "")).lower() in ("reader", "none")
 
 
 def require_writable(collection, resource_id):
     if resource_read_only(collection, resource_id):
         fail(READ_ONLY_REASON)
+
+
+def require_page_ordering(section_id):
+    """Page order is written into the section's file in its owner's
+    OneDrive, and the optional Files.ReadWrite grant reaches only the
+    signed-in account's own drive: a personal notebook it owns, never one
+    shared with it. Provider.qml's pageOrderingNotebook() offers drags on
+    the same terms."""
+    notebook = notebook_record("sections", section_id)
+    if (str(notebook.get("userRole", "")).lower() != "owner"
+            or not web_session.PERSONAL_ITEM.fullmatch(str(notebook.get("id", "")))):
+        fail("Page ordering is available only in personal notebooks you own")
 
 
 def resource_url(collection, resource_id):
@@ -169,6 +195,13 @@ def page_content_url(page_id):
 def page_record(page, section):
     result = {"id": page["id"], "title": page.get("title", "") or "",
               "sectionId": section["id"], "modified": page.get("lastModifiedDateTime", "")}
+    for name in ("order", "level"):
+        value = page.get(name)
+        if type(value) is int and value >= 0:
+            result[name] = value
+    client_id = page_order.client_guid(page)
+    if client_id:
+        result["clientId"] = client_id
     endpoint = notebook_inventory.graph_url(page.get("self"))
     if not endpoint:
         section_url = notebook_inventory.graph_url(section.get("pagesUrl"))
@@ -183,21 +216,16 @@ def page_record(page, section):
 
 
 def section_pages_url(section_id, pages_url=None):
-    """The pages of one section, in the order the OneNote app shows them.
+    """Graph's native page order and hierarchy within a section.
 
-    `$orderby=order` is the order the user set by dragging page tabs, and the
-    sidebar's job is to show a section the way its owner arranged it, not the
-    way it was last touched. Graph sorts by `order` but does not return it: it
-    is absent from the page resource in v1.0 and in beta, and asking for it in
-    `$select` gives null. So the sequence Graph answers in *is* the order, and
-    it is kept from here to the sidebar — `pages` stays a list, never a set,
-    and the provider walks it as given (Provider.qml, rebuild). Nothing here
-    can re-sort it, because there is no key left to sort by.
+    `pagelevel=true` includes `order` and `level`; without it Graph omits
+    both even when explicitly selected. Keep Graph's ordered sequence
+    through pagination and caching, including any gaps in order numbers.
     """
     if pages_url is None:
         pages_url = cached_resource("sections", section_id).get("pagesUrl")
     endpoint = notebook_inventory.graph_url(pages_url) or resource_url("sections", section_id) + "/pages"
-    return endpoint + "?$select=id,title,lastModifiedDateTime,self,contentUrl&$orderby=order&$top=100"
+    return endpoint + "?pagelevel=true&$select=id,title,lastModifiedDateTime,self,contentUrl,order,level,links&$orderby=order&$top=100"
 
 
 def collect_section_pages(section, get):
@@ -348,7 +376,7 @@ def has_section_order_scope():
     """Inspect existing consent without refreshing or changing the sign-in."""
     try:
         token = msgraph.signed_in(msgraph.config()[0]) or {}
-        return "Files.Read" in token.get("scope", "").split()
+        return bool({"Files.Read", "Files.ReadWrite"}.intersection(token.get("scope", "").split()))
     except Exception:
         return False
 
@@ -461,6 +489,12 @@ class Listing:
         seen = cache.get("sectionPages")
         self.seen = dict(seen) if isinstance(seen, dict) else {}
         self.progress = dict(cache.get("sectionProgress") or {})
+        if cache.get("pageMetadataVersion") != PAGE_METADATA_VERSION:
+            # A cursor saved by an older listing would finish its section
+            # without the metadata the new query asks for. Complete lists
+            # stay as they are: each says which metadata it carries
+            # (`outdated`), and only an opened section is fetched again.
+            self.progress = {}
         self.notebook_progress = cache.get("notebookProgress")
         self.warnings = cache.get("listingWarnings", [])
         self.revision = cache.get("pageRevision", "")
@@ -482,8 +516,18 @@ class Listing:
 
     def record(self, sct, pages):
         self.by_section[sct["id"]] = pages
-        self.seen[sct["id"]] = {"modified": sct.get("modified", ""), "at": time.time()}
+        self.seen[sct["id"]] = {"modified": sct.get("modified", ""), "at": time.time(),
+                                "metadata": PAGE_METADATA_VERSION}
         self.progress.pop(sct["id"], None)
+
+    def outdated(self):
+        """Sections listed in full, but before the page metadata listings
+        now carry (hierarchy and client identities). They count as current
+        for discovery and search coverage; the provider fetches one again
+        when it is opened, which is the only place the metadata is used."""
+        return [section["id"] for section in self.sections
+                if not self.stale(section, False)
+                and self.seen[section["id"]].get("metadata") != PAGE_METADATA_VERSION]
 
     def prepare_sections(self, force=False):
         for section in self.sections:
@@ -517,6 +561,7 @@ class Listing:
                       "pageRevision": self.revision,
                       "pageListSerial": self.serial,
                       "inventoryVersion": INVENTORY_VERSION,
+                      "pageMetadataVersion": PAGE_METADATA_VERSION,
                       "inventoryComplete": complete})
         self.last_write = time.monotonic()
 
@@ -557,7 +602,8 @@ class Listing:
         return {"sections": remembered_order(self.sections, load_order()), "notebooks": self.notebooks,
                 "pages": self.pages(), "inventoryReady": True,
                 "inventoryComplete": self.complete(),
-                "pendingSections": pending, "sectionRetryAt": retries,
+                "pendingSections": pending, "outdatedSections": self.outdated(),
+                "sectionRetryAt": retries,
                 "pageListSerial": self.serial,
                 "listingWarnings": self.warnings}
 
@@ -1644,7 +1690,10 @@ def cmd_onenote_create(section_id, path):
         except ValueError:
             fail("Graph error %s" % status)
     pg = json.loads(res)
-    page = page_record(pg, dict(section, id=section_id))
+    # Graph adds a created page at the end of its section as a top-level
+    # page, and its answer carries no pagelevel data to say so. Without the
+    # level the section's page ordering would stay off until a relisting.
+    page = dict(page_record(pg, dict(section, id=section_id)), level=0)
     # A new page goes to the end of its section, which is where OneNote itself
     # puts one and so where the next listing will show it. (It used to go to
     # the front, which was right while the list was newest-first.)
@@ -1720,6 +1769,63 @@ def cmd_onenote_delete(page_id):
 
 
 
+def cmd_reorder_pages(payload_path):
+    payload = read_payload(payload_path)
+    section_id = payload.get("sectionId")
+    section = cached_resource("sections", section_id)
+    expected, wanted = payload.get("expected"), payload.get("order")
+    if (not section or not isinstance(expected, list) or not isinstance(wanted, list)
+            or not 1 < len(wanted) <= MAX_PAGES or len(expected) != len(wanted)
+            or not all(isinstance(value, str) for value in expected + wanted)
+            or len(set(expected)) != len(expected) or set(expected) != set(wanted)):
+        fail("invalid page reorder request")
+    require_page_ordering(section_id)
+    access_token()
+    token = msgraph.signed_in(msgraph.config()[0]) or {}
+    if "Files.ReadWrite" not in token.get("scope", "").split():
+        fail("Enable page ordering to grant the OneDrive write permission")
+    fresh = collect_section_pages(section, lambda url: graph("GET", url, max_bytes=MAX_LIST_BODY))
+    if fresh.get("error"):
+        fail(fresh["error"], kind=fresh.get("kind"))
+    session = web_session.Session.for_section(section, graph)
+    # From this point a revision might commit. Neither a follow-up throttle
+    # nor a lost response may tell the host to replay this whole command.
+    try:
+        arranged = page_order.reorder(session, fresh["pages"], expected, wanted)
+        final = None
+        for delay in ORDER_CONFIRM_DELAYS:
+            time.sleep(delay)
+            confirmed = collect_section_pages(section, lambda url: graph("GET", url, max_bytes=MAX_LIST_BODY))
+            if not confirmed.get("error") and [page["id"] for page in confirmed["pages"]] == [page["id"] for page in arranged]:
+                final = confirmed["pages"]
+                break
+        if final is None:
+            raise web_session.WebError("OneNote accepted the order but Graph is still syncing; refresh the section")
+    except Exception as error:
+        # Whatever ended the command, the revision may have committed, so
+        # the cached order is no longer known and the section is listed
+        # again. No failure here carries a `kind` the host could replay.
+        with listing_lock():
+            cache = load_listing() or {}
+            invalidate_page_lists(cache, section_id)
+            cache.get("sectionPages", {}).pop(section_id, None)
+            cache["inventoryComplete"] = False
+            save_listing(cache)
+        message = str(error) if isinstance(error, msgraph.GraphError) else "Page ordering could not be confirmed; refresh the section"
+        fail(message)
+    with listing_lock():
+        cache = load_listing() or {}
+        listing = Listing(cache, cache.get("sections", []))
+        current_section = next((value for value in listing.sections if value["id"] == section_id), None)
+        if current_section is None:
+            fail("The order was saved but the notebook inventory changed; refresh it")
+        listing.record(current_section, final)
+        listing.revision = uuid.uuid4().hex
+        listing.save(listing.complete())
+        answer = listing.answer()
+    out(dict(answer, ok=True))
+
+
 def main(argv):
     cmd = argv[1] if len(argv) > 1 else ""
     if cmd == "list":
@@ -1734,6 +1840,8 @@ def main(argv):
         cmd_list_step(argv[2])
     elif cmd == "section-order":
         cmd_section_order()
+    elif cmd == "reorder-pages" and len(argv) >= 3:
+        cmd_reorder_pages(argv[2])
     elif cmd == "pages" and len(argv) >= 3:
         cmd_onenote_pages(argv[2:])
     elif cmd == "page" and len(argv) >= 3:
@@ -1765,7 +1873,7 @@ def main(argv):
                 pass
         out({"ok": True})
     else:
-        fail("usage: onenote.py list [--cached|--max-age S|--force]|section-order|page <id>|recording <src> <title>|update <id> <file>|create <sectionId> <file>|delete <id>|create-section <notebookId> <file>|clear-cache", 2)
+        fail("usage: onenote.py list [--cached|--max-age S|--force]|section-order|reorder-pages <file|->|page <id>|recording <src> <title>|update <id> <file>|create <sectionId> <file>|delete <id>|create-section <notebookId> <file>|clear-cache", 2)
 
 
 def run(argv):

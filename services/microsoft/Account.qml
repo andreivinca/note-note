@@ -45,6 +45,9 @@ Item {
   property string cacheSession: ""
   property string grantedScope: ""
   property bool loggingIn: false
+  // The sign-in under way is loginOptional()'s request for added consent,
+  // not an ordinary one: what a provider's "enable" action may cancel.
+  readonly property bool requestingOptional: root.loggingIn && root.loginScopes !== root.scopes
 
   signal updated()
   // The sign-in is gone: a status answer said so, or the user signed out. A

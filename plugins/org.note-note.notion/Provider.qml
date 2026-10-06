@@ -57,7 +57,7 @@ LaneProvider {
       rows.push({ kind: "action", path: "setup", title: "Set up…", icon: "󰒓" })
     } else {
       for (var i = 0; i < root.pages.length; i++) {
-        rows.push({ kind: "note", path: pathOf(root.pages[i].id), title: root.pages[i].title, preview: "", fixed: true, version: root.pages[i].edited || "", modified: root.pages[i].edited || "" })
+        rows.push({ kind: "note", path: pathOf(root.pages[i].id), title: root.pages[i].title, preview: "", version: root.pages[i].edited || "", modified: root.pages[i].edited || "" })
       }
       if (root.pages.length > 0) {
         footerActions.push({ path: "newNote", title: "New Note", icon: "󰐕", shortcut: "newNote" })

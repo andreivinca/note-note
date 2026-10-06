@@ -19,6 +19,7 @@ SUITES = [
     "plugins/org.note-note.onenote/merge_selftest.py",
     "plugins/org.note-note.onenote/search_selftest.py",
     "plugins/org.note-note.onenote/page_inventory_selftest.py",
+    "plugins/org.note-note.onenote/page_order_selftest.py",
     "plugins/org.note-note.onenote/order_selftest.py",
     "services/microsoft/selftest.py",
     "lib/ratelimit_selftest.py",
@@ -30,6 +31,7 @@ SUITES = [
     "tests/test_regressions.py",
     "tests/statusbar_selftest.py",
     "tests/tabstrip_selftest.py",
+    "tests/ordering_selftest.py",
     "tests/transition_selftest.py",
     "tests/extensions_selftest.py",
 ]

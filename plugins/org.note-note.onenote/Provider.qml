@@ -2,6 +2,7 @@ import "../../services/platform"
 import QtQuick
 import "../../services/processes"
 import "../../services/providers"
+import "../../services/notes/ordering.js" as Ordering
 import "../../design"
 import "../../design/controls"
 
@@ -53,7 +54,7 @@ LaneProvider {
   Component.onCompleted: {
     if (services && services.microsoft) {
       root.ms = services.microsoft.create(root.id, root.microsoftScopes, root.microsoftClientId)
-      root.ms.optionalScopes = "Files.Read"
+      root.ms.optionalScopes = "Files.Read Files.ReadWrite"
     }
   }
 
@@ -78,6 +79,8 @@ LaneProvider {
   property var pendingPages: ({})  // draft id -> page, deferred operations and create result
   property var pageAliases: ({})   // draft id -> Graph id, for callbacks captured before creation
   property var pendingDeletes: ({}) // page id -> hidden row and its original order
+  property var pageOrderWrites: ({})
+  property var pageOrderRecovery: ({})
   property int nextDraft: 0
   property var expanded: []      // notebook/section ids the user opened
   property bool searchInventoryReady: false
@@ -168,6 +171,39 @@ LaneProvider {
     var section = page ? root.sectionAt(page.sectionId) : null
     return !!section && !root.bookWritable(section.notebookId)
   }
+
+  function sectionPages(sectionId) {
+    return root.pages.filter(function(page) {
+      return page.sectionId === sectionId
+    })
+  }
+
+  // Page order is written into the section's file in its owner's OneDrive,
+  // and the optional Files.ReadWrite grant reaches only the signed-in
+  // account's own drive: a personal notebook it owns, never one shared with
+  // it. onenote.py's require_page_ordering() enforces the same rule.
+  function pageOrderingNotebook(bookId) {
+    var book = root.onNotebooks.find(function(candidate) {
+      return candidate.id === bookId
+    })
+    return !!book && (book.userRole || "").toLowerCase() === "owner" && /^0-[0-9a-f]{16}![0-9]+$/i.test(book.id)
+  }
+
+  function pageOrderingAvailable(section) {
+    if (!root.ready || !root.ms.hasScope("Files.ReadWrite") || !root.pageOrderingNotebook(section.notebookId)
+        || pageInventory.pendingSections.indexOf(section.id) >= 0 || root.pageOrderRecovery[section.id]) {
+      return false
+    }
+    var pages = root.sectionPages(section.id)
+    var parents = pages.filter(function(page) {
+      return page.level === 0
+    })
+    return parents.length > 1 && pages.every(function(page) {
+      return typeof page.level === "number" && page.level >= 0 && page.level <= 2
+        && Math.floor(page.level) === page.level && !!page.clientId
+        && !root.pendingPages[page.id] && !root.pendingDeletes[page.id]
+    })
+  }
   // One notebook's sections with their pages and New Note rows when open,
   // starting at `level`: 0 when the notebook is a tab
   // of its own, 1 when it sits under its own tree row.
@@ -183,12 +219,17 @@ LaneProvider {
       if (!secOpen) {
         continue
       }
+      var orderable = root.pageOrderingAvailable(sec)
       for (var p = 0; p < root.pages.length; p++) {
         var pg = root.pages[p]
         if (pg.sectionId !== sec.id || root.pendingDeletes[pg.id]) {
           continue
         }
-        rows.push({ kind: "note", path: pathOf(pg.id), title: pg.title, preview: "", level: level + 1, fixed: true, version: pg.modified || "", modified: pg.modified || "" })
+        rows.push({ kind: "note", path: pathOf(pg.id), title: pg.title, preview: "",
+                    level: level + 1 + (pg.level || 0),
+                    reorder: orderable && pg.level === 0
+                      ? { scope: "pages:" + sec.id, id: pathOf(pg.id), descendants: true } : null,
+                    version: pg.modified || "", modified: pg.modified || "" })
       }
       if (pageInventory.pendingSections.indexOf(sec.id) >= 0) {
         rows.push({ kind: "action", path: "loadsection:" + sec.id, title: pageInventory.status(sec.id), icon: "󰑐", level: level + 1 })
@@ -210,6 +251,11 @@ LaneProvider {
                      title: books.length === 1 ? "New section" : "New section in " + book.name,
                      icon: "󰉗" })
     })
+    if (!ms.hasScope("Files.ReadWrite") && books.some(function(book) {
+      return root.pageOrderingNotebook(book.id)
+    })) {
+      actions.push({ path: "enable-page-order", title: ms.requestingOptional ? "Cancel enabling page ordering…" : "Enable page ordering…", icon: "󰜯" })
+    }
     actions.push({ path: "logout", title: "Sign out" + (ms.account ? " (" + ms.account + ")" : ""), icon: "󰍃" })
     return actions
   }
@@ -379,6 +425,16 @@ LaneProvider {
         ms.relogin()
       }
     }
+    else if (id === "enable-page-order") {
+      // Only this action's own consent request is its to cancel; during an
+      // ordinary sign-in, loginOptional() declines to start a second one.
+      if (ms.requestingOptional) {
+        ms.cancelLogin()
+        root.noticeCleared()
+      } else {
+        ms.loginOptional()
+      }
+    }
     else if (id === "logout") {
       root.noticeRequested("Sign out of OneNote?",
         "You'll need to sign in again" + (ms.account ? " as " + ms.account : "") + " to keep using OneNote.", "",
@@ -525,6 +581,48 @@ LaneProvider {
     return root.runProcess(searchRunner, args, payload, callback)
   }
 
+  function reorder(scope, paths, callback) {
+    var sectionId = scope.indexOf("pages:") === 0 ? scope.substring(6) : ""
+    var section = root.sectionAt(sectionId)
+    if (!section || !root.rq || !root.pageOrderingAvailable(section) || root.pageOrderWrites[sectionId]) {
+      callback({ error: "The complete section and page ordering permission must be available before reordering" })
+      return
+    }
+    var expected = root.sectionPages(sectionId).filter(function(page) {
+      return page.level === 0
+    }).map(function(page) {
+      return page.id
+    })
+    var wanted = paths.map(function(path) {
+      return root.idOf(path)
+    })
+    if (!Ordering.isPermutation(expected, wanted)) {
+      callback({ error: "The pages changed — try reordering again" })
+      return
+    }
+    root.pageOrderWrites = root.withEntry(root.pageOrderWrites, sectionId, true)
+    return root.rq.enqueue({ key: "page-order:" + sectionId, mode: "append", priority: 0,
+                             owner: root, flush: true, label: "page order" },
+      function(ctx) {
+        root.runScript(["reorder-pages", "-"], JSON.stringify({ sectionId: sectionId,
+                       expected: expected, order: wanted }), ctx)
+      },
+      function(result) {
+        root.pageOrderWrites = root.withoutEntry(root.pageOrderWrites, sectionId)
+        var answer = result || { error: "The order was not saved — the request was cancelled" }
+        if (answer.error) {
+          // The response might have been lost after a successful revision.
+          // Refresh canonical Graph order rather than retrying the write.
+          root.pageOrderRecovery = root.withEntry(root.pageOrderRecovery, sectionId, true)
+          pageInventory.request(sectionId, true, true)
+        } else {
+          root.applyInventory(answer)
+        }
+        root.rebuild()
+        callback(answer)
+      })
+  }
+
   function refresh() {
     if (!root.ready) {
       root.onNotebooks = []
@@ -590,6 +688,15 @@ LaneProvider {
       return
     }
     root.inventoryRevision++
+    if (Array.isArray(result.pages) && Array.isArray(result.pendingSections)) {
+      var recovering = Object.assign({}, root.pageOrderRecovery)
+      Object.keys(recovering).forEach(function(sectionId) {
+        if (result.pendingSections.indexOf(sectionId) < 0) {
+          delete recovering[sectionId]
+        }
+      })
+      root.pageOrderRecovery = recovering
+    }
     if (Array.isArray(result.notebooks)) {
       root.onNotebooks = result.notebooks
     }

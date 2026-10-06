@@ -48,7 +48,7 @@ and manual script environment overrides.
 | `hasTitle`          | bool   | notes have a separate editable title; false also uses normal text weight for the first-line label in the list and search results |
 | `canCreate`         | bool   | `create()` is supported |
 | `canDelete`         | bool   | `remove()` is supported |
-| `canReorder`        | bool   | rows may be dragged within a section; `setOrder()` persists |
+| `canReorder`        | bool   | legacy shorthand for note rows within a tab; new providers declare each row's `reorder` group |
 | `canCreateSection`  | bool   | `createSection()` is supported; the provider supplies its creation action in `footerActions` |
 | `canImages`         | bool   | a pasted picture can be stored: the editor writes it into the note as `![](file:///…)` and `save()` must carry it to the backend. False (the default) makes ctrl+v say so rather than swallow the paste. An image may carry a display width the author set with the editor's corner handle, written as `![alt](src){width=N}` — a provider stores it with the image if the backend can, and must at least round-trip the marker |
 | `tools`             | list   | optional: formatting-toolbar capabilities the backend can store — the `toolId`s under `ui/tools/` (`bold italic underline strikeout highlight textColor code h1 h2 h3 p ul ol todo indent outdent quote codeblock rule link`), plus `table` for the table and calendar tools, and any other capability a package's tool names; omitted = all (when `markdown`), `[]` = no toolbar. State it: a construct the backend flattens must not be offered, and a save holding one must fail rather than lose it |
@@ -86,9 +86,45 @@ do — a folder is not a brand.
 time and which one is open is the user's, kept between runs. Passing it is
 harmless.
 
-A row is `{ kind, path, title, preview, icon, level, expanded, fixed, version, modified }` with
+A row is `{ kind, path, title, preview, icon, level, expanded, reorder, version, modified }` with
 `kind` one of `note`, `new` (path = create target), `action` (path = action
 id), `tree` (path = tree id, `expanded`).
+
+### Provider-defined ordering
+
+Declare reorderable rows with `reorder: { scope, id, descendants? }` and
+implement `reorder(scope, ids, callback)`. Both identifiers are opaque strings
+owned by the provider; an empty scope is valid. Groups are isolated by provider
+and scope, independently of notebook tabs, row kind and displayed hierarchy.
+Set `reorder: null` when ordering is unavailable, such as an incomplete
+inventory, insufficient permissions or an unsupported resource.
+
+```js
+{ kind: "note", path: "example:page", level: 1,
+  reorder: { scope: "pages-in-section", id: "page", descendants: true } }
+```
+
+`descendants: true` carries all following rows with a greater `level` as a
+single block. A provider can therefore enable future section/tree ordering by
+declaring a different group on those parent rows and handling that scope in
+its existing hook. The workspace needs no provider-specific branches.
+Rows within a carried block must not belong to the parent's reorder group.
+
+The callback settles exactly once with `{}` or `{ error }`. Validate the full
+unique permutation (`isPermutation(current, ids)` in
+`services/notes/ordering.js`) and current remote membership before writing; update the
+provider's canonical rows before reporting success. Accepted mutations belong
+in the write queue and contribute to `writeBusy`, including while queued.
+The UI projects the pending order across refreshes, disables another drag in
+that group, and returns to canonical rows with a status message on failure.
+Drags never reorder search results. Escape cancels; viewport edges scroll.
+
+For compatibility, `canReorder: true` and a note row with neither `reorder`
+nor `fixed: true` still imply scope = tab key and id = note path. Legacy
+`setOrder(sectionKey, paths)` remains supported, but its synchronous hook
+cannot acknowledge persistence failures. An explicit `reorder`, `null`
+included, takes precedence over the legacy flag and `fixed` field; providers
+using descriptors need neither.
 
 Action and tree ids are plain strings and several providers use the same ones
 (`login`, `logout`, `refresh`): the host resolves a click against the open
@@ -321,7 +357,8 @@ to the running instance and `rebuild()` is called.
   displays it below the result count. Incomplete coverage keeps an empty
   result from appearing to be a complete content search. OneNote reports
   initial indexing, refreshes, unavailable pages and pauses here.
-- `setOrder(sectionKey, paths)`
+- `reorder(scope, ids, callback)` — persist a declared reorder group; see above
+- `setOrder(sectionKey, paths)` — legacy ordering hook
 - `crumb(path)` → string for the editor's description line
 - `storageLabel(path)` (optional) → status-bar storage location, such as a
   local filename; omitted means no storage label. Save state is shown separately.
@@ -555,7 +592,11 @@ registration of their own gives it to your provider alone, in
 An account may declare `optionalScopes` (space-separated). `login()` requests
 the scopes declared in `scopes`, including optional scopes a provider wants
 in its initial sign-in. `loginOptional()` requests additional optional consent
-without signing out the existing account. The process environment excludes
+without signing out the existing account; `requestingOptional` is true while
+that request, rather than an ordinary sign-in, is under way. When Graph shows
+the new sign-in is the same user as the current one, the account keeps its
+`cacheSession`, so the provider's caches and running jobs survive the added
+consent; any other sign-in starts a new session. The process environment excludes
 optional scopes from the required renewal grant. Only already-granted optional scopes are
 renewed, and a rejected optional refresh is retried with required scopes.
 The account's `env` includes `NOTE_NOTE_MS_OPTIONAL_SCOPES`; providers must not

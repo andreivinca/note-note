@@ -420,6 +420,18 @@ def cmd_status():
          "scope": (tok or {}).get("scope", ""), "cacheSession": (tok or {}).get("cacheSession", "")})
 
 
+def profile(access, fields="id"):
+    """The user an access token belongs to, as Graph's /me reports `fields`,
+    or {} when it cannot say: a sign-in never fails on this answer."""
+    try:
+        status, me = http("GET", GRAPH + "/me?$select=" + fields,
+                          headers={"Authorization": "Bearer " + access, "Accept": "application/json"},
+                          retry_policy=RetryPolicy.NEVER)
+    except (GraphError, ratelimit.Throttled, ratelimit.Deferred, OSError):
+        return {}
+    return me if status == 200 and isinstance(me, dict) else {}
+
+
 def cmd_login():
     client_id, tenant = config()
     if not client_id:
@@ -443,25 +455,32 @@ def cmd_login():
         if status == 200 and "access_token" in tok:
             tok["expires_at"] = time.time() + int(tok.get("expires_in", 3600))
             tok["client_id"] = client_id
-            tok["cacheSession"] = uuid.uuid4().hex
-            with token_lock():
-                save_private(TOKENS, tok)
             # Asked with the token just minted, not through `graph()`: this
-            # probe is allowed to fail (the account name is a nicety, hence
-            # the `else ""`), and `graph()` would answer a 401 here — Entra
-            # replication lag right after a redemption is real — by forcing a
-            # refresh and, if that failed too, deleting the sign-in the user
-            # has this second completed.
-            s, me = http("GET", GRAPH + "/me?$select=displayName,userPrincipalName,mail",
-                         headers={"Authorization": "Bearer " + tok["access_token"],
-                                  "Accept": "application/json"}, retry_policy=RetryPolicy.NEVER)
-            tok["account"] = (me.get("mail") or me.get("userPrincipalName") or me.get("displayName") or "") if s == 200 else ""
+            # probe is allowed to fail (the account name is a nicety), and
+            # `graph()` would answer a 401 here — Entra replication lag right
+            # after a redemption is real — by forcing a refresh and, if that
+            # failed too, deleting the sign-in the user has this second
+            # completed.
+            me = profile(tok["access_token"], "id,displayName,userPrincipalName,mail")
+            tok["account"] = me.get("mail") or me.get("userPrincipalName") or me.get("displayName") or ""
+            if me.get("id"):
+                tok["userId"] = me["id"]
+            previous = signed_in(client_id) or {}
+            previous_user = previous.get("userId")
+            if not previous_user and previous.get("expires_at", 0) > time.time():
+                previous_user = profile(previous.get("access_token", "")).get("id")
             with token_lock():
-                current = signed_in(client_id)
-                if not current or current.get("cacheSession") != tok["cacheSession"]:
-                    fail("the signed-in account changed")
-                current["account"] = tok["account"]
-                save_private(TOKENS, current)
+                current = signed_in(client_id) or {}
+                # Consent added to the account already signed in (a
+                # provider's optional scopes) keeps its cache session, and
+                # with it that account's caches and running jobs. Any other
+                # sign-in, or one whose account cannot be told apart, starts
+                # a new session.
+                same = (bool(tok.get("userId")) and previous_user == tok["userId"]
+                        and bool(current.get("cacheSession"))
+                        and current.get("cacheSession") == previous.get("cacheSession"))
+                tok["cacheSession"] = current["cacheSession"] if same else uuid.uuid4().hex
+                save_private(TOKENS, tok)
             out({"ok": True, "account": tok["account"]})
             return
         err = tok.get("error", "")
