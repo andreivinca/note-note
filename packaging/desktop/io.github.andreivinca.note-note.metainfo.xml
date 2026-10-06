@@ -34,6 +34,19 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.0.36" date="2026-10-06">
+      <description>
+        <p>OneNote pages can be reordered by dragging them, in personal
+        notebooks you own. Choose Enable page ordering… once to give the app
+        the OneDrive permission this needs. Subpages show indented under their
+        page and move with it. The new order is saved to OneNote, and a save
+        that fails puts the pages back where they were.</p>
+        <p>Local notes can be dragged within each notebook when all notebooks
+        share one tab, too. Escape cancels a drag, holding a note at the top
+        or bottom of the list scrolls it, and a quick drag moves the note
+        instead of scrolling the list.</p>
+      </description>
+    </release>
     <release version="1.0.35" date="2026-10-05">
       <description>
         <p>A new OneNote page opens for typing at once, before OneNote has made
