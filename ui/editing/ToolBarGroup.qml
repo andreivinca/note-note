@@ -103,7 +103,13 @@ Rectangle {
           tooltipText: group.panelOpen || menu.opened ? "" : modelData.tooltip
           iconSize: Style.font.icon
           horizontalPadding: labeledMenu ? Style.space(12) : Style.spacing.sm
+          // Match the inset created by centering an icon in a square tool button.
+          leftPadding: iconText.length > 0 && (modelData.isMenu || modelData.panelPopup)
+            ? Math.max(horizontalPadding + 1, (height - implicitIconWidth) / 2)
+            : horizontalPadding + 1
           verticalPadding: Style.spacing.xxs
+          spacing: !labeledMenu && (modelData.isMenu || modelData.panelPopup)
+            ? Style.spacing.controlGap / 2 : Style.spacing.controlGap
           text: {
             if (labeledMenu) {
               return modelData.label + " 󰅀"

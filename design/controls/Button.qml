@@ -22,6 +22,7 @@ Controls.AbstractButton {
   property string fontFamily: Style.font.family
   property real fontSize: Style.font.body
   property real iconSize: Style.font.icon
+  readonly property real implicitIconWidth: iconText.length > 0 ? iconGlyph.implicitWidth : 0
   horizontalPadding: Style.spacing.controlPaddingX
   verticalPadding: Style.spacing.xs
   property real radius: Style.cornerRadius
@@ -34,6 +35,7 @@ Controls.AbstractButton {
   bottomPadding: verticalPadding + 1
   implicitWidth: implicitContentWidth + leftPadding + rightPadding
   implicitHeight: implicitContentHeight + topPadding + bottomPadding
+  spacing: Style.spacing.controlGap
   hoverEnabled: true
   focusPolicy: focusable ? Qt.StrongFocus : Qt.NoFocus
   Accessible.name: text || tooltipText
@@ -61,7 +63,7 @@ Controls.AbstractButton {
       x: (parent.width - width) / 2
       anchors.verticalCenter: parent.verticalCenter
       anchors.alignWhenCentered: false
-      spacing: Style.spacing.controlGap
+      spacing: button.spacing
 
       Item {
         visible: button.iconText.length > 0
