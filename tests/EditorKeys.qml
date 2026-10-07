@@ -1760,6 +1760,14 @@ Window {
     return popup
   }
 
+  // Without capabilities, Insert keeps only tools that insert plain text,
+  // such as Diacritics in a supported region, and no emptied submenu.
+  function insertKeepsOnlyPlainText() {
+    return editor.tools.menuTools("insert").every(function(tool) {
+      return !tool.isMenu && tool.capability === ""
+    })
+  }
+
   function openMonthMenu() {
     var popup = openInsertMenu()
     var row = keys.findChild(popup.contentItem, "editingMenu-insertMonth")
@@ -1796,7 +1804,7 @@ Window {
     keys.keyClick(Qt.Key_Escape)
     child = openMonthMenu()
     editor.enabledTools = []
-    require(!child.opened && editor.tools.menuTools("insert").length === 0,
+    require(!child.opened && insertKeepsOnlyPlainText(),
             "unsupported descendants left an empty submenu")
     editor.enabledTools = null
     child = openMonthMenu()
@@ -1894,7 +1902,7 @@ Window {
     require(editor.inTable && editor.tools.canExecute(tool), "calendar is unavailable inside another table")
     load({ source: "word\n" })
     editor.enabledTools = []
-    require(!editor.tool(id) && editor.tools.menuTools("insert").length === 0,
+    require(!editor.tool(id) && insertKeepsOnlyPlainText(),
             "calendar bypassed table capability restrictions")
     editor.enabledTools = ["table"]
     editor.readOnly = true
