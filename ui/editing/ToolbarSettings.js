@@ -12,7 +12,7 @@ function defaults() {
     ["addRow", "delRow", "addCol", "delCol"],
     [{ dropdown: "insert", items: [
       { dropdown: "insertMonth", items: ["currentMonth", "nextMonth", "customMonth"] },
-      "rule", "link", "table"
+      "rule", "link", "table", "diacritics"
     ] }]
   ]
 }
@@ -25,6 +25,19 @@ function defaults() {
 // no installed config can still hold it.
 function previousDefaults() {
   return [
+    // 1.0.23 to 1.0.36
+    [
+      ["heading"],
+      ["bold", "italic", "underline", "strikeout"],
+      ["textColor", "highlight", "code"],
+      ["ul", "ol", "todo", "outdent", "indent"],
+      ["quote", "codeblock"],
+      ["addRow", "delRow", "addCol", "delCol"],
+      [{ dropdown: "insert", items: [
+        { dropdown: "insertMonth", items: ["currentMonth", "nextMonth", "customMonth"] },
+        "rule", "link", "table"
+      ] }]
+    ],
     // 1.0.17 to 1.0.22
     [
       ["heading"],

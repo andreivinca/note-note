@@ -164,6 +164,11 @@ setting on first run.
   All three use the OS locale's week start and labels for providers that support
   tables. Layout changes apply on Save;
   see [the layout examples and tool IDs](docs/editing-tools.md#arrange-the-toolbar).
+  **Insert → Diacritics** offers lowercase and uppercase letters for the country
+  identified by the system timezone, including Romanian **ă â î ș ț** for
+  `Europe/Bucharest`. Click a letter to insert it at the caret, or select it with
+  arrow keys and Enter. It is hidden for unsupported regions;
+  see [region detection](docs/editing-tools.md#diacritics).
 - `providers.<id>.enabled` — hide a source (`local`, `sticky`, `onenote`,
   `notion`, or an external provider's own id) from the sidebar. Reordering
   the `providers` object reorders the sidebar tabs to match.

@@ -27,7 +27,8 @@ custom layouts keep their chosen placement.
 The default layout puts table and link insertion under **Insert** and shows row and
 column actions in their own toolbar group while the caret is inside a table.
 Text color, highlight and inline code stay on the toolbar. Insert also contains
-the separator, with the calendar package's tools under **Insert → Insert month**:
+the separator and a regional diacritics picker, with the calendar package's tools
+under **Insert → Insert month**:
 
 ```json
 "editor": {
@@ -40,7 +41,7 @@ the separator, with the calendar package's tools under **Insert → Insert month
     ["addRow", "delRow", "addCol", "delCol"],
     [{ "dropdown": "insert", "items": [
       { "dropdown": "insertMonth", "items": ["currentMonth", "nextMonth", "customMonth"] },
-      "rule", "link", "table"
+      "rule", "link", "table", "diacritics"
     ] }]
   ]
 }
@@ -165,6 +166,29 @@ capability (or unrestricted tools). Code blocks and providers with restricted
 formatting, such as Notion, do not offer it. Without the optional native helper,
 stored colors still render and save; automatic link, quote and highlight ink
 uses the document's ordinary foreground. Build with `sh cpp/build.sh`.
+
+## Diacritics
+
+**Insert → Diacritics** offers lowercase and uppercase letters for the country
+identified by the system timezone. Romanian includes **ă â î ș ț** and **Ă Â Î Ș Ț**, using
+the modern comma-below forms of ș and ț. Click a letter, or move with the arrow
+keys and press Enter or Space, to insert it at the caret. A selection is replaced.
+Insertion preserves text formatting, works in lists, table cells and code blocks,
+and is one undo step with the native helper. Escape or clicking outside cancels;
+a changed note, document or selection rejects the pending choice.
+
+Detection reads the named system timezone locally (`TZ` when explicitly set,
+otherwise `/etc/localtime`, with `/etc/timezone` for systems that copy the timezone
+file). The installed IANA timezone database maps it to a country. For example,
+`Europe/Bucharest` selects Romanian even with an English interface, and
+`Europe/Zurich` offers Swiss German letters without ß. The catalog covers common
+Latin alphabets, including Romanian, French, German, Spanish, Portuguese, Polish,
+Hungarian, Turkish and the Nordic languages. Unsupported regions, unnamed timezones
+and UTC hide the tool. Timezone changes take effect after restarting the app.
+
+The tool inserts ordinary Unicode text, so it is available for every editable
+provider. Its ID is `diacritics`. Existing default toolbar layouts upgrade
+automatically; add `"diacritics"` to Insert's `items` in a customized layout.
 
 ## Calendar tools
 
@@ -299,7 +323,7 @@ Qt Quick's own controls.
 | `toolId` | Unique action ID. Existing IDs such as `bold`, `h1` and `addRow` remain stable for IPC. |
 | `label`, `icon` | Button tooltip/menu text and icon glyph. |
 | `toolbarLabelVisible` | Show the menu label on the toolbar button; defaults to true. Hiding it keeps the icon, dropdown arrow, menu labels and tooltip. |
-| `capability` | Provider capability required; defaults to `toolId`. All four table alteration tools require `table`. |
+| `capability` | Provider capability required; defaults to `toolId`. All four table alteration tools require `table`. Use an empty string for literal text requiring no formatting capability. |
 | `checked` | Reactive pressed state for formatting buttons; false by default. |
 | `available` | Reactive context condition, such as `editor.inTable`. Controls both presentation and execution; execution reads the caret's context again first. |
 | `shortcutKey`, `shortcutModifiers` | Optional default key and modifiers. The central registry resolves conflicts and user overrides; `shortcutLabel` (read-only), tooltips, and help show its effective binding. |
@@ -361,6 +385,7 @@ an action's content, rules and UI belong in its tool file.
 | `acceptsInline()` | Whether the selection takes inline formatting or HTML: false on a code line, and for a selection crossing a code block's edge, which also reports why. |
 | `replaceInline(html, keepSelection)` | Replace selected formatting without breaking the containing list/paragraph; one undo step. Refused on a code line. |
 | `insertHtml(html)`, `escapeHtml(text)` | Replace the selection with HTML in one undo step, and escape literal text/attributes. `insertHtml` is refused on a code line. |
+| `insertText(text)` | Replace the selection with literal text, preserving the caret's formatting and pending font/color choices. Also works on code lines. |
 | `insertSnippet(markdown)` | Insert after the current block, or on an empty paragraph, with a landing paragraph when needed. |
 | `insertTable(markdown)` | Insert table content at the caret inside a cell, or as a normal snippet outside tables. |
 | `transformBlocks(transform, options)` | Transform selected Markdown blocks. The callback receives `{ indent, prefix, content, isList }` and returns a line. `options.list` manages paragraph separators when toggling lists; `unchangedMessage` supplies optional feedback. |

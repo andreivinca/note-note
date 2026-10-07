@@ -61,7 +61,7 @@ QtObject {
   }
 
   function supports(capability) {
-    return enabledTools === null || enabledTools.indexOf(capability) >= 0
+    return !capability || enabledTools === null || enabledTools.indexOf(capability) >= 0
   }
 
   // Brings inTable, inList and inCode up to the caret before a tool runs.
@@ -185,6 +185,24 @@ QtObject {
       textArea.insert(range.from, Dialect.documentHtml(html))
     })
     host.edited()
+  }
+
+  // TextSelection replaces literal text in the caret's character and block
+  // formats, including code and highlights, without parsing it as HTML.
+  function insertText(text) {
+    if (!writable || !text) {
+      return false
+    }
+    if (typePending(text)) {
+      return true
+    }
+    var from = selection().from
+    host.atomic(function() {
+      textArea.cursorSelection.text = text
+      textArea.cursorPosition = from + text.length
+    })
+    host.edited()
+    return true
   }
 
   function escapeHtml(text) {

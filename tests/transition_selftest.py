@@ -18,6 +18,12 @@ def main():
         (work / "design").symlink_to(ROOT / "design", target_is_directory=True)
         tool_ui = work / "ui"
         shutil.copytree(ROOT / "ui/tools", tool_ui / "tools")
+        # QML singletons belong to an import URL. Copied tools must use the
+        # host's platform instance, rather than a second one through a symlink.
+        for path in (tool_ui / "tools").glob("*.qml"):
+            source = path.read_text().replace('"../../services/platform"',
+                                              '"' + (ROOT / "services/platform").as_uri() + '"')
+            path.write_text(source)
         for path in (ROOT / "ui").iterdir():
             if path.name != "tools":
                 (tool_ui / path.name).symlink_to(path, target_is_directory=path.is_dir())
@@ -118,9 +124,11 @@ def main():
                    NOTE_NOTE_TEST_TOOLS=(tool_ui / "tools").as_uri(),
                    NOTE_NOTE_TEST_INVALID_TOOLS=invalid_tools.as_uri(),
                    NOTE_NOTE_TEST_PLUGIN_TOOLS=plugin_tools.as_uri(),
-                   NOTE_NOTE_TEST_TOOLS_ONLY="1" if "--tools" in sys.argv else "",
+                   NOTE_NOTE_TEST_TOOLS_ONLY="1" if "--tools" in sys.argv or "--diacritics" in sys.argv else "",
+                   NOTE_NOTE_TEST_DIACRITICS_ONLY="1" if "--diacritics" in sys.argv else "",
                    NOTE_NOTE_TEST_NOTES_ONLY="1" if "--notes" in sys.argv else "",
                    NOTE_NOTE_TEST_STANDALONE="1" if standalone else "",
+                   TZ="Europe/Bucharest",
                    QT_QUICK_BACKEND="software",
                    QT_QPA_PLATFORM="offscreen", QT_QPA_PLATFORMTHEME="generic", QT_FORCE_STDERR_LOGGING="1")
         env.pop("WAYLAND_DISPLAY", None)
