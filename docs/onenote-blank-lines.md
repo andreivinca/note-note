@@ -1,9 +1,10 @@
 # OneNote blank lines
 
 OneNote stores a blank line as an outline element holding one empty rich-text
-object. OneNote clients leave its text empty; a `<br/>` written through Graph
-becomes a single line-break character (`\x0b`). Graph exports both as a bare
-`<br/>` without a generated ID, and [Graph's update API](https://learn.microsoft.com/en-us/graph/onenote-update-page)
+object. OneNote clients leave its text empty or leave the text property out; a
+`<br/>` written through Graph becomes a single line-break character (`\x0b`).
+Graph exports each as a bare `<br/>` without a generated ID, and
+[Graph's update API](https://learn.microsoft.com/en-us/graph/onenote-update-page)
 targets elements only by ID. The page's absolutely positioned outline `div`
 cannot be replaced either. No Graph command can therefore remove a blank line
 between two blocks, or turn one into text.
@@ -26,7 +27,8 @@ through the [web revision service](onenote-page-order.md#writing-and-consent):
 3. Resolve each neighbour's generated ID `tag:{guid}{n}` to the object
    `guid|n`: an element, or the content of exactly one element.
 4. Require both neighbours under one parent, with exactly the run's number of
-   elements between them, each holding only blank text and no child elements.
+   elements between them, each holding only blank text (or none, and no
+   ASCII text) and no child elements.
    A `<br/>` beside a list can be the text of the element the list hangs
    under; that element is not blank, and the save keeps the draft.
 5. Write one revision of the changed parents, conditional on the page
@@ -53,4 +55,5 @@ in OneNote.
 - `write_page` then removed another blank line end to end.
 - A page created by OneNote in 2025 stored its blank line with empty text, in
   a section whose page groups list each page's metadata twice. A read-only
-  dry run joined its cell and outline.
+  dry run joined its cell and outline. Another blank line on that page had
+  no text property at all; removing it failed until that counted as blank.

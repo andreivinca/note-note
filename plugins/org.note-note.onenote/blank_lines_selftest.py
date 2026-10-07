@@ -36,12 +36,22 @@ def obj(number, kind, *properties):
 
 
 def line(number, text, children=()):
-    """An element `number` holding rich text `number + 1`, as OneNote stores a line."""
+    """An element `number` holding rich text `number + 1`, as OneNote stores a line.
+
+    Text None leaves the text property out, as OneNote clients do for some
+    blank lines; a tuple gives the text object's properties as they are.
+    """
     properties = [blank_lines.CONTENT, braced(number + 1)]
     if children:
         properties += [ordering.CHILDREN, braced(*children)]
+    if text is None:
+        content = [0x10001CFE, "1033"]
+    elif isinstance(text, tuple):
+        content = list(text)
+    else:
+        content = [blank_lines.TEXT, text]
     return [obj(number, blank_lines.ELEMENT, *properties),
-            obj(number + 1, blank_lines.RICH_TEXT, blank_lines.TEXT, text)]
+            obj(number + 1, blank_lines.RICH_TEXT, *content)]
 
 
 def page_state(lines, outline=(20, 22, 24, 26)):
@@ -106,6 +116,12 @@ class JoinTests(unittest.TestCase):
                 self.assertEqual(parents[0]["Properties"][:2], [123, "keep"])
         self.assertEqual(state, before)
 
+    def test_a_text_object_without_text_is_a_blank_line(self):
+        state = page_state([(20, "Alpha"), (22, None), (24, ""), (26, "Bravo")])
+        run = BlankLines(graph_id(21), graph_id(27), 2, (0,))
+        parents = blank_lines.updated_parents(blank_lines.Page(state), (run,))
+        self.assertEqual(children(parents[0]), [ref(20), ref(24), ref(26)])
+
     def test_an_id_naming_the_element_itself_is_a_neighbour(self):
         # A list's ID names the element it hangs under.
         run = BlankLines(graph_id(21), graph_id(26, "ul"), 2, (0, 1))
@@ -123,6 +139,8 @@ class JoinTests(unittest.TestCase):
             "fewer breaks than lines": (LINES, BlankLines(graph_id(21), graph_id(27), 1, (0,))),
             "text between neighbours": ([(20, "Alpha"), (22, "words"), (24, ""), (26, "Bravo")],
                                         BlankLines(graph_id(21), graph_id(27), 2, (0,))),
+            "ASCII text between neighbours": ([(20, "Alpha"), (22, (blank_lines.ASCII_TEXT, "words")), (24, ""), (26, "Bravo")],
+                                              BlankLines(graph_id(21), graph_id(27), 2, (0,))),
             "list under a blank line": ([(20, "Alpha"), (22, "\x0b", (40,)), (24, ""), (26, "Bravo"), (40, "item")],
                                         BlankLines(graph_id(21), graph_id(27), 2, (0,))),
             "neighbours in different parents": ([(20, "Alpha", (40,)), (22, "\x0b"), (24, ""), (26, "Bravo"), (40, "item")],

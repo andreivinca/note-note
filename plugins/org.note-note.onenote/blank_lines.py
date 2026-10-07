@@ -19,8 +19,10 @@ ELEMENT = 0x6000D
 RICH_TEXT = 0x6000E
 CONTENT = 0x24001C1F
 TEXT = 0x1C001C22
-# OneNote clients store a blank line's text as nothing; Graph input as a line break.
-BLANK_TEXTS = ("", "\x0b")
+ASCII_TEXT = 0x1C003498
+# OneNote clients store a blank line's text as nothing, or leave it out;
+# Graph input stores a line break.
+BLANK_TEXTS = (None, "", "\x0b")
 GENERATED_ID = re.compile(r"[a-z0-9]+:\{([0-9A-Fa-f-]{36})\}\{([0-9]+)\}")
 CHANGED = "The blank lines changed in OneNote; reload the page and try again"
 
@@ -74,7 +76,10 @@ class Page:
         if references(props.get(CHILDREN, "")) or len(contents) != 1:
             return False
         text = self.objects.get(contents[0], {})
-        return text.get("ClassId") == RICH_TEXT and properties(text).get(TEXT) in BLANK_TEXTS
+        if text.get("ClassId") != RICH_TEXT:
+            return False
+        values = properties(text)
+        return values.get(TEXT) in BLANK_TEXTS and not values.get(ASCII_TEXT)
 
 
 def updated_parents(page, runs):
