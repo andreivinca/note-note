@@ -34,6 +34,16 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.0.37" date="2026-10-07">
+      <description>
+        <p>Blank lines in OneNote pages can now be deleted, or typed on.
+        OneNote gives them nothing an app can edit, so such a save failed and
+        kept its draft. Note Note now removes them the way OneNote's web app
+        does, in personal notebooks you own with page ordering enabled.</p>
+        <p>Insert → Diacritics offers the accented letters of your region,
+        found from the system timezone, such as Romanian ă â î ș ț.</p>
+      </description>
+    </release>
     <release version="1.0.36" date="2026-10-06">
       <description>
         <p>OneNote pages can be reordered by dragging them, in personal
