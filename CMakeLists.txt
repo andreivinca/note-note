@@ -104,6 +104,8 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/ordering_selftest.py)
     add_test(NAME onenote-page-order COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/plugins/org.note-note.onenote/page_order_selftest.py)
+    add_test(NAME onenote-blank-lines COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/plugins/org.note-note.onenote/blank_lines_selftest.py)
     add_test(NAME onenote-audio COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/plugins/org.note-note.onenote/audio_selftest.py)
     if(Qt6Multimedia_FOUND)

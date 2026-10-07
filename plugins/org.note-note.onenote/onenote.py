@@ -43,6 +43,7 @@ import search_index  # noqa: E402
 import notebook_inventory  # noqa: E402
 import page_order  # noqa: E402
 import web_session  # noqa: E402
+import blank_lines  # noqa: E402
 
 # OneNote's own Graph budget, shared with no other provider: a throttle here
 # parks OneNote and leaves Sticky Notes listing. Microsoft's delegated OneNote
@@ -168,15 +169,26 @@ def require_writable(collection, resource_id):
         fail(READ_ONLY_REASON)
 
 
-def require_page_ordering(section_id):
-    """Page order is written into the section's file in its owner's
-    OneDrive, and the optional Files.ReadWrite grant reaches only the
-    signed-in account's own drive: a personal notebook it owns, never one
-    shared with it. Provider.qml's pageOrderingNotebook() offers drags on
-    the same terms."""
+def owns_personal_notebook(section_id):
+    """The web revision service writes into the section's file in its
+    owner's OneDrive, and the optional Files.ReadWrite grant reaches only
+    the signed-in account's own drive: a personal notebook it owns, never
+    one shared with it. Provider.qml's pageOrderingNotebook() offers drags
+    on the same terms."""
     notebook = notebook_record("sections", section_id)
-    if (str(notebook.get("userRole", "")).lower() != "owner"
-            or not web_session.PERSONAL_ITEM.fullmatch(str(notebook.get("id", "")))):
+    return (str(notebook.get("userRole", "")).lower() == "owner"
+            and bool(web_session.PERSONAL_ITEM.fullmatch(str(notebook.get("id", "")))))
+
+
+def file_write_granted():
+    """Whether the account granted the optional OneDrive write permission."""
+    access_token()
+    token = msgraph.signed_in(msgraph.config()[0]) or {}
+    return "Files.ReadWrite" in token.get("scope", "").split()
+
+
+def require_page_ordering(section_id):
+    if not owns_personal_notebook(section_id):
         fail("Page ordering is available only in personal notebooks you own")
 
 
@@ -1547,6 +1559,25 @@ def wrap_runs(runs):
 
 
 
+def remove_blank_lines(page_id, runs):
+    """Graph has no target for a blank line between two blocks. OneNote's
+    web revision service removes it, on the same terms as page order
+    (docs/onenote-blank-lines.md)."""
+    section = cached_resource("sections", cached_resource("pages", page_id).get("sectionId"))
+    if not section or not owns_personal_notebook(section["id"]) or not file_write_granted():
+        fail("OneNote's API cannot remove blank lines between paragraphs. Choose Enable page ordering… "
+             "to let Note Note remove them, or remove them in OneNote — your draft was kept")
+    status, metadata = graph("GET", resource_url("pages", page_id) + "?$select=id,links")
+    client_id = page_order.client_guid(metadata) if status == 200 and isinstance(metadata, dict) else None
+    if not client_id:
+        fail("OneNote did not identify this page to remove its blank lines — your draft was kept")
+    try:
+        session = web_session.Session.for_section(section, graph)
+        blank_lines.remove(session, client_id, runs)
+    except web_session.WebError as error:
+        fail("Could not remove the blank lines: %s — your draft was kept" % error)
+
+
 def write_page(page_id, note, remote, current):
     """Write a merge planned against the exact HTML fetched by this save."""
     url = page_content_url(page_id)
@@ -1583,6 +1614,10 @@ def write_page(page_id, note, remote, current):
         commands = uploads.materialize(planned.commands)
         if uploads.error:
             fail(uploads.error)
+        if planned.blank_lines:
+            # First: Graph commands never target blank lines, so their
+            # targets survive this, and the next save plans without them.
+            remove_blank_lines(page_id, planned.blank_lines)
         if commands:
             status, res = patch_page(url, commands, uploads.parts)
             if status not in (200, 204):
@@ -1780,9 +1815,7 @@ def cmd_reorder_pages(payload_path):
             or len(set(expected)) != len(expected) or set(expected) != set(wanted)):
         fail("invalid page reorder request")
     require_page_ordering(section_id)
-    access_token()
-    token = msgraph.signed_in(msgraph.config()[0]) or {}
-    if "Files.ReadWrite" not in token.get("scope", "").split():
+    if not file_write_granted():
         fail("Enable page ordering to grant the OneDrive write permission")
     fresh = collect_section_pages(section, lambda url: graph("GET", url, max_bytes=MAX_LIST_BODY))
     if fresh.get("error"):

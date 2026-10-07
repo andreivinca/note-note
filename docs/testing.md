@@ -46,6 +46,11 @@ python3 tests/ordering_selftest.py
 python3 plugins/org.note-note.onenote/page_order_selftest.py
 ```
 
+`plugins/org.note-note.onenote/blank_lines_selftest.py` covers removing blank
+lines through the same revision service ([blank lines](onenote-blank-lines.md)):
+exact joins to OneNote's elements, refusals, the page cell join and one
+conditional revision.
+
 The QML fixture sends actual pointer drags through the shared sidebar,
 including future tree/subtree groups, scope boundaries, pending writes,
 Escape cancellation and edge scrolling. The transition suite checks
@@ -290,7 +295,9 @@ Mobile-table cases merge a pending local edit with an empty
 table added remotely and preserve leading/trailing bare breaks, including
 breaks in a separate empty layout container. Internal breaks remain part of
 the document unless removing the surrounding content makes them boundary
-breaks. Deletion cases cover the first/last table, the whole page, and a remote
+breaks; deleting one, or typing on it, removes it through a simulated revision
+service before any Graph command, and a break beside an element without an ID
+still keeps the draft. Deletion cases cover the first/last table, the whole page, and a remote
 spacing change while table removal is pending. Ordinary, empty and nested table
 exports check OneNote's HTML `border` attribute; CSS table borders are unsupported
 on input. Calendar cases append a repeated month heading without changing the

@@ -190,19 +190,27 @@ class Session(Transport):
         raise WebError("Microsoft's ordering authorization challenge did not settle")
 
     def read_section(self):
+        return self.read(UNKNOWN_ROOT)
+
+    def read(self, cell):
+        """A cell's revisions: the section root, or one page's content."""
         operation = dict(common_operation(), FileId=self.file_id,
-                         RevisionRequest={"CellId": UNKNOWN_ROOT, "ContextId": NIL, "ClientKnowledge": None},
+                         RevisionRequest={"CellId": cell, "ContextId": NIL, "ClientKnowledge": None},
                          IsFolderCell=False, IsUserAlone=False, IsBackendAlone=False, IsHidden=False,
                          IsAsleep=False, ExpectedLatestRevisionId=NIL)
         return self.operation(2, operation)
 
     def put(self, state, root):
+        return self.write(state["RootCellId"], state, [root])
+
+    def write(self, cell, state, objects):
+        """One revision of `cell`, conditional on the revision `state` read."""
         identifier = str(uuid.uuid4())
-        revision = {"Id": identifier + "|1", "RelativePath": None, "CellId": state["RootCellId"],
+        revision = {"Id": identifier + "|1", "RelativePath": None, "CellId": cell,
                     "ContextId": NIL, "ExpectedLatestId": state["LatestRevisionId"],
                     "BaseId": state["LatestRevisionId"], "RootObjectDescriptors": None,
                     "IsFolderCell": False, "FileId": self.file_id,
-                    "ObjectGroups": [{"Id": identifier + "|2", "Objects": [root]}]}
+                    "ObjectGroups": [{"Id": identifier + "|2", "Objects": list(objects)}]}
         operation = dict(common_operation(), Revision=revision, ClientKnowledge=state["ClientKnowledge"],
                          BaseRevision=None, ExpectedLatestId=state["LatestRevisionId"],
                          ExpectedIncrementalActionId=NIL, IsVersionHistoryEnabled=True,

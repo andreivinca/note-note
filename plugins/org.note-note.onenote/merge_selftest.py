@@ -1142,16 +1142,87 @@ class SaveTests(unittest.TestCase):
         operations = [op for method, _, data in self.calls if method == "PATCH" for op in json.loads(data)]
         self.assertEqual(operations, [{"target": "table:mobile", "action": "replace", "content": "<div></div>"}])
 
-    def test_deleting_an_internal_untargetable_break_still_preserves_draft(self):
-        self.remote = ('<html><head><title>Title</title></head><body><div>'
-                       '<p id="p:first">Before</p><br/><p id="p:second">After</p>'
+    def revision_service(self):
+        """Remove blank lines from the simulated page as the web revision service does."""
+        def remove(page_id, runs):
+            self.calls.append(("REVISION", page_id, runs))
+            current = ET.fromstring(self.remote)
+            for run in runs:
+                parent = next(node for node in current.iter() if any(child.get("id") == run.before for child in node))
+                siblings = list(parent)
+                start = next(index for index, child in enumerate(siblings) if child.get("id") == run.before) + 1
+                breaks = siblings[start:start + run.count]
+                self.assertEqual([node.tag for node in breaks], ["br"] * run.count)
+                self.assertEqual(siblings[start + run.count].get("id"), run.after)
+                for index in run.removed:
+                    parent.remove(breaks[index])
+            self.remote = ET.tostring(current, encoding="unicode")
+
+        patch.object(onenote, "remove_blank_lines", side_effect=remove).start()
+
+    def blank_line_page(self, middle='<br/>'):
+        self.remote = ('<html><head><title>Title</title></head><body><div id="div:outline">'
+                       '<p id="p:first">Before</p>' + middle + '<p id="p:second">After</p>'
                        '</div></body></html>')
+
+    def test_deleting_a_blank_line_removes_it_through_the_revision_service(self):
+        self.revision_service()
+        self.blank_line_page('<br/><br/>')
         loaded = self.load()
         result = self.save(note("Before\n\nAfter"), loaded["view"])
-        self.assertIn("no editable target", result.get("error", ""))
+        self.assertTrue(result.get("ok"), result)
+        self.assertEqual([call[2] for call in self.calls if call[0] == "REVISION"],
+                         [(onenote.onenote_patch.BlankLines("p:first", "p:second", 2, (0, 1)),)])
+        self.assertFalse(any(method == "PATCH" for method, *_ in self.calls))
+        current = ET.fromstring(self.remote)
+        self.assertEqual(list(current.iter("br")), [])
+        self.assertEqual([node.get("id") for node in current.iter("p")], ["p:first", "p:second"])
+        self.assertEqual(onenote.normalize_note(self.load()), onenote.normalize_note(note("Before\n\nAfter")))
+
+    def test_typing_on_a_blank_line_replaces_it_in_place(self):
+        self.revision_service()
+        self.blank_line_page()
+        loaded = self.load()
+        result = self.save(note("Before\n\nMiddle\n\nAfter"), loaded["view"])
+        self.assertTrue(result.get("ok"), result)
+        kinds = [call[0] for call in self.calls if call[0] in ("REVISION", "PATCH")]
+        self.assertEqual(kinds, ["REVISION", "PATCH"])
+        operations = [op for method, _, data in self.calls if method == "PATCH" for op in json.loads(data)]
+        self.assertEqual([(op["action"], op["position"], op["target"]) for op in operations],
+                         [("insert", "before", "p:second")])
+        current = ET.fromstring(self.remote)
+        self.assertEqual(list(current.iter("br")), [])
+        self.assertEqual(onenote.normalize_note(self.load()), onenote.normalize_note(note("Before\n\nMiddle\n\nAfter")))
+
+    def test_blank_lines_are_removed_before_graph_edits_their_neighbours(self):
+        self.revision_service()
+        self.blank_line_page()
+        loaded = self.load()
+        result = self.save(note("Edited\n\nAfter"), loaded["view"])
+        self.assertTrue(result.get("ok"), result)
+        kinds = [call[0] for call in self.calls if call[0] in ("REVISION", "PATCH")]
+        self.assertEqual(kinds, ["REVISION", "PATCH"])
+        self.assertEqual(onenote.normalize_note(self.load()), onenote.normalize_note(note("Edited\n\nAfter")))
+
+    def test_deleting_a_blank_line_without_revision_access_keeps_the_draft(self):
+        self.blank_line_page()
+        loaded = self.load()
+        result = self.save(note("Before\n\nAfter"), loaded["view"])
+        self.assertIn("remove them in OneNote", result.get("error", ""))
+        self.assertIn("your draft was kept", result["error"])
         self.assertFalse(any(method == "PATCH" for method, *_ in self.calls))
         with self.store() as journal:
             self.assertEqual(journal.recover()["body"], onenote.normalize_note(note("Before\n\nAfter"))["body"])
+
+    def test_a_blank_line_beside_an_element_without_an_id_keeps_the_draft(self):
+        self.revision_service()
+        self.remote = ('<html><head><title>Title</title></head><body><div>'
+                       '<p id="p:first">Before</p><cite>Quoted</cite><br/><p id="p:second">After</p>'
+                       '</div></body></html>')
+        loaded = self.load()
+        result = self.save(note(loaded["body"].replace("\n\n ", "")), loaded["view"])
+        self.assertIn("no editable target", result.get("error", ""))
+        self.assertFalse(any(call[0] in ("REVISION", "PATCH") for call in self.calls))
 
     def test_inserting_a_blank_line_preserves_existing_elements(self):
         self.remote = ('<html><head><title>Title</title></head><body><div>'

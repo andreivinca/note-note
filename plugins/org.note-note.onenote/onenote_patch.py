@@ -2,7 +2,9 @@
 
 Planning has no I/O. Unsupported edits and invalid simulations are errors;
 neither authorizes a broader replacement. Graph capabilities are documented
-at https://learn.microsoft.com/en-us/graph/onenote-update-page.
+at https://learn.microsoft.com/en-us/graph/onenote-update-page. Graph has no
+target for a blank line; the plan names those separately, for OneNote's web
+revision service (docs/onenote-blank-lines.md).
 """
 import copy
 from dataclasses import dataclass
@@ -26,9 +28,24 @@ class InvalidPlan(ValueError):
 
 
 @dataclass(frozen=True)
+class BlankLines:
+    """Consecutive bare breaks between two siblings that have generated IDs.
+
+    OneNote exports each blank line as a <br/> without an ID, so no Graph
+    command can remove one. The caller removes the `removed` positions of
+    this run through the revision service, before any Graph command runs.
+    """
+    before: str
+    after: str
+    count: int
+    removed: tuple
+
+
+@dataclass(frozen=True)
 class Plan:
     commands: tuple
     simulated: str
+    blank_lines: tuple = ()
 
 
 def parse(source):
@@ -154,6 +171,8 @@ class _Planner:
         self.insertions = []
         self.replacements = []
         self.retained = {}
+        self.blank_runs = {}
+        self.removed = set()
         self.parents = {id(child): parent for parent in walk(tree) for child in parent.children}
 
     def retain(self, node, subtree=True):
@@ -176,31 +195,76 @@ class _Planner:
             old = before[span.before_start:span.before_end]
             new = after[span.after_start:span.after_end]
             shared = min(len(old), len(new))
-            for original, desired in zip(old, new):
+            pending = []
+            for position, (original, desired) in enumerate(zip(old, new)):
+                if original.tag == "br" and desired.tag != "br":
+                    # Text typed on a blank line. The break has no target to
+                    # replace: remove it and insert the text in its place.
+                    self.remove_break(original)
+                    pending.append(desired)
+                    continue
+                if pending:
+                    self.insert(pending, before, span.before_start + position, container)
+                    pending = []
                 self.update(original, desired)
             for original in old[shared:]:
                 # Deleting the first/last content can turn an internal break
                 # into a boundary break. Like the breaks already excluded by
                 # document_elements(), it can stay in OneNote without changing
-                # the saved document. Internal gaps still require a target.
+                # the saved document. Internal gaps have no Graph target.
                 boundary = container.tag in LAYOUT | {"root"} and span.after_end in (0, len(after))
                 if original.tag == "br" and boundary:
                     self.retain(original)
+                    continue
+                if original.tag == "br":
+                    self.remove_break(original)
                     continue
                 # Graph deletions use empty replacements. A cell needs an
                 # editable paragraph left behind for subsequent typing.
                 empty = "<p><br/></p>" if container.tag in {"td", "th"} else "<div></div>"
                 self.replacements.append({"target": target(original), "action": "replace", "content": empty})
-            if new[shared:]:
-                self.insert(new[shared:], before, span.before_end, container)
+            if pending or new[shared:]:
+                self.insert(pending + list(new[shared:]), before, span.before_end, container)
+
+    def remove_break(self, node):
+        """Record a blank line for the revision service.
+
+        Its run of consecutive breaks is identified by the generated IDs of
+        the siblings around it, which the service resolves to its elements.
+        """
+        siblings = children(self.parents[id(node)])
+        index = next(position for position, child in enumerate(siblings) if child is node)
+        start, end = index, index + 1
+        while start > 0 and siblings[start - 1].tag == "br":
+            start -= 1
+        while end < len(siblings) and siblings[end].tag == "br":
+            end += 1
+        before = siblings[start - 1].attrs.get("id", "") if start > 0 else ""
+        after = siblings[end].attrs.get("id", "") if end < len(siblings) else ""
+        if not before or not after:
+            raise UnsupportedEdit("OneNote supplied no editable target for this br element")
+        removed = self.blank_runs.setdefault((before, after), (end - start, set()))[1]
+        removed.add(index - start)
+        self.removed.add(id(node))
+
+    def neighbours(self, before, index):
+        """Insertion anchors around `index`. Removed breaks are not anchors."""
+        candidates = []
+        following = index
+        while following < len(before) and id(before[following]) in self.removed:
+            following += 1
+        if following < len(before):
+            candidates.append((before[following], "before"))
+        preceding = index - 1
+        while preceding >= 0 and id(before[preceding]) in self.removed:
+            preceding -= 1
+        if preceding >= 0:
+            candidates.append((before[preceding], "after"))
+        return candidates
 
     def insert(self, additions, before, index, container):
         content = "".join(serialize(node) for node in additions)
-        candidates = []
-        if index < len(before):
-            candidates.append((before[index], "before"))
-        if index > 0:
-            candidates.append((before[index - 1], "after"))
+        candidates = self.neighbours(before, index)
         command = None
         for node, position in candidates:
             identifier = target_identifier(node)
@@ -354,10 +418,13 @@ class _Planner:
         self.replacements.append({"target": target(old), "action": "replace", "content": serialize(updated)})
 
     def finish(self):
-        # Insertions use original anchors, which still exist before any
-        # replacements. Simulate exactly that same command order.
+        # Blank lines are removed first. Insertions then use original
+        # anchors, which still exist before any replacements. Simulate
+        # exactly that same order.
         commands = tuple(self.insertions + self.replacements)
-        simulated = simulate(self.tree, commands)
+        blank_lines = tuple(BlankLines(before, after, count, tuple(sorted(removed)))
+                            for (before, after), (count, removed) in self.blank_runs.items())
+        simulated = simulate(remove_blank_lines(self.tree, blank_lines), commands)
         by_id = {node.attrs["id"]: node for node in walk(simulated) if node.attrs.get("id")}
         for identifier, (tag, attrs, content) in self.retained.items():
             kept = by_id.get(identifier)
@@ -365,7 +432,27 @@ class _Planner:
                 raise InvalidPlan("an unchanged element lost its identity")
             if content is not None and serialize(kept, keep_ids=True) != content:
                 raise InvalidPlan("an unchanged element was modified")
-        return Plan(commands, serialize(simulated, keep_ids=True))
+        return Plan(commands, serialize(simulated, keep_ids=True), blank_lines)
+
+
+def remove_blank_lines(tree, blank_lines):
+    """Remove planned blank lines the way the revision service does."""
+    tree = copy.deepcopy(tree)
+    for run in blank_lines:
+        parents = [node for node in walk(tree)
+                   if any(child.attrs.get("id") == run.before for child in node.children)]
+        if len(parents) != 1:
+            raise InvalidPlan("a blank line has no unique preceding element")
+        siblings = children(parents[0])
+        start = next(index for index, child in enumerate(siblings) if child.attrs.get("id") == run.before) + 1
+        breaks = siblings[start:start + run.count]
+        following = siblings[start + run.count] if start + run.count < len(siblings) else None
+        if (len(breaks) != run.count or any(node.tag != "br" for node in breaks)
+                or following is None or following.attrs.get("id") != run.after):
+            raise InvalidPlan("blank lines no longer separate their neighbouring elements")
+        removed = {id(breaks[index]) for index in run.removed}
+        parents[0].children = [child for child in parents[0].children if id(child) not in removed]
+    return tree
 
 
 def simulate(tree, commands):

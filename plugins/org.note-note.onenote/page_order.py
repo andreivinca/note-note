@@ -4,6 +4,7 @@ Graph supplies page order, levels and public page identities. The web
 revision service supplies the section's current page-series references.
 Only an exact join between the two may be written, against the revision
 just read. No inferred page-ID encoding, note recreation or manual overlay.
+The same join locates a page's own revision cell (page_cell).
 """
 import copy
 import re
@@ -76,8 +77,11 @@ def references(value):
     return result
 
 
-def materialize(state):
-    """Follow the latest revision's ancestry, excluding unrelated branches."""
+def latest_objects(state):
+    """Follow the latest revision's ancestry, excluding unrelated branches.
+
+    Returns every current object by ID, and the root objects by root ID.
+    """
     revisions = state.get("RevisionList")
     if not isinstance(revisions, list) or not 0 < len(revisions) <= MAX_REVISIONS:
         raise WebError("The section's ordering history is unavailable or too large")
@@ -112,10 +116,52 @@ def materialize(state):
                 objects[obj["ObjectId"]] = obj
                 if len(objects) > MAX_OBJECTS:
                     raise WebError("The section's ordering metadata is too large")
+    return objects, roots
+
+
+def materialize(state):
+    """The section root of the latest revision, and every current object."""
+    objects, roots = latest_objects(state)
     root = objects.get(roots.get(CONTENT_ROOT))
     if not root or root.get("ClassId") != SECTION:
         raise WebError("Microsoft returned an unsupported section structure")
     return root, objects
+
+
+def page_cell(state, client_id):
+    """The revision cell holding a page's content.
+
+    The page metadata's entity GUID is the page's public OneNote client ID.
+    Older sections list one page's metadata more than once; each cell joins
+    the next distinct page. The caller confirms the cell's own metadata.
+    """
+    root, objects = materialize(state)
+    cells = []
+    for reference in references(properties(root).get(CHILDREN)):
+        series = objects.get(reference, {})
+        if series.get("ClassId") != PAGE_SERIES:
+            raise WebError("The section contains an unsupported page group")
+        props = properties(series)
+        page_cells = references(props.get(PAGE_CELLS))
+        guids = []
+        for identifier in references(props.get(PAGE_METADATA_REFS)):
+            obj = objects.get(identifier, {})
+            if obj.get("ClassId") != PAGE_METADATA:
+                raise WebError("Microsoft returned invalid page metadata")
+            try:
+                guid = str(uuid.UUID(properties(obj)[ENTITY_GUID]))
+            except (KeyError, ValueError) as error:
+                raise WebError("Microsoft returned invalid page identities") from error
+            if guid not in guids:
+                guids.append(guid)
+        if len(page_cells) != len(guids):
+            raise WebError("Microsoft returned incomplete page group metadata")
+        for cell, guid in zip(page_cells, guids):
+            if guid == client_id:
+                cells.append(cell)
+    if len(cells) != 1:
+        raise WebError("The page was not found in its section; refresh the section")
+    return cells[0]
 
 
 class SectionOrder:
