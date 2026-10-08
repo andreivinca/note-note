@@ -54,6 +54,12 @@ tested account. Microsoft changes may disable ordering. The provider fails
 visibly rather than guessing a different resource, recreating notes, or
 retrying an uncertain write.
 
+`web_session.py` carries the service's reads and writes and decides which
+notebooks it can write. `revision_objects.py` reads the section and page
+objects. Page ordering (`page_order.py`) and
+[blank-line removal](onenote-blank-lines.md) (`blank_lines.py`) are the two
+changes written through it.
+
 ## Provider and UI behavior
 
 Ordering is available within fully loaded sections, with at least two parent
@@ -73,7 +79,8 @@ handle their scopes without changing shared UI code.
 Before writing, the backend fetches native Graph page identities and reads the
 latest section revision. It follows that revision's ancestry, resolves only
 live page-series references, and joins page metadata GUIDs to Graph's public
-OneNote client links. It requires complete membership, matching hierarchy and
+OneNote client links. Older sections list one page's metadata more than once;
+each page cell joins the next distinct page. It requires complete membership, matching hierarchy and
 the starting order the UI saw. A fresh `BaseId`/`ExpectedLatestId` guards
 concurrent changes. Only the section root's page-series sequence is submitted.
 The service is read back, then native Graph order is confirmed before the

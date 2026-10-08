@@ -190,7 +190,7 @@ LaneProvider {
 
   // Page order is written into the section's file in its owner's OneDrive:
   // a personal notebook this account owns, or one shared with it for
-  // editing. onenote.py's require_page_ordering() enforces the same rule.
+  // editing. web_session.py's writable_notebook() enforces the same rule.
   function pageOrderingNotebook(bookId) {
     var book = root.onNotebooks.find(function(candidate) {
       return candidate.id === bookId

@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import onenote  # noqa: E402
 import blank_lines  # noqa: E402
-import page_order as ordering  # noqa: E402
+import revision_objects as revisions  # noqa: E402
 import web_session as web  # noqa: E402
 from onenote_patch import BlankLines  # noqa: E402
 
@@ -43,7 +43,7 @@ def line(number, text, children=()):
     """
     properties = [blank_lines.CONTENT, braced(number + 1)]
     if children:
-        properties += [ordering.CHILDREN, braced(*children)]
+        properties += [revisions.CHILDREN, braced(*children)]
     if text is None:
         content = [0x10001CFE, "1033"]
     elif isinstance(text, tuple):
@@ -56,8 +56,8 @@ def line(number, text, children=()):
 
 def page_state(lines, outline=(20, 22, 24, 26)):
     """A page cell: its own metadata, and an outline of the given lines."""
-    objects = [obj(10, 0x6000C, 123, "keep", ordering.CHILDREN, braced(*outline)),
-               obj(5, ordering.PAGE_METADATA, ordering.ENTITY_GUID, CLIENT)]
+    objects = [obj(10, 0x6000C, 123, "keep", revisions.CHILDREN, braced(*outline)),
+               obj(5, revisions.PAGE_METADATA, revisions.ENTITY_GUID, CLIENT)]
     for number, text, *children in lines:
         objects += line(number, text, *children)
     return {"LatestRevisionId": "latest|1", "ClientKnowledge": "known",
@@ -80,27 +80,27 @@ def cell_guid(index):
 
 def section_state(guids=((CLIENT, CLIENT),)):
     """A section root whose page groups list each page's metadata, possibly twice."""
-    root = {"ObjectId": "root|1", "ClassId": ordering.SECTION,
-            "Properties": [ordering.CHILDREN, ",".join("{%s}{1}" % series_guid(index) for index in range(len(guids)))]}
+    root = {"ObjectId": "root|1", "ClassId": revisions.SECTION,
+            "Properties": [revisions.CHILDREN, ",".join("{%s}{1}" % series_guid(index) for index in range(len(guids)))]}
     objects = [root]
     for index, group in enumerate(guids):
         metadata = []
         for position, guid in enumerate(group):
             identifier = "00000003-0000-0000-%04d-%012d" % (index, position)
             metadata.append("{%s}{1}" % identifier)
-            objects.append({"ObjectId": identifier + "|1", "ClassId": ordering.PAGE_METADATA,
-                            "Properties": [ordering.ENTITY_GUID, guid, ordering.PAGE_LEVEL, "1"]})
-        objects.append({"ObjectId": series_guid(index) + "|1", "ClassId": ordering.PAGE_SERIES,
-                        "Properties": [ordering.PAGE_CELLS, "{%s}{1}" % cell_guid(index),
-                                       ordering.PAGE_METADATA_REFS, ",".join(metadata)]})
+            objects.append({"ObjectId": identifier + "|1", "ClassId": revisions.PAGE_METADATA,
+                            "Properties": [revisions.ENTITY_GUID, guid, revisions.PAGE_LEVEL, "1"]})
+        objects.append({"ObjectId": series_guid(index) + "|1", "ClassId": revisions.PAGE_SERIES,
+                        "Properties": [revisions.PAGE_CELLS, "{%s}{1}" % cell_guid(index),
+                                       revisions.PAGE_METADATA_REFS, ",".join(metadata)]})
     return {"RootCellId": "section|1", "LatestRevisionId": "section|1", "ClientKnowledge": "known",
             "RevisionList": [{"Id": "section|1", "BaseId": web.NIL,
-                              "RootObjectDescriptors": [{"RootId": ordering.CONTENT_ROOT, "ObjectId": "root|1"}],
+                              "RootObjectDescriptors": [{"RootId": revisions.CONTENT_ROOT, "ObjectId": "root|1"}],
                               "ObjectGroups": [{"Objects": objects}]}]}
 
 
 def children(parent):
-    return ordering.references(ordering.properties(parent)[ordering.CHILDREN])
+    return revisions.references(revisions.properties(parent)[revisions.CHILDREN])
 
 
 class JoinTests(unittest.TestCase):
@@ -153,13 +153,13 @@ class JoinTests(unittest.TestCase):
             with self.subTest(name), self.assertRaises(web.WebError):
                 blank_lines.updated_parents(blank_lines.Page(page_state(lines)), (run,))
 
-    def test_page_cell_joins_each_cell_to_the_next_distinct_page(self):
+    def test_a_section_joins_each_cell_to_the_next_distinct_page(self):
         other = "11111111-2222-3333-4444-555555555555"
         state = section_state(((other, other), (CLIENT, CLIENT)))
-        self.assertEqual(ordering.page_cell(state, CLIENT), cell_guid(1) + "|1")
+        self.assertEqual(revisions.Section(state).cell(CLIENT), cell_guid(1) + "|1")
         for guids in (((other,),), ((CLIENT, other),)):
             with self.subTest(guids=guids), self.assertRaises(web.WebError):
-                ordering.page_cell(section_state(guids), CLIENT)
+                revisions.Section(section_state(guids)).cell(CLIENT)
 
 
 class RemovalTests(unittest.TestCase):
@@ -217,8 +217,8 @@ class CommandTests(unittest.TestCase):
         output = io.StringIO()
         with contextlib.ExitStack() as stack:
             stack.enter_context(patch.object(onenote, "cached_resource", side_effect=lambda kind, _: resources[kind]))
-            stack.enter_context(patch.object(onenote, "edits_personal_notebook", return_value=editable))
-            stack.enter_context(patch.object(onenote, "file_write_granted", return_value=granted))
+            stack.enter_context(patch.object(web, "writable_notebook", return_value=editable))
+            stack.enter_context(patch.object(web, "write_granted", return_value=granted))
             graph = stack.enter_context(patch.object(onenote, "graph", return_value=(200, metadata if links else {})))
             stack.enter_context(patch.object(web.Session, "for_section"))
             remove = stack.enter_context(patch.object(blank_lines, "remove", side_effect=error))

@@ -3,8 +3,8 @@
 Planning has no I/O. Unsupported edits and invalid simulations are errors;
 neither authorizes a broader replacement. Graph capabilities are documented
 at https://learn.microsoft.com/en-us/graph/onenote-update-page. Graph has no
-target for a blank line; the plan names those separately, for OneNote's web
-revision service (docs/onenote-blank-lines.md).
+target for a blank line; the plan lists those removals separately, for the
+caller to make before any Graph command (docs/onenote-blank-lines.md).
 """
 import copy
 from dataclasses import dataclass
@@ -33,7 +33,7 @@ class BlankLines:
 
     OneNote exports each blank line as a <br/> without an ID, so no Graph
     command can remove one. The caller removes the `removed` positions of
-    this run through the revision service, before any Graph command runs.
+    this run before any Graph command runs.
     """
     before: str
     after: str
@@ -45,7 +45,7 @@ class BlankLines:
 class Plan:
     commands: tuple
     simulated: str
-    blank_lines: tuple = ()
+    blank_lines: tuple
 
 
 def parse(source):
@@ -227,10 +227,10 @@ class _Planner:
                 self.insert(pending + list(new[shared:]), before, span.before_end, container)
 
     def remove_break(self, node):
-        """Record a blank line for the revision service.
+        """Record a blank line no Graph command can remove.
 
         Its run of consecutive breaks is identified by the generated IDs of
-        the siblings around it, which the service resolves to its elements.
+        the siblings around it.
         """
         siblings = children(self.parents[id(node)])
         index = next(position for position, child in enumerate(siblings) if child is node)
@@ -424,7 +424,7 @@ class _Planner:
         commands = tuple(self.insertions + self.replacements)
         blank_lines = tuple(BlankLines(before, after, count, tuple(sorted(removed)))
                             for (before, after), (count, removed) in self.blank_runs.items())
-        simulated = simulate(remove_blank_lines(self.tree, blank_lines), commands)
+        simulated = simulate(without_blank_lines(self.tree, blank_lines), commands)
         by_id = {node.attrs["id"]: node for node in walk(simulated) if node.attrs.get("id")}
         for identifier, (tag, attrs, content) in self.retained.items():
             kept = by_id.get(identifier)
@@ -435,8 +435,8 @@ class _Planner:
         return Plan(commands, serialize(simulated, keep_ids=True), blank_lines)
 
 
-def remove_blank_lines(tree, blank_lines):
-    """Remove planned blank lines the way the revision service does."""
+def without_blank_lines(tree, blank_lines):
+    """A copy of `tree` without the planned blank lines, as the caller removes them."""
     tree = copy.deepcopy(tree)
     for run in blank_lines:
         parents = [node for node in walk(tree)

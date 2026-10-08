@@ -38,6 +38,12 @@ The removal runs before the save's Graph commands, which never target blank
 lines. If a later step fails, the next save plans against the page without
 them. Every failure keeps the draft.
 
+The plan keeps blank lines apart from its Graph commands, and
+`remove_blank_lines()` in `onenote.py` is the one place a save hands them to
+`blank_lines.py`. Should Graph ever target blank lines, the planner emits
+Graph commands for them instead, and that function, `blank_lines.py` and its
+tests go.
+
 ## Availability
 
 Removal has the same terms as page ordering: a personal notebook the account

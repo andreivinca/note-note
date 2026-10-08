@@ -16,6 +16,7 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import onenote  # noqa: E402
 import page_order as ordering  # noqa: E402
+import revision_objects as revisions  # noqa: E402
 import web_session as web  # noqa: E402
 
 
@@ -32,20 +33,20 @@ def obj(number, kind, properties):
 
 
 def fixture():
-    root = obj(1, ordering.SECTION, [ordering.CHILDREN, ref(2) + "," + ref(3), 123, "preserve me"])
+    root = obj(1, revisions.SECTION, [revisions.CHILDREN, ref(2) + "," + ref(3), 123, "preserve me"])
     objects = [root,
-               obj(2, ordering.PAGE_SERIES, [ordering.PAGE_CELLS, ref(10) + "," + ref(11),
-                                           ordering.PAGE_METADATA_REFS, ref(20) + "," + ref(21)]),
-               obj(3, ordering.PAGE_SERIES, [ordering.PAGE_CELLS, ref(12), ordering.PAGE_METADATA_REFS, ref(22)])]
+               obj(2, revisions.PAGE_SERIES, [revisions.PAGE_CELLS, ref(10) + "," + ref(11),
+                                           revisions.PAGE_METADATA_REFS, ref(20) + "," + ref(21)]),
+               obj(3, revisions.PAGE_SERIES, [revisions.PAGE_CELLS, ref(12), revisions.PAGE_METADATA_REFS, ref(22)])]
     pages = []
     for index, level in enumerate((0, 1, 0)):
-        objects.append(obj(20 + index, ordering.PAGE_METADATA,
-                           [ordering.ENTITY_GUID, guid(100 + index), ordering.PAGE_LEVEL, str(level + 1)]))
+        objects.append(obj(20 + index, revisions.PAGE_METADATA,
+                           [revisions.ENTITY_GUID, guid(100 + index), revisions.PAGE_LEVEL, str(level + 1)]))
         pages.append({"id": "opaque-%d" % index, "clientId": guid(100 + index), "level": level,
                       "title": "note %d" % index, "order": index})
     state = {"RootCellId": guid(50) + "|1", "LatestRevisionId": guid(60) + "|1", "ClientKnowledge": "known",
              "RevisionList": [{"Id": guid(60) + "|1", "BaseId": web.NIL,
-                               "RootObjectDescriptors": [{"RootId": ordering.CONTENT_ROOT, "ObjectId": root["ObjectId"]}],
+                               "RootObjectDescriptors": [{"RootId": revisions.CONTENT_ROOT, "ObjectId": root["ObjectId"]}],
                                "ObjectGroups": [{"Id": guid(61) + "|1", "Objects": objects}]}]}
     return state, pages
 
@@ -61,14 +62,14 @@ class StructureTests(unittest.TestCase):
         page = onenote.page_record(raw, {"id": "section"})
         self.assertEqual((page["order"], page["level"], page["clientId"]), (42, 1, guid(10)))
         self.assertNotIn("order", onenote.page_record({"id": "p", "order": True}, {"id": "s"}))
-        self.assertIsNone(ordering.client_guid({"links": {"oneNoteClientUrl": {"href": "https://evil.test/?page-id=x"}}}))
+        self.assertIsNone(revisions.client_guid({"links": {"oneNoteClientUrl": {"href": "https://evil.test/?page-id=x"}}}))
 
     def test_parent_order_preserves_subpages_and_all_other_properties(self):
         state, pages = fixture()
         before = copy.deepcopy(state)
         order = ordering.SectionOrder(state, pages)
         root = order.arranged_root(["opaque-0", "opaque-2"], ["opaque-2", "opaque-0"])
-        self.assertEqual(root["Properties"], [ordering.CHILDREN, ref(3) + "," + ref(2), 123, "preserve me"])
+        self.assertEqual(root["Properties"], [revisions.CHILDREN, ref(3) + "," + ref(2), 123, "preserve me"])
         self.assertEqual([page["id"] for page in order.arranged_pages(pages, ["opaque-2", "opaque-0"])],
                          ["opaque-2", "opaque-0", "opaque-1"])
         self.assertEqual(state, before)
@@ -76,13 +77,21 @@ class StructureTests(unittest.TestCase):
     def test_inherited_revisions_follow_only_latest_ancestry(self):
         state, pages = fixture()
         latest = {"Id": guid(70) + "|1", "BaseId": state["LatestRevisionId"], "ObjectGroups": [{"Objects": [
-            obj(1, ordering.SECTION, [ordering.CHILDREN, ref(2) + "," + ref(3), 123, "updated"]) ]}]}
+            obj(1, revisions.SECTION, [revisions.CHILDREN, ref(2) + "," + ref(3), 123, "updated"]) ]}]}
         unrelated = {"Id": guid(71) + "|1", "BaseId": web.NIL, "ObjectGroups": [{"Objects": [
-            obj(1, ordering.SECTION, [ordering.CHILDREN, "bad"])]}]}
+            obj(1, revisions.SECTION, [revisions.CHILDREN, "bad"])]}]}
         state["RevisionList"] = [latest, unrelated] + state["RevisionList"]
         state["LatestRevisionId"] = latest["Id"]
         order = ordering.SectionOrder(state, pages)
-        self.assertEqual(order.properties[123], "updated")
+        self.assertEqual(revisions.properties(order.root)[123], "updated")
+
+    def test_metadata_listed_twice_joins_each_cell_to_the_next_distinct_page(self):
+        state, pages = fixture()
+        objects = state["RevisionList"][0]["ObjectGroups"][0]["Objects"]
+        objects.append(obj(23, revisions.PAGE_METADATA,
+                           [revisions.ENTITY_GUID, guid(102), revisions.PAGE_LEVEL, "1"]))
+        objects[2]["Properties"][3] = ref(22) + "," + ref(23)
+        self.assertEqual(ordering.SectionOrder(state, pages).parents, ["opaque-0", "opaque-2"])
 
     def test_concurrent_order_partial_membership_and_duplicates_are_rejected(self):
         state, pages = fixture()
@@ -127,10 +136,10 @@ class StructureTests(unittest.TestCase):
             session.read_section.side_effect = iter([dict(state, RevisionList=[dict(state["RevisionList"][0],
                 ObjectGroups=[{"Objects": [root] + state["RevisionList"][0]["ObjectGroups"][0]["Objects"][1:]}])])])
 
-        session.put.side_effect = commit
+        session.write_section.side_effect = commit
         arranged = ordering.reorder(session, pages, ["opaque-0", "opaque-2"], ["opaque-2", "opaque-0"])
         self.assertEqual([page["id"] for page in arranged], ["opaque-2", "opaque-0", "opaque-1"])
-        session.put.assert_called_once()
+        session.write_section.assert_called_once()
 
     def test_old_cached_page_lists_stay_complete_until_their_section_is_opened(self):
         section = {"id": "s", "modified": "unchanged"}
@@ -207,7 +216,7 @@ class TransportTests(unittest.TestCase):
         root = state["RevisionList"][0]["ObjectGroups"][0]["Objects"][0]
         with patch.object(self.session, "request", return_value=(503, b"", {"X-OfficeVersion": "current"})) as request:
             with self.assertRaises(web.WebError) as caught:
-                self.session.put(state, root)
+                self.session.write_section(state, root)
         self.assertEqual(request.call_count, 1)
         self.assertIsNone(caught.exception.kind)
 
@@ -215,7 +224,7 @@ class TransportTests(unittest.TestCase):
         state, _ = fixture()
         root = state["RevisionList"][0]["ObjectGroups"][0]["Objects"][0]
         with patch.object(self.session, "request", return_value=(200, self.response(3), {})) as request:
-            self.session.put(state, root)
+            self.session.write_section(state, root)
         sent = json.loads(request.call_args.args[2])["srs"][0][1]
         self.assertEqual(sent["ExpectedLatestId"], state["LatestRevisionId"])
         self.assertEqual(sent["Revision"]["BaseId"], state["LatestRevisionId"])
@@ -252,9 +261,7 @@ class CommandTests(unittest.TestCase):
         stack.enter_context(patch.object(onenote, "read_payload", return_value={
             "sectionId": "s", "expected": ["opaque-0", "opaque-2"], "order": ["opaque-2", "opaque-0"]}))
         stack.enter_context(patch.object(onenote, "cached_resource", return_value={"id": "s"}))
-        stack.enter_context(patch.object(onenote, "require_page_ordering"))
-        stack.enter_context(patch.object(onenote, "access_token", return_value="private"))
-        stack.enter_context(patch.object(onenote.msgraph, "signed_in", return_value={"scope": "Files.ReadWrite"}))
+        stack.enter_context(patch.object(onenote, "require_revision_access"))
         collect = stack.enter_context(patch.object(onenote, "collect_section_pages", side_effect=listings))
         stack.enter_context(patch.object(web.Session, "for_section"))
         stack.enter_context(patch.object(ordering, "reorder", return_value=arranged, side_effect=error))
@@ -306,20 +313,36 @@ class CommandTests(unittest.TestCase):
             self.assertEqual(collect.call_count, len(listings))
             self.assertEqual("error" in json.loads(output.getvalue()), not confirmed)
 
-    def test_page_ordering_requires_a_personal_notebook_the_account_can_edit(self):
+    def test_revisions_require_a_personal_notebook_the_account_can_edit(self):
         personal = "0-0123456789abcdef!12"
         for role, notebook, allowed in (("Owner", personal, True), ("owner", personal, True),
                                         ("Contributor", personal, True), ("Reader", personal, False),
                                         ("Owner", "1-business-id", False), (None, personal, False)):
             cache = {"notebooks": [{"id": notebook, "userRole": role}],
                      "sections": [{"id": "s", "notebookId": notebook}]}
-            with self.subTest(role=role, notebook=notebook), patch.object(onenote, "load_listing", return_value=cache):
-                with contextlib.redirect_stdout(io.StringIO()):
-                    if allowed:
-                        onenote.require_page_ordering("s")
-                    else:
-                        with self.assertRaises(SystemExit):
-                            onenote.require_page_ordering("s")
+            output = io.StringIO()
+            with self.subTest(role=role, notebook=notebook), contextlib.ExitStack() as stack:
+                stack.enter_context(patch.object(onenote, "load_listing", return_value=cache))
+                stack.enter_context(patch.object(web, "write_granted", return_value=True))
+                stack.enter_context(contextlib.redirect_stdout(output))
+                if allowed:
+                    onenote.require_revision_access("s", "not writable", "not granted")
+                else:
+                    with self.assertRaises(SystemExit):
+                        onenote.require_revision_access("s", "not writable", "not granted")
+            self.assertEqual(output.getvalue() == "", allowed)
+
+    def test_revisions_require_the_write_grant(self):
+        cache = {"notebooks": [{"id": "0-0123456789abcdef!12", "userRole": "Owner"}],
+                 "sections": [{"id": "s", "notebookId": "0-0123456789abcdef!12"}]}
+        output = io.StringIO()
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch.object(onenote, "load_listing", return_value=cache))
+            stack.enter_context(patch.object(web, "write_granted", return_value=False))
+            stack.enter_context(contextlib.redirect_stdout(output))
+            with self.assertRaises(SystemExit):
+                onenote.require_revision_access("s", "not writable", "not granted")
+        self.assertEqual(json.loads(output.getvalue())["error"], "not granted")
 
     def test_a_created_page_is_recorded_as_a_top_level_page(self):
         created = {"id": "new", "title": "New", "lastModifiedDateTime": "2026-10-06T00:00:00Z",

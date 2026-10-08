@@ -41,6 +41,7 @@ from onenote_audio import RecordingIdentity  # noqa: E402
 from notemerge import MergeStore, StaleRemote, snapshot  # noqa: E402
 import search_index  # noqa: E402
 import notebook_inventory  # noqa: E402
+import revision_objects  # noqa: E402
 import page_order  # noqa: E402
 import web_session  # noqa: E402
 import blank_lines  # noqa: E402
@@ -169,27 +170,13 @@ def require_writable(collection, resource_id):
         fail(READ_ONLY_REASON)
 
 
-def edits_personal_notebook(section_id):
-    """The web revision service writes into the section's file in its
-    owner's OneDrive, which the account reaches through its Files.ReadWrite
-    grant: a personal notebook it owns, or one shared with it for editing.
-    Provider.qml's pageOrderingNotebook() offers drags on the same terms."""
-    notebook = notebook_record("sections", section_id)
-    return (str(notebook.get("userRole", "")).lower() in ("owner", "contributor")
-            and bool(web_session.PERSONAL_ITEM.fullmatch(str(notebook.get("id", "")))))
-
-
-def file_write_granted():
-    """Whether the sign-in holds OneDrive write access. One made before the
-    app asked for it does not, and Provider.qml asks to sign in again."""
-    access_token()
-    token = msgraph.signed_in(msgraph.config()[0]) or {}
-    return "Files.ReadWrite" in token.get("scope", "").split()
-
-
-def require_page_ordering(section_id):
-    if not edits_personal_notebook(section_id):
-        fail("Page ordering is available only in personal notebooks you can edit")
+def require_revision_access(section_id, not_writable, not_granted):
+    """Fail unless OneNote's web revision service (web_session.py) can write
+    into this section under the current sign-in."""
+    if not web_session.writable_notebook(notebook_record("sections", section_id)):
+        fail(not_writable)
+    if not web_session.write_granted():
+        fail(not_granted)
 
 
 def resource_url(collection, resource_id):
@@ -211,7 +198,7 @@ def page_record(page, section):
         value = page.get(name)
         if type(value) is int and value >= 0:
             result[name] = value
-    client_id = page_order.client_guid(page)
+    client_id = revision_objects.client_guid(page)
     if client_id:
         result["clientId"] = client_id
     endpoint = notebook_inventory.graph_url(page.get("self"))
@@ -1563,18 +1550,17 @@ def remove_blank_lines(page_id, runs):
     """Graph has no target for a blank line between two blocks. OneNote's
     web revision service removes it, on the same terms as page order
     (docs/onenote-blank-lines.md)."""
-    section = cached_resource("sections", cached_resource("pages", page_id).get("sectionId"))
-    if not section or not edits_personal_notebook(section["id"]):
-        fail("OneNote's API cannot remove blank lines between paragraphs in this notebook; "
-             "remove them in OneNote — your draft was kept")
-    if not file_write_granted():
-        fail("Sign in to OneNote again to let Note Note remove blank lines — your draft was kept")
+    section_id = cached_resource("pages", page_id).get("sectionId")
+    require_revision_access(section_id,
+                            "OneNote's API cannot remove blank lines between paragraphs in this notebook; "
+                            "remove them in OneNote — your draft was kept",
+                            "Sign in to OneNote again to let Note Note remove blank lines — your draft was kept")
     status, metadata = graph("GET", resource_url("pages", page_id) + "?$select=id,links")
-    client_id = page_order.client_guid(metadata) if status == 200 and isinstance(metadata, dict) else None
+    client_id = revision_objects.client_guid(metadata) if status == 200 and isinstance(metadata, dict) else None
     if not client_id:
         fail("OneNote did not identify this page to remove its blank lines — your draft was kept")
     try:
-        session = web_session.Session.for_section(section, graph)
+        session = web_session.Session.for_section(cached_resource("sections", section_id), graph)
         blank_lines.remove(session, client_id, runs)
     except web_session.WebError as error:
         fail("Could not remove the blank lines: %s — your draft was kept" % error)
@@ -1816,9 +1802,8 @@ def cmd_reorder_pages(payload_path):
             or not all(isinstance(value, str) for value in expected + wanted)
             or len(set(expected)) != len(expected) or set(expected) != set(wanted)):
         fail("invalid page reorder request")
-    require_page_ordering(section_id)
-    if not file_write_granted():
-        fail("Sign in to OneNote again to allow page ordering")
+    require_revision_access(section_id, "Page ordering is available only in personal notebooks you can edit",
+                            "Sign in to OneNote again to allow page ordering")
     fresh = collect_section_pages(section, lambda url: graph("GET", url, max_bytes=MAX_LIST_BODY))
     if fresh.get("error"):
         fail(fresh["error"], kind=fresh.get("kind"))

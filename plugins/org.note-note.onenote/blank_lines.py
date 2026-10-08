@@ -7,12 +7,11 @@ parent's child list; this does the same through the web revision service.
 Only an exact join with the Graph HTML the save planned against may be
 written, against the page revision just read. See docs/onenote-blank-lines.md.
 """
-import copy
 import re
 import uuid
 
-import page_order
-from page_order import CHILDREN, properties, references
+from revision_objects import (CHILDREN, PAGE_METADATA, Section, latest_objects, page_guid, properties,
+                              references, with_children)
 from web_session import WebError
 
 ELEMENT = 0x6000D
@@ -31,7 +30,7 @@ class Page:
     """A page revision's elements, and which element owns each object."""
 
     def __init__(self, state):
-        self.objects, self.roots = page_order.latest_objects(state)
+        self.objects, self.roots = latest_objects(state)
         self.owners, self.parents = {}, {}
         for identifier, obj in self.objects.items():
             props = properties(obj)
@@ -46,13 +45,10 @@ class Page:
     def identity(self):
         """The page's client ID, from the cell's own page metadata."""
         found = [self.objects[identifier] for identifier in self.roots.values()
-                 if self.objects.get(identifier, {}).get("ClassId") == page_order.PAGE_METADATA]
+                 if self.objects.get(identifier, {}).get("ClassId") == PAGE_METADATA]
         if len(found) != 1:
             raise WebError("Microsoft returned a page without its identity")
-        try:
-            return str(uuid.UUID(properties(found[0])[page_order.ENTITY_GUID]))
-        except (KeyError, ValueError) as error:
-            raise WebError("Microsoft returned an invalid page identity") from error
+        return page_guid(found[0])
 
     def element(self, generated_id):
         """The element a Graph ID names: itself, or the one holding that content."""
@@ -100,19 +96,13 @@ def updated_parents(page, runs):
         if len(between) != run.count or not all(page.blank(element) for element in between):
             raise WebError(CHANGED)
         removed.setdefault(parent, set()).update(between[index] for index in run.removed)
-    updated = []
-    for parent, elements in removed.items():
-        obj = copy.deepcopy(page.objects[parent])
-        values = obj["Properties"]
-        kept = [child for child in page.children(parent) if child not in elements]
-        values[values.index(CHILDREN) + 1] = ",".join("{%s}{%s}" % tuple(child.split("|")) for child in kept)
-        updated.append(obj)
-    return updated
+    return [with_children(page.objects[parent], [child for child in page.children(parent) if child not in elements])
+            for parent, elements in removed.items()]
 
 
 def remove(session, client_id, runs):
     """One conditional page revision, confirmed by reading the page back."""
-    cell = page_order.page_cell(session.read_section(), client_id)
+    cell = Section(session.read_section()).cell(client_id)
     state = session.read(cell)
     page = Page(state)
     if page.identity() != client_id:

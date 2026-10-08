@@ -1,6 +1,8 @@
 """App-authenticated access to OneNote's web revision service.
 
-This is an undocumented Microsoft interface, not a Graph ordering API.
+This is an undocumented Microsoft interface, not a Graph API. It writes what
+Graph cannot: page order (page_order.py) and blank-line removal
+(blank_lines.py), both changing the objects revision_objects.py reads.
 Credentials are minted through Graph's driveItem preview and live only in
 this process. No browser cookies, HAR files or account-specific identifiers
 are needed. See docs/onenote-page-order.md for the compatibility boundary.
@@ -23,6 +25,7 @@ NIL = "00000000-0000-0000-0000-000000000000|0"
 UNKNOWN_ROOT = "40c4a0be-3ff1-49c7-b169-ba9d74e0724c|1"
 ENDPOINT = "https://onenote.officeapps.live.com/o/OneNote.ashx"
 PERSONAL_ITEM = re.compile(r"0-([0-9A-Fa-f]{16}![0-9]+)\Z")
+EDITOR_ROLES = ("owner", "contributor")
 MAX_BODY = 16 * 1024 * 1024
 MAX_SECONDS = 120
 RATE_KEY = "onenote-web-order"
@@ -33,10 +36,30 @@ class WebError(msgraph.GraphError):
     """An operation that must settle visibly, without automatic job replay."""
 
 
+def writable_notebook(notebook):
+    """Whether the service can write this notebook's sections.
+
+    Their files live in the owner's personal OneDrive, which the account
+    reaches when it owns the notebook or may edit it. Provider.qml's
+    pageOrderingNotebook() offers drags on the same terms.
+    """
+    return (str(notebook.get("userRole", "")).lower() in EDITOR_ROLES
+            and bool(PERSONAL_ITEM.fullmatch(str(notebook.get("id", "")))))
+
+
+def write_granted():
+    """Whether the sign-in holds the Files.ReadWrite the service needs. One
+    made before the app asked for it does not, and Provider.qml asks to sign
+    in again."""
+    msgraph.access_token()
+    token = msgraph.signed_in(msgraph.config()[0]) or {}
+    return "Files.ReadWrite" in token.get("scope", "").split()
+
+
 def personal_item(identifier):
     match = PERSONAL_ITEM.fullmatch(str(identifier))
     if not match:
-        raise WebError("Page ordering is currently available only for personal OneNote notebooks")
+        raise WebError("OneNote's revision service reaches only sections of personal notebooks")
     return match[1]
 
 
@@ -58,7 +81,7 @@ def frame_info(raw, item_id):
     text = raw.decode("utf-8", errors="replace")
     match = re.search(r"\bvar\s+g_fileInfo\s*=\s*", text)
     if not match:
-        raise WebError("Microsoft's notebook preview no longer provides ordering authorization")
+        raise WebError("Microsoft's notebook preview no longer provides revision authorization")
     try:
         info, _ = json.JSONDecoder().raw_decode(text, match.end())
         source = info["wopiSrc"]
@@ -75,7 +98,7 @@ def frame_info(raw, item_id):
     except (KeyError, TypeError, ValueError):
         valid = False
     if not valid:
-        raise WebError("Microsoft returned mismatched or expired ordering authorization")
+        raise WebError("Microsoft returned mismatched or expired revision authorization")
     return {"WOPIsrc": source, "access_token": token, "access_token_ttl": ttl}
 
 
@@ -98,7 +121,7 @@ class Transport:
         def once():
             remaining = self.deadline - time.monotonic()
             if remaining <= 0:
-                raise WebError("The page ordering request timed out; refresh the section to check its order")
+                raise WebError("OneNote's revision service timed out; refresh the section to check it")
             try:
                 try:
                     response = self.opener.open(request, timeout=min(30, remaining))
@@ -115,8 +138,8 @@ class Transport:
                 # credentials. A mutation's outcome may also be uncertain:
                 # a malformed or cut-off response (http.client) can follow
                 # a revision the server already committed.
-                message = ("Microsoft did not confirm the order; refresh the section before trying again"
-                           if mutation else "Could not read Microsoft's page ordering metadata")
+                message = ("Microsoft did not confirm the change; refresh the section before trying again"
+                           if mutation else "Could not read the section from OneNote's revision service")
                 raise WebError(message) from error
 
         # Only explicit 429 rejections replay. No timeout, 5xx or lost write
@@ -152,7 +175,7 @@ class Session(Transport):
             raise WebError("The OneNote section could not be verified as a writable OneDrive file")
         status, preview = graph("POST", path + "/preview", data={}, retry_policy=msgraph.RetryPolicy.REPLAY)
         if status != 200 or not isinstance(preview, dict):
-            raise WebError("Microsoft could not authorize page ordering (HTTP %s)" % status)
+            raise WebError("Microsoft could not authorize changes to this section (HTTP %s)" % status)
         url = preview_url(preview.get("getUrl"))
         # A signed preview URL is already authorized. Sending a Graph token
         # or following a redirect would cross the credential boundary.
@@ -175,7 +198,7 @@ class Session(Transport):
                 self.headers["X-OfficeVersion"] = returned["X-OfficeVersion"]
                 continue
             if status != 200:
-                raise WebError("Microsoft did not confirm page ordering (HTTP %s); refresh the section" % status)
+                raise WebError("Microsoft did not confirm the change (HTTP %s); refresh the section" % status)
             try:
                 response = json.loads(raw)["Responses"]
                 if len(response) != 1 or response[0][0] != kind:
@@ -185,15 +208,15 @@ class Session(Transport):
                 if type(code) is not int:
                     raise ValueError("invalid operation status")
             except (KeyError, TypeError, ValueError, IndexError) as error:
-                raise WebError("Microsoft returned an invalid ordering response; refresh the section") from error
+                raise WebError("Microsoft returned an invalid revision response; refresh the section") from error
             if code in (2, 4, 5) or value.get("IsConflict"):
-                raise WebError("The section changed in OneNote — refresh it and try reordering again")
+                raise WebError("The section changed in OneNote — refresh it and try again")
             if code == 7:
                 raise WebError("Microsoft denied the change; sign in to OneNote again and check notebook access")
             if code != 0:
-                raise WebError("Microsoft's ordering service rejected the operation (code %s)" % code)
+                raise WebError("OneNote's revision service rejected the change (code %s)" % code)
             return value
-        raise WebError("Microsoft's ordering authorization challenge did not settle")
+        raise WebError("Microsoft's revision authorization challenge did not settle")
 
     def read_section(self):
         return self.read(UNKNOWN_ROOT)
@@ -206,7 +229,8 @@ class Session(Transport):
                          IsAsleep=False, ExpectedLatestRevisionId=NIL)
         return self.operation(2, operation)
 
-    def put(self, state, root):
+    def write_section(self, state, root):
+        """One revision of the section root, conditional on `state`."""
         return self.write(state["RootCellId"], state, [root])
 
     def write(self, cell, state, objects):
