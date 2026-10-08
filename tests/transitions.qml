@@ -843,12 +843,12 @@ ShellRoot {
     property bool configured: true
     property bool signedIn: true
     property bool loggingIn: false
-    property bool requestingOptional: false
     property bool filesRead: false
-    property bool filesWrite: false
+    property bool filesWrite: true
     property string account: "test"
     property string cacheSession: ""
     property var env: ({})
+    property int logins: 0
     property int destructiveLogins: 0
     signal updated()
     signal signedOut()
@@ -857,6 +857,7 @@ ShellRoot {
       return scope === "Notes.ReadWrite" || (scope === "Files.Read" && filesRead)
         || (scope === "Files.ReadWrite" && filesWrite)
     }
+    function login() { logins++ }
     function relogin() { destructiveLogins++ }
   }
   OneNote.Provider { id: oneNote; ms: oneNoteAccount }
@@ -1197,10 +1198,18 @@ ShellRoot {
                             { id: "child", sectionId: orderingSection, title: "Child", clientId: "child", level: 1 },
                             { id: "b", sectionId: orderingSection, title: "B", clientId: "b", level: 0 }]
     orderingSource.rebuild()
-    check("OneNote offers optional page ordering consent without changing normal sign-in scopes",
-          orderingSource.accountActions(orderingBook).some(function(action) { return action.path === "enable-page-order" })
-          && orderingSource.microsoftScopes.indexOf("Files.ReadWrite") < 0)
-    check("OneNote page drags require explicit write consent", !orderingSource.bookRows(orderingBook, 0)[1].reorder)
+    check("OneNote sign-in asks for OneDrive write access and offers no page ordering toggle",
+          orderingSource.microsoftScopes.indexOf("Files.ReadWrite") >= 0
+          && orderingSource.accountActions(orderingBook).map(function(action) {
+            return action.path
+          }).join(",") === "newsection:" + orderingBook + ",logout")
+    oneNoteAccount.filesWrite = false
+    check("a sign-in without OneDrive write access asks to sign in again",
+          orderingSource.accountRows().length === 1 && orderingSource.accountRows()[0].path === "login")
+    check("OneNote page drags require OneDrive write access", !orderingSource.bookRows(orderingBook, 0)[1].reorder)
+    orderingSource.action("login")
+    check("signing in again keeps the account instead of signing out first",
+          oneNoteAccount.logins === 1 && oneNoteAccount.destructiveLogins === 0)
     oneNoteAccount.filesWrite = true
     var orderingRows = orderingSource.bookRows(orderingBook, 0)
     check("OneNote declares section page groups and keeps subpage hierarchy",
@@ -1213,18 +1222,8 @@ ShellRoot {
     orderingSource.onNotebooks = [{ id: orderingBook, name: "Book", userRole: "Reader" }]
     check("read-only OneNote notebooks cannot expose reorder capabilities", !orderingSource.pageOrderingAvailable(orderingSource.onSections[0]))
     orderingSource.onNotebooks = [{ id: orderingBook, name: "Book", userRole: "Contributor" }]
-    check("notebooks shared from another account cannot expose reorder capabilities",
-          !orderingSource.pageOrderingAvailable(orderingSource.onSections[0]))
-    oneNoteAccount.filesWrite = false
-    check("notebooks shared from another account do not ask for page ordering consent",
-          !orderingSource.accountActions(orderingBook).some(function(action) { return action.path === "enable-page-order" }))
-    orderingSource.onNotebooks = [{ id: orderingBook, name: "Book", userRole: "Owner" }]
-    oneNoteAccount.loggingIn = true
-    check("an ordinary sign-in in progress is not page ordering's to cancel",
-          orderingSource.accountActions(orderingBook).filter(function(action) {
-            return action.path === "enable-page-order"
-          })[0].title === "Enable page ordering…")
-    oneNoteAccount.loggingIn = false
+    check("notebooks shared for editing expose reorder capabilities",
+          orderingSource.pageOrderingAvailable(orderingSource.onSections[0]))
     orderingSource.destroy()
     var creations = []
     var creationHost = {
@@ -1331,9 +1330,6 @@ ShellRoot {
     oneNote.rebuild()
     check("OneNote stays ready without Files.Read", oneNote.ready && oneNote.accountRows() === null)
     check("OneNote notes remain visible without Files.Read", oneNote.sections[0].notes.length === 1)
-    check("notebook rows need no ordering toggle",
-          !oneNote.sections[0].footerActions.some(function(action) { return action.path === "enableorder" }) &&
-          oneNote.sections[0].rows.some(function(row) { return row.path === "book" }))
     check("OneNote keeps sign-out out of the scrolling tree",
           oneNote.sections[0].footerActions.some(function(action) { return action.path === "logout" }) &&
           !oneNote.sections[0].rows.some(function(row) { return row.path === "logout" }))
@@ -1342,14 +1338,10 @@ ShellRoot {
     check("OneNote notebook tabs retain the account footer",
           oneNote.sections[0].key === "book" && oneNote.sections[0].footerActions.some(function(action) { return action.path === "logout" }))
     oneNote.notebookTabs = false
-    oneNoteAccount.filesRead = true
-    oneNote.rebuild()
-    check("ordering consent needs no toggle", !oneNote.sections[0].footerActions.some(function(action) { return action.path === "enableorder" }))
-    oneNoteAccount.filesRead = false
     oneNote.rebuild()
     check("losing Files.Read does not hide notes", oneNote.ready && oneNote.sections[0].notes.length === 1)
-    check("OneNote sign-in includes ordering consent",
-          oneNote.microsoftScopes.indexOf("Files.Read") >= 0 && oneNote.microsoftScopes.indexOf("Notes.ReadWrite") >= 0)
+    check("OneNote sign-in includes OneDrive write access",
+          oneNote.microsoftScopes.indexOf("Files.ReadWrite") >= 0 && oneNote.microsoftScopes.indexOf("Notes.ReadWrite") >= 0)
     check("optional initial consent stays optional during renewal",
           scopeAccount.loginScopes.indexOf("Files.Read") >= 0 && scopeAccount.env.NOTE_NOTE_MS_SCOPES.indexOf("Files.Read") < 0 &&
           scopeAccount.env.NOTE_NOTE_MS_OPTIONAL_SCOPES === "Files.Read")

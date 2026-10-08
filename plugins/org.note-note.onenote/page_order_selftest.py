@@ -169,6 +169,29 @@ class TransportTests(unittest.TestCase):
         with self.assertRaises(web.WebError):
             web.frame_info(raw, "0123456789ABCDEF!456")
 
+    def test_a_section_file_is_found_in_its_owners_drive(self):
+        """A notebook shared with the account is reached by the owner's drive."""
+        item = "0123456789ABCDEF!123"
+        path = "/drives/0123456789ABCDEF/items/0123456789ABCDEF%21123"
+        metadata = {"id": item, "name": "Section.one", "file": {},
+                    "parentReference": {"driveId": "0123456789abcdef", "driveType": "personal"}}
+        info = {"wopiSrc": "https://my.microsoftpersonalcontent.com/personal/0123456789abcdef/_vti_bin/wopi.ashx/files/" + item,
+                "wopiTokenAppAndUser": "private", "wopiTokenAppAndUserTtl": int((time.time() + 60) * 1000)}
+        frame = ("var g_fileInfo = " + json.dumps(info) + ";").encode()
+        preview = {"getUrl": "https://my.microsoftpersonalcontent.com/personal/0123456789abcdef/_layouts/15/embed.aspx?access_token=private"}
+        graph = Mock(side_effect=[(200, metadata), (200, preview)])
+        with patch.object(web.Transport, "request", return_value=(200, frame, {})):
+            session = web.Session.for_section({"id": "0-" + item}, graph)
+        self.assertEqual([call.args[:2] for call in graph.call_args_list],
+                         [("GET", path + "?$select=id,name,file,parentReference"), ("POST", path + "/preview")])
+        self.assertEqual(session.headers["X-AccessToken"], "private")
+        for parent in ({"driveId": "FEDCBA9876543210", "driveType": "personal"},
+                       {"driveId": "0123456789ABCDEF", "driveType": "business"}, None):
+            graph = Mock(return_value=(200, dict(metadata, parentReference=parent)))
+            with self.subTest(parent=parent), self.assertRaises(web.WebError):
+                web.Session.for_section({"id": "0-" + item}, graph)
+            graph.assert_called_once()
+
     def test_read_discovers_version_and_retries_rejected_key_challenge(self):
         with patch.object(self.session, "request", side_effect=[
                 (503, b"", {"X-OfficeVersion": "current"}),
@@ -283,11 +306,11 @@ class CommandTests(unittest.TestCase):
             self.assertEqual(collect.call_count, len(listings))
             self.assertEqual("error" in json.loads(output.getvalue()), not confirmed)
 
-    def test_page_ordering_requires_a_personal_notebook_the_account_owns(self):
+    def test_page_ordering_requires_a_personal_notebook_the_account_can_edit(self):
         personal = "0-0123456789abcdef!12"
         for role, notebook, allowed in (("Owner", personal, True), ("owner", personal, True),
-                                        ("Contributor", personal, False), ("Owner", "1-business-id", False),
-                                        (None, personal, False)):
+                                        ("Contributor", personal, True), ("Reader", personal, False),
+                                        ("Owner", "1-business-id", False), (None, personal, False)):
             cache = {"notebooks": [{"id": notebook, "userRole": role}],
                      "sections": [{"id": "s", "notebookId": notebook}]}
             with self.subTest(role=role, notebook=notebook), patch.object(onenote, "load_listing", return_value=cache):

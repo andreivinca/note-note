@@ -33,14 +33,19 @@ the revision service. Credentials remain in memory and are renewed from the
 app's own Microsoft sign-in; no HAR, cookies or signed URLs are retained.
 Service version and request-key challenges are discovered dynamically.
 
-Normal sign-in keeps `Notes.ReadWrite` and `Files.Read`. Users choose
-**Enable page ordering…** to grant optional `Files.ReadWrite`; Microsoft asks
-for account consent. That permission also permits writing OneDrive files
-beyond OneNote. This uses delegated dynamic consent and requires no change to
-the shared app registration or other users' grants. Optional renewal failure
-falls back to required scopes so normal note access remains available.
-Granting it is a sign-in by the same account, so the account keeps its cache
-session: the notebook inventory, search index and running jobs survive.
+Sign-in requests `Notes.ReadWrite` and `Files.ReadWrite`; Microsoft asks for
+account consent. That permission also permits writing OneDrive files beyond
+OneNote. This uses delegated dynamic consent and requires no change to the
+shared app registration. Renewal treats `Files.ReadWrite` as optional, so a
+sign-in made before the app asked for it keeps normal note access, and the
+OneNote list asks to sign in again. That sign-in does not sign out first: the
+same account keeps its cache session, so the notebook inventory, search index,
+drafts and running jobs survive.
+
+The section's file is looked up as `/drives/{owner}/items/{item}`, the owner
+being the item ID's drive prefix, and must be that personal drive's `.one`
+file. `/me/drive/items` reaches only the account's own drive; for a notebook
+shared with the account it returned 400.
 
 This integration is a compatibility boundary, not a supported Graph write
 API. Even [Graph's preview documentation](https://learn.microsoft.com/en-us/graph/api/driveitem-preview?view=graph-rest-1.0)
@@ -51,11 +56,11 @@ retrying an uncertain write.
 
 ## Provider and UI behavior
 
-Initially, ordering is available within fully loaded sections, with at least
-two parent pages, of personal notebooks the signed-in account owns.
-`Files.ReadWrite` reaches only that account's own OneDrive, so notebooks
-shared with it offer no drags; the provider and `reorder-pages` apply the
-same rule. Each parent declares its section's
+Ordering is available within fully loaded sections, with at least two parent
+pages, of personal notebooks the signed-in account owns or can edit (OneNote
+role Owner or Contributor). Read-only shares and work or school notebooks
+offer no drags; the provider and `reorder-pages` apply the same rule. Each
+parent declares its section's
 reorder group and carries its subpages. Subpage indentation is shown, and
 subpages retain their existing order and parent. Individual subpage promotion,
 cross-section moves and section reordering are not enabled.

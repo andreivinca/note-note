@@ -210,14 +210,14 @@ class RemovalTests(unittest.TestCase):
 class CommandTests(unittest.TestCase):
     RUNS = (BlankLines("p:first", "p:second", 1, (0,)),)
 
-    def remove(self, owned=True, granted=True, links=True, error=None):
+    def remove(self, editable=True, granted=True, links=True, error=None):
         """remove_blank_lines with the inventory, permissions and service given."""
         resources = {"pages": {"id": "page", "sectionId": "s"}, "sections": {"id": "s"}}
         metadata = {"links": {"oneNoteClientUrl": {"href": "onenote:https://example.test/#T&page-id={%s}&end" % CLIENT}}}
         output = io.StringIO()
         with contextlib.ExitStack() as stack:
             stack.enter_context(patch.object(onenote, "cached_resource", side_effect=lambda kind, _: resources[kind]))
-            stack.enter_context(patch.object(onenote, "owns_personal_notebook", return_value=owned))
+            stack.enter_context(patch.object(onenote, "edits_personal_notebook", return_value=editable))
             stack.enter_context(patch.object(onenote, "file_write_granted", return_value=granted))
             graph = stack.enter_context(patch.object(onenote, "graph", return_value=(200, metadata if links else {})))
             stack.enter_context(patch.object(web.Session, "for_section"))
@@ -235,10 +235,11 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(remove.call_args.args[1:], (CLIENT, self.RUNS))
 
     def test_without_revision_access_nothing_is_requested(self):
-        for owned, granted in ((False, True), (True, False)):
-            with self.subTest(owned=owned, granted=granted):
-                result, graph, remove = self.remove(owned=owned, granted=granted)
-                self.assertIn("remove them in OneNote", result["error"])
+        for editable, granted, advice in ((False, True, "remove them in OneNote"),
+                                          (True, False, "Sign in to OneNote again")):
+            with self.subTest(editable=editable, granted=granted):
+                result, graph, remove = self.remove(editable=editable, granted=granted)
+                self.assertIn(advice, result["error"])
                 self.assertIn("your draft was kept", result["error"])
                 graph.assert_not_called()
                 remove.assert_not_called()

@@ -41,9 +41,10 @@ them. Every failure keeps the draft.
 ## Availability
 
 Removal has the same terms as page ordering: a personal notebook the account
-owns, and the optional OneDrive write permission (**Enable page ordering…**).
-Elsewhere the save keeps the draft and asks for the blank lines to be removed
-in OneNote.
+owns or can edit, and a sign-in holding `Files.ReadWrite`. A sign-in made
+before the app asked for it keeps the draft and asks to sign in again; other
+notebooks keep the draft and ask for the blank lines to be removed in
+OneNote.
 
 ## Verification on 2026-10-07
 
@@ -57,3 +58,15 @@ in OneNote.
   a section whose page groups list each page's metadata twice. A read-only
   dry run joined its cell and outline. Another blank line on that page had
   no text property at all; removing it failed until that counted as blank.
+
+## Verification on 2026-10-08
+
+- OneNote for the web removed a blank line from a notebook shared for
+  editing (role Contributor), with one revision of the outline in the
+  owner's section file.
+- With the sharee's app sign-in, `/me/drive/items` returned 400 for that
+  file; `/drives/{owner}/items` and its preview authorized a session that
+  read the section and joined the page and its blank line.
+- That sign-in lacked `Files.ReadWrite`. Its preview carried a read-only
+  permission mask (view, open, versions; the owner's added add, edit and
+  delete), and the revision was refused with code 7. Nothing was written.

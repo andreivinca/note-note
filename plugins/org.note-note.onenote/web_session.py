@@ -138,10 +138,16 @@ class Session(Transport):
     @classmethod
     def for_section(cls, section, graph=msgraph.graph):
         item_id = personal_item(section["id"])
-        path = "/me/drive/items/" + urllib.parse.quote(item_id, safe="")
+        # The section's file lives in its owner's OneDrive; a notebook
+        # shared with this account is reached by that drive, not /me/drive.
+        drive_id = item_id.split("!", 1)[0]
+        path = "/drives/%s/items/%s" % (drive_id, urllib.parse.quote(item_id, safe=""))
         status, metadata = graph("GET", path + "?$select=id,name,file,parentReference")
-        if (status != 200 or not isinstance(metadata, dict)
+        parent = metadata.get("parentReference") if isinstance(metadata, dict) else None
+        if (status != 200 or not isinstance(parent, dict)
                 or str(metadata.get("id", "")).casefold() != item_id.casefold()
+                or str(parent.get("driveId", "")).casefold() != drive_id.casefold()
+                or parent.get("driveType") != "personal"
                 or "file" not in metadata or not str(metadata.get("name", "")).lower().endswith(".one")):
             raise WebError("The OneNote section could not be verified as a writable OneDrive file")
         status, preview = graph("POST", path + "/preview", data={}, retry_policy=msgraph.RetryPolicy.REPLAY)
@@ -183,7 +189,7 @@ class Session(Transport):
             if code in (2, 4, 5) or value.get("IsConflict"):
                 raise WebError("The section changed in OneNote — refresh it and try reordering again")
             if code == 7:
-                raise WebError("Microsoft denied page ordering; enable the OneDrive write permission and check notebook access")
+                raise WebError("Microsoft denied the change; sign in to OneNote again and check notebook access")
             if code != 0:
                 raise WebError("Microsoft's ordering service rejected the operation (code %s)" % code)
             return value

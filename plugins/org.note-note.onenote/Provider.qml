@@ -25,7 +25,9 @@ LaneProvider {
   // Pages carry their images through an edit, and a pasted one is uploaded
   // with the save (onenote.py).
   readonly property bool canImages: true
-  readonly property var microsoftScopes: ["Notes.ReadWrite", "Files.Read"]
+  // Files.ReadWrite reads the notebooks' section order and writes page
+  // order and blank-line removals into their section files.
+  readonly property var microsoftScopes: ["Notes.ReadWrite", "Files.ReadWrite"]
   // What the page can hold (PROVIDERS.md). Not a quote, a code block, inline
   // code or a rule: onenote_md.py writes each as a look its reader has no
   // reading for, so they would come back as plain text — and a save holding
@@ -54,6 +56,9 @@ LaneProvider {
   Component.onCompleted: {
     if (services && services.microsoft) {
       root.ms = services.microsoft.create(root.id, root.microsoftScopes, root.microsoftClientId)
+      // A sign-in from before the app asked for Files.ReadWrite still
+      // renews, so its notes stay readable; accountRows() asks for a new
+      // sign-in.
       root.ms.optionalScopes = "Files.Read Files.ReadWrite"
     }
   }
@@ -137,6 +142,11 @@ LaneProvider {
     if (!ms.hasScope("Notes.ReadWrite")) {
       return [{ kind: "action", path: "relogin", title: ms.loggingIn ? "Cancel signing in…" : "Sign in again to enable OneNote…", icon: ms.loggingIn ? "󰅖" : "󰊻" }]
     }
+    // The same account signing in again keeps its caches and drafts, so
+    // this is a sign-in without the sign-out "relogin" does first.
+    if (!ms.hasScope("Files.ReadWrite")) {
+      return [{ kind: "action", path: "login", title: ms.loggingIn ? "Cancel signing in…" : "Sign in again to update OneNote permissions…", icon: ms.loggingIn ? "󰅖" : "󰊻" }]
+    }
     return null
   }
   function bookList() {
@@ -178,15 +188,15 @@ LaneProvider {
     })
   }
 
-  // Page order is written into the section's file in its owner's OneDrive,
-  // and the optional Files.ReadWrite grant reaches only the signed-in
-  // account's own drive: a personal notebook it owns, never one shared with
-  // it. onenote.py's require_page_ordering() enforces the same rule.
+  // Page order is written into the section's file in its owner's OneDrive:
+  // a personal notebook this account owns, or one shared with it for
+  // editing. onenote.py's require_page_ordering() enforces the same rule.
   function pageOrderingNotebook(bookId) {
     var book = root.onNotebooks.find(function(candidate) {
       return candidate.id === bookId
     })
-    return !!book && (book.userRole || "").toLowerCase() === "owner" && /^0-[0-9a-f]{16}![0-9]+$/i.test(book.id)
+    var role = book ? (book.userRole || "").toLowerCase() : ""
+    return (role === "owner" || role === "contributor") && /^0-[0-9a-f]{16}![0-9]+$/i.test(book.id)
   }
 
   function pageOrderingAvailable(section) {
@@ -251,11 +261,6 @@ LaneProvider {
                      title: books.length === 1 ? "New section" : "New section in " + book.name,
                      icon: "󰉗" })
     })
-    if (!ms.hasScope("Files.ReadWrite") && books.some(function(book) {
-      return root.pageOrderingNotebook(book.id)
-    })) {
-      actions.push({ path: "enable-page-order", title: ms.requestingOptional ? "Cancel enabling page ordering…" : "Enable page ordering…", icon: "󰜯" })
-    }
     actions.push({ path: "logout", title: "Sign out" + (ms.account ? " (" + ms.account + ")" : ""), icon: "󰍃" })
     return actions
   }
@@ -423,16 +428,6 @@ LaneProvider {
         root.noticeCleared()
       } else {
         ms.relogin()
-      }
-    }
-    else if (id === "enable-page-order") {
-      // Only this action's own consent request is its to cancel; during an
-      // ordinary sign-in, loginOptional() declines to start a second one.
-      if (ms.requestingOptional) {
-        ms.cancelLogin()
-        root.noticeCleared()
-      } else {
-        ms.loginOptional()
       }
     }
     else if (id === "logout") {

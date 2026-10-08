@@ -23,8 +23,10 @@ Item {
   property string clientId: ""
   // Space-separated Graph scopes to request at sign-in.
   property string scopes: "offline_access User.Read"
-  // Optional scopes can be requested in the initial sign-in or later through
-  // incremental consent. Losing them must not invalidate the required grant.
+  // Scopes a grant may lack and still renew. A provider lists them in
+  // `scopes` too, so sign-in asks for them; a sign-in from before it did
+  // keeps working until the provider asks for a new one. Losing them must
+  // not invalidate the required grant.
   property string optionalScopes: ""
   property string loginScopes: root.scopes
   readonly property string renewalScopes: {
@@ -45,9 +47,6 @@ Item {
   property string cacheSession: ""
   property string grantedScope: ""
   property bool loggingIn: false
-  // The sign-in under way is loginOptional()'s request for added consent,
-  // not an ordinary one: what a provider's "enable" action may cancel.
-  readonly property bool requestingOptional: root.loggingIn && root.loginScopes !== root.scopes
 
   signal updated()
   // The sign-in is gone: a status answer said so, or the user signed out. A
@@ -67,7 +66,6 @@ Item {
   }
 
   function login() { startLogin(root.scopes) }
-  function loginOptional() { startLogin(root.scopes + " " + root.optionalScopes) }
 
   function startLogin(requestedScopes) {
     if (root.loggingIn) {

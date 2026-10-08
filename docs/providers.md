@@ -589,20 +589,24 @@ registration of their own gives it to your provider alone, in
 `~/.config/omarchy/note-note.json` as
 `{"microsoft": {"<providerId>": {"clientId": "…", "tenant": "…"}}}`.
 
-An account may declare `optionalScopes` (space-separated). `login()` requests
-the scopes declared in `scopes`, including optional scopes a provider wants
-in its initial sign-in. `loginOptional()` requests additional optional consent
-without signing out the existing account; `requestingOptional` is true while
-that request, rather than an ordinary sign-in, is under way. When Graph shows
-the new sign-in is the same user as the current one, the account keeps its
-`cacheSession`, so the provider's caches and running jobs survive the added
-consent; any other sign-in starts a new session. The process environment excludes
-optional scopes from the required renewal grant. Only already-granted optional scopes are
-renewed, and a rejected optional refresh is retried with required scopes.
-The account's `env` includes `NOTE_NOTE_MS_OPTIONAL_SCOPES`; providers must not
-gate ordinary functionality on optional consent. OneNote requests `Files.Read`
-in normal sign-in and treats it as optional during renewal for its high-risk
-section-order workaround; unavailable metadata falls back to alphabetical sections.
+An account may declare `optionalScopes` (space-separated): scopes a grant may
+lack and still renew. `login()` requests every scope declared in `scopes`,
+optional ones included. The process environment excludes optional scopes from
+the required renewal grant. Only already-granted optional scopes are renewed,
+and a rejected optional refresh is retried with required scopes, so a sign-in
+from before a provider asked for a scope keeps working. The provider decides
+when to ask for a new sign-in. `login()` while signed in, unlike `relogin()`,
+does not sign out first: when Graph shows the new sign-in is the same user as
+the current one, the account keeps its `cacheSession`, so the provider's
+caches, drafts and running jobs survive; any other sign-in starts a new
+session. The account's `env` includes `NOTE_NOTE_MS_OPTIONAL_SCOPES`.
+
+OneNote requests `Notes.ReadWrite` and `Files.ReadWrite`, and treats
+`Files.Read` and `Files.ReadWrite` as optional during renewal. Its notes stay
+readable on an older grant; its list asks to sign in again until the grant
+holds `Files.ReadWrite`, which section order, page order and blank-line
+removal need. Unavailable section-order metadata falls back to alphabetical
+sections.
 
 
 ### Retirement and process ownership

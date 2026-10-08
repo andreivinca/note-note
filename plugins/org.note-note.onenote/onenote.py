@@ -169,27 +169,27 @@ def require_writable(collection, resource_id):
         fail(READ_ONLY_REASON)
 
 
-def owns_personal_notebook(section_id):
+def edits_personal_notebook(section_id):
     """The web revision service writes into the section's file in its
-    owner's OneDrive, and the optional Files.ReadWrite grant reaches only
-    the signed-in account's own drive: a personal notebook it owns, never
-    one shared with it. Provider.qml's pageOrderingNotebook() offers drags
-    on the same terms."""
+    owner's OneDrive, which the account reaches through its Files.ReadWrite
+    grant: a personal notebook it owns, or one shared with it for editing.
+    Provider.qml's pageOrderingNotebook() offers drags on the same terms."""
     notebook = notebook_record("sections", section_id)
-    return (str(notebook.get("userRole", "")).lower() == "owner"
+    return (str(notebook.get("userRole", "")).lower() in ("owner", "contributor")
             and bool(web_session.PERSONAL_ITEM.fullmatch(str(notebook.get("id", "")))))
 
 
 def file_write_granted():
-    """Whether the account granted the optional OneDrive write permission."""
+    """Whether the sign-in holds OneDrive write access. One made before the
+    app asked for it does not, and Provider.qml asks to sign in again."""
     access_token()
     token = msgraph.signed_in(msgraph.config()[0]) or {}
     return "Files.ReadWrite" in token.get("scope", "").split()
 
 
 def require_page_ordering(section_id):
-    if not owns_personal_notebook(section_id):
-        fail("Page ordering is available only in personal notebooks you own")
+    if not edits_personal_notebook(section_id):
+        fail("Page ordering is available only in personal notebooks you can edit")
 
 
 def resource_url(collection, resource_id):
@@ -1564,9 +1564,11 @@ def remove_blank_lines(page_id, runs):
     web revision service removes it, on the same terms as page order
     (docs/onenote-blank-lines.md)."""
     section = cached_resource("sections", cached_resource("pages", page_id).get("sectionId"))
-    if not section or not owns_personal_notebook(section["id"]) or not file_write_granted():
-        fail("OneNote's API cannot remove blank lines between paragraphs. Choose Enable page ordering… "
-             "to let Note Note remove them, or remove them in OneNote — your draft was kept")
+    if not section or not edits_personal_notebook(section["id"]):
+        fail("OneNote's API cannot remove blank lines between paragraphs in this notebook; "
+             "remove them in OneNote — your draft was kept")
+    if not file_write_granted():
+        fail("Sign in to OneNote again to let Note Note remove blank lines — your draft was kept")
     status, metadata = graph("GET", resource_url("pages", page_id) + "?$select=id,links")
     client_id = page_order.client_guid(metadata) if status == 200 and isinstance(metadata, dict) else None
     if not client_id:
@@ -1816,7 +1818,7 @@ def cmd_reorder_pages(payload_path):
         fail("invalid page reorder request")
     require_page_ordering(section_id)
     if not file_write_granted():
-        fail("Enable page ordering to grant the OneDrive write permission")
+        fail("Sign in to OneNote again to allow page ordering")
     fresh = collect_section_pages(section, lambda url: graph("GET", url, max_bytes=MAX_LIST_BODY))
     if fresh.get("error"):
         fail(fresh["error"], kind=fresh.get("kind"))
