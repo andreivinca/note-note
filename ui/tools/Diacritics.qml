@@ -2,6 +2,7 @@ import QtQuick
 import "../../design"
 import "../../design/controls"
 import "../../services/platform"
+import ".." as AppUi
 import "../editing"
 import "Diacritics.js" as Diacritics
 
@@ -13,12 +14,14 @@ Tool {
   // Literal text needs no provider-specific formatting capability.
   capability: ""
   panelPopup: true
-  available: characters.length > 0
   property var systemRegion: SystemRegion {}
   property string countryCode: systemRegion.countryCode
-  readonly property var alphabet: Diacritics.alphabet(countryCode)
+  // The timezone's country preselects a language until the user picks one.
+  property string chosenLanguage: ""
+  readonly property string language: chosenLanguage || Diacritics.regionLanguage(countryCode)
+  readonly property var languages: Diacritics.languages()
+  readonly property var alphabet: Diacritics.alphabet(language)
   readonly property var characters: alphabet ? Array.from(alphabet.lower + alphabet.upper) : []
-  onCountryCodeChanged: panelOpen = false
 
   function execute() {
     openPanel()
@@ -42,8 +45,13 @@ Tool {
         Math.floor((width + Style.spacing.xs) / (Style.space(36) + Style.spacing.xs))))
 
       function focusInput() {
-        if (tool.panelOpen && letters.count > 0) {
+        if (!tool.panelOpen) {
+          return
+        }
+        if (letters.count > 0) {
           letters.itemAt(0).forceActiveFocus()
+        } else {
+          languageField.forceActiveFocus()
         }
       }
 
@@ -52,14 +60,19 @@ Tool {
         width: parent.width
         spacing: Style.spacing.sm
 
-        Text {
+        AppUi.ChromeDropdown {
+          id: languageField
+          objectName: "diacriticsLanguage"
           width: parent.width
-          text: tool.alphabet ? Qt.locale(tool.alphabet.language).nativeLanguageName : ""
-          textFormat: Text.PlainText
-          color: Color.token("popup.foreground")
-          font.family: tool.editor.fontFamily
-          font.pixelSize: Style.font.body
-          wrapMode: Text.Wrap
+          label: "Language"
+          options: tool.languages
+          value: tool.language
+          displayText: currentIndex < 0 ? "Choose a language" : currentText
+          accent: tool.editor.accent
+          fontFamily: tool.editor.fontFamily
+          onSelected: function(value) {
+            tool.chosenLanguage = value
+          }
         }
 
         Grid {
@@ -101,10 +114,20 @@ Tool {
                 }
                 if (next >= 0 && next < letters.count) {
                   letters.itemAt(next).forceActiveFocus()
+                } else if (event.key === Qt.Key_Up) {
+                  languageField.forceActiveFocus()
                 }
                 event.accepted = true
               }
             }
+          }
+        }
+      }
+      Connections {
+        target: tool
+        function onPanelOpenChanged() {
+          if (!tool.panelOpen) {
+            languageField.close()
           }
         }
       }

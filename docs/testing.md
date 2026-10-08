@@ -201,7 +201,8 @@ cover malformed or duplicate entries, older configurations, JSON persistence
 and failed saves that must preserve the current arrangement.
 Submenu cases cover nested settings, hover and click navigation, arrow keys,
 Escape, outside clicks, and closing menus when permissions or layouts change.
-Diacritics checks cover timezone detection, regional alphabets and case variants,
+Diacritics checks cover timezone preselection, choosing another language and
+keeping it, regions without an alphabet, regional alphabets and case variants,
 mouse and keyboard insertion, selection replacement, pending formatting,
 lists, tables, code blocks, saving/reloading, undo/redo and the helperless host.
 They also check cancellation and rejection after the caret, note, region or

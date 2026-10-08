@@ -169,22 +169,25 @@ uses the document's ordinary foreground. Build with `sh cpp/build.sh`.
 
 ## Diacritics
 
-**Insert → Diacritics** offers lowercase and uppercase letters for the country
-identified by the system timezone. Romanian includes **ă â î ș ț** and **Ă Â Î Ș Ț**, using
-the modern comma-below forms of ș and ț. Click a letter, or move with the arrow
-keys and press Enter or Space, to insert it at the caret. A selection is replaced.
+**Insert → Diacritics** offers the lowercase and uppercase letters of the language
+chosen in the **Language** dropdown at the top of the picker. Romanian includes
+**ă â î ș ț** and **Ă Â Î Ș Ț**, using the modern comma-below forms of ș and ț.
+Click a letter, or move with the arrow keys and press Enter or Space, to insert it
+at the caret; Up from the first row reaches the dropdown. A selection is replaced.
 Insertion preserves text formatting, works in lists, table cells and code blocks,
 and is one undo step with the native helper. Escape or clicking outside cancels;
 a changed note, document or selection rejects the pending choice.
 
-Detection reads the named system timezone locally (`TZ` when explicitly set,
-otherwise `/etc/localtime`, with `/etc/timezone` for systems that copy the timezone
-file). The installed IANA timezone database maps it to a country. For example,
-`Europe/Bucharest` selects Romanian even with an English interface, and
-`Europe/Zurich` offers Swiss German letters without ß. The catalog covers common
+The system timezone preselects the language; choosing another one keeps it until
+the app restarts. Detection reads the named system timezone locally (`TZ` when
+explicitly set, otherwise `/etc/localtime`, with `/etc/timezone` for systems that
+copy the timezone file). The installed IANA timezone database maps it to a country.
+For example, `Europe/Bucharest` preselects Romanian even with an English interface,
+and `Europe/Zurich` preselects Swiss German, without ß. The catalog covers common
 Latin alphabets, including Romanian, French, German, Spanish, Portuguese, Polish,
 Hungarian, Turkish and the Nordic languages. Unsupported regions, unnamed timezones
-and UTC hide the tool. Timezone changes take effect after restarting the app.
+and UTC preselect nothing, and the picker asks for a language. Timezone changes take
+effect after restarting the app.
 
 The tool inserts ordinary Unicode text, so it is available for every editable
 provider. Its ID is `diacritics`. Existing default toolbar layouts upgrade

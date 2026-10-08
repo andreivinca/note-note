@@ -1509,17 +1509,22 @@ Window {
       { region: "constructor", expected: "" }
     ]
     for (var data of cases) {
-      var alphabet = Diacritics.alphabet(data.region)
+      var alphabet = Diacritics.alphabet(Diacritics.regionLanguage(data.region))
       var characters = alphabet ? alphabet.lower + alphabet.upper : ""
       require(characters === data.expected, "unexpected diacritics for " + data.region + ": " + characters)
     }
+    var languages = Diacritics.languages()
+    require(languages.length === Object.keys(Diacritics.alphabets).length && languages.every(function(option) {
+      return option.label === Diacritics.alphabet(option.value).name
+    }), "the language choices do not name every alphabet")
+    require(Diacritics.alphabet("constructor") === null, "an object property was taken for a language")
     var tool = editor.tools.find("diacritics")
     keys.tryVerify(function() { return tool.systemRegion.ready }, 3000)
     require(tool.systemRegion.timeZone === "Europe/Bucharest" && tool.countryCode === "RO",
             "the system timezone did not identify Romania: " + tool.systemRegion.timeZone + "/" + tool.countryCode
               + " ready=" + tool.systemRegion.ready + " error=" + tool.systemRegion.error)
-    require(tool.available && tool.characters.join("") === "ăâîșțĂÂÎȘȚ",
-            "an English interface hid the system timezone's Romanian letters")
+    require(tool.language === "ro" && tool.characters.join("") === "ăâîșțĂÂÎȘȚ",
+            "an English interface did not preselect the system timezone's Romanian letters")
   }
 
   function diacriticsPopup() {
@@ -1605,6 +1610,64 @@ Window {
     }
   }
 
+  function diacriticsLanguageChoice() {
+    var tool = editor.tools.find("diacritics")
+    var originalRegion = tool.countryCode
+    try {
+      tool.countryCode = "RO"
+      load({ source: "word\n" })
+      editor.setCursorPosition(4)
+      editor.tool("diacritics")
+      var popup = diacriticsPopup()
+      var language = keys.findChild(popup.contentItem, "diacriticsLanguage")
+      var first = keys.findChild(popup.contentItem, "diacritics-ă")
+      require(language && language.visible && first.mapToItem(language, 0, 0).y >= language.height,
+              "the language choice is not above the letters")
+      require(language.displayText === "Română", "the timezone did not preselect Romanian: " + language.displayText)
+      require(first.activeFocus, "picker did not focus the first letter")
+      keys.keyClick(Qt.Key_Up)
+      require(language.activeFocus, "Up from the first row did not reach the language")
+
+      language.open()
+      keys.tryVerify(function() { return language.popupOpen }, 3000)
+      var steps = language.indexOfValue("pl") - language.currentIndex
+      for (var i = 0; i < Math.abs(steps); i++) {
+        keys.keyClick(steps > 0 ? Qt.Key_Down : Qt.Key_Up)
+      }
+      keys.keyClick(Qt.Key_Return)
+      require(tool.panelOpen && tool.language === "pl" && language.displayText === "Polski",
+              "choosing Polish did not switch the picker: " + language.displayText)
+      require(!tool.choose("ș") && tool.panelOpen, "picker accepted a letter of the language it left")
+      var letter = keys.findChild(popup.contentItem, "diacritics-ł")
+      require(letter && letter.visible, "choosing Polish did not show its letters")
+      keys.mouseClick(letter, letter.width / 2, letter.height / 2)
+      require(savedMarkdown() === "wordł\n", "the chosen language's letter was not inserted: " + savedMarkdown())
+
+      tool.countryCode = "DE"
+      editor.tool("diacritics")
+      popup = diacriticsPopup()
+      require(language.displayText === "Polski" && keys.findChild(popup.contentItem, "diacritics-ą").activeFocus,
+              "the chosen language did not outlast the picker and the timezone")
+      tool.cancelPanel()
+
+      tool.chosenLanguage = ""
+      tool.countryCode = "US"
+      require(editor.tools.menuTools("insert").some(function(entry) {
+        return entry.toolId === "diacritics"
+      }), "a region without an alphabet hid Diacritics from Insert")
+      editor.tool("diacritics")
+      popup = diacriticsPopup()
+      keys.tryVerify(function() { return language.activeFocus }, 1000)
+      require(language.displayText === "Choose a language" && tool.characters.length === 0,
+              "a region without an alphabet preselected a language: " + language.displayText)
+      require(!tool.choose("ă") && tool.panelOpen, "picker accepted a letter before a language was chosen")
+    } finally {
+      tool.cancelPanel()
+      tool.chosenLanguage = ""
+      tool.countryCode = originalRegion
+    }
+  }
+
   function diacriticsGuards() {
     var tool = editor.tools.find("diacritics")
     var originalRegion = tool.countryCode
@@ -1631,14 +1694,10 @@ Window {
 
       editor.tool("diacritics")
       require(!tool.choose("a") && tool.panelOpen, "picker accepted a character outside its alphabet")
-      tool.countryCode = "US"
-      require(!tool.panelOpen && !editor.tool("diacritics"), "unsupported region kept a live picker")
-      require(!editor.tools.menuTools("insert").some(function(entry) {
-        return entry.toolId === "diacritics"
-      }), "unsupported region showed Diacritics in Insert")
+      tool.countryCode = "PL"
+      require(!tool.choose("ă") && tool.panelOpen, "picker accepted a letter of the region it left")
 
       tool.countryCode = "RO"
-      editor.tool("diacritics")
       editor.readOnly = true
       require(!tool.panelOpen && !editor.tool("diacritics") && !tool.choose("ă"), "read-only note accepted a diacritic")
       require(savedMarkdown() === "other\n", "cancelled picker changed the note")
@@ -1676,10 +1735,7 @@ Window {
 
   function toolLayout() {
     load({ source: "word\n" })
-    var expectedInsert = ["insertMonth", "rule", "link", "table"]
-    if (editor.tools.find("diacritics").available) {
-      expectedInsert.push("diacritics")
-    }
+    var expectedInsert = ["insertMonth", "rule", "link", "table", "diacritics"]
     require(editor.tools.menuTools("insert").map(function(tool) {
       return tool.toolId
     }).join(",") === expectedInsert.join(","), "default Insert menu is missing its insertion tools")
@@ -2854,8 +2910,9 @@ Window {
 
   function diacriticsCases() {
     return [
-      { name: "diacritics follow the system timezone and preserve language-specific letter cases", run: diacriticsRegions },
+      { name: "diacritics preselect the system timezone's language and preserve language-specific letter cases", run: diacriticsRegions },
       { name: "diacritics insert through Insert with mouse and keys, formatting, saving and undo", run: diacriticsInsertion },
+      { name: "diacritics offer every language, which the timezone only preselects", run: diacriticsLanguageChoice },
       { name: "diacritics cancel and reject changed notes, carets, regions and read-only contexts", run: diacriticsGuards },
       { name: "diacritics retain formatting and code blocks without the native helper", run: diacriticsWithoutHelper }
     ]
