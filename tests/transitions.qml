@@ -524,6 +524,45 @@ ShellRoot {
   }
 
   QtObject {
+    id: titleProvider
+    property var loads: []
+    property var saves: []
+    function load(path, callback) { loads.push(callback); return { cancel: function() {} } }
+    function save(path, title, body, callback, options) { saves.push(callback) }
+    function noteEdited(path) {}
+  }
+  Notes.NoteSession {
+    id: titleSession
+    editor: document
+    providerFor: function(path) { return titleProvider }
+    versionFor: function(path) { return "1" }
+    report: function(message) {}
+  }
+  function unsavedTitleCases() {
+    titleSession.selectPath("titles:a")
+    titleProvider.loads.shift()({ title: "Listed", body: "text" })
+    check("an unedited note shows its provider's title", !("titles:a" in titleSession.unsavedTitles))
+    document.title = "Typed"
+    titleSession.onEdited()
+    check("a title being typed is the list's at once", titleSession.unsavedTitles["titles:a"] === "Typed")
+    document.title = "Typed on"
+    check("every keystroke of the title reaches the list", titleSession.unsavedTitles["titles:a"] === "Typed on")
+    titleSession.selectPath("titles:b")
+    document.conversions.shift()("text", true)
+    titleProvider.loads.shift()({ title: "B", body: "b" })
+    check("a note left with its save in flight keeps the typed title",
+          titleSession.unsavedTitles["titles:a"] === "Typed on" && !("titles:b" in titleSession.unsavedTitles))
+    titleProvider.saves.shift()({ error: "offline" })
+    check("a failed save keeps the title it carried", titleSession.unsavedTitles["titles:a"] === "Typed on")
+    titleSession.selectPath("titles:a")
+    titleSession.flushSave()
+    document.conversions.shift()("text", true)
+    titleProvider.saves.shift()({})
+    check("a landed save hands the title back to the provider", !("titles:a" in titleSession.unsavedTitles))
+    titleSession.selectPath("")
+  }
+
+  QtObject {
     id: host
     property bool writesSettled: !session.busy
     property var config: ({ providers: { test: { enabled: true, notebookTabs: false } } })
@@ -1942,6 +1981,7 @@ ShellRoot {
         return
       }
       if (Platform.env("NOTE_NOTE_TEST_NOTES_ONLY")) {
+        unsavedTitleCases()
         sessionCases()
         mergeCases()
         lifecycleCases()
@@ -1954,6 +1994,7 @@ ShellRoot {
         return
       }
       editorCases()
+      unsavedTitleCases()
       sessionCases()
       mergeCases()
       lifecycleCases()

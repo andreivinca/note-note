@@ -25,7 +25,8 @@ Item {
   property color selectedText: Color.menu.selectedText
   property string fontFamily: Style.font.menuFamily
   property int noteFontSize: Style.font.body
-  property var titleFor: function(t, p) { return t || p || "Untitled" }
+  // row -> string shown in the row (NoteList.titleFor).
+  property var titleFor: function(row) { return row.title || row.preview || "Untitled" }
 
   signal activated(string path)
 
@@ -106,7 +107,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             anchors.leftMargin: root.textInset
             anchors.rightMargin: Style.spacing.sm
-            title: root.titleFor(hit.modelData.title, hit.modelData.preview)
+            title: root.titleFor(hit.modelData)
             hasTitle: hit.modelData.hasTitle !== false
             preview: hit.modelData.preview || ""
             modified: hit.modelData.modified || ""

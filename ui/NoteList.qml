@@ -76,8 +76,10 @@ Item {
   readonly property color accentInk: Qt.tint(foreground, Util.alpha(accent, 0.6))
   property string fontFamily: Style.font.menuFamily
   property int noteFontSize: Style.font.body
-  // (title, preview) -> string shown in the row.
-  property var titleFor: function(t, p) { return t || p || "Untitled" }
+  // row -> string shown in the row. The host's answer may change while the
+  // row does not — a title being typed into the open note — and the row
+  // follows it.
+  property var titleFor: function(row) { return row.title || row.preview || "Untitled" }
 
   signal activated(string path)
   // `target` is the row's path when it has one (e.g. a OneNote section), else
@@ -428,7 +430,7 @@ Item {
                 anchors.leftMargin: root.textInset + slot.indent
                 anchors.rightMargin: Style.spacing.sm + (closeButton.opacity > 0 ? closeButton.width : 0)
                 anchors.verticalCenter: parent.verticalCenter
-                title: root.titleFor(slot.modelData.title, slot.modelData.preview)
+                title: root.titleFor(slot.modelData)
                 hasTitle: slot.modelData.hasTitle !== false
                 preview: slot.modelData.preview || ""
                 modified: slot.modelData.modified || ""

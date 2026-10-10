@@ -1292,17 +1292,22 @@ Item {
     })
   }
 
-  function displayTitle(title, preview) {
+  // What a row is called in the list. A title typed into a note shows at
+  // once, over the one its provider listed, until the save lands
+  // (NoteSession.unsavedTitles) — OneNote takes seconds to answer.
+  function displayTitle(row) {
+    var unsaved = row.hasTitle !== false && row.path in session.unsavedTitles
+    var title = unsaved ? session.unsavedTitles[row.path] : row.title
     if (title) {
       return title
     }
 
-    if (!preview) {
+    if (!row.preview) {
       return "Untitled"
     }
 
     // A checkbox line reads as a box, not as its Markdown.
-    var text = preview.replace(/^\[[xX]\]\s*/, "☑ ").replace(/^\[\s?\]\s*/, "☐ ").replace(/\u00a0/g, " ").trim()
+    var text = row.preview.replace(/^\[[xX]\]\s*/, "☑ ").replace(/^\[\s?\]\s*/, "☐ ").replace(/\u00a0/g, " ").trim()
     if (!text) {
       return "Untitled"
     }

@@ -35,7 +35,24 @@ Item {
   property int noteLoadSeq: 0
   property var saveEpoch: ({})
   property var savesPending: ({})
+  // Replaced wholesale, never mutated (setDraft), like savesPending:
+  // unsavedTitles follows them.
   property var drafts: ({})
+  // The titles the list shows over its providers' while they are unsaved:
+  // path -> title. The open note's is the editor's while it holds edits no
+  // save has taken yet; any other's is the one its draft carries — a save
+  // still in flight, or one that failed and is kept. A note leaves once its
+  // save lands, and its provider's row says the same by then.
+  readonly property var unsavedTitles: {
+    var titles = {}
+    for (var path in session.drafts) {
+      titles[path] = session.drafts[path].document.title
+    }
+    if (session.dirty) {
+      titles[session.currentPath] = session.editor.title
+    }
+    return titles
+  }
   property var pathAliases: ({})
   property var pendingDeletions: ({})
   readonly property bool busy: Object.keys(session.savesPending).length > 0 || Object.keys(session.pendingDeletions).length > 0
@@ -50,13 +67,16 @@ Item {
   // Callbacks accepted under the old identity still settle the same draft.
   function replacePath(previous, next, view) {
     session.pathAliases[previous] = next
-    var maps = [session.saveEpoch, session.drafts]
-    for (var i = 0; i < maps.length; i++) {
-      if (previous in maps[i]) {
-        maps[i][next] = maps[i][previous]
-        delete maps[i][previous]
-      }
+    if (previous in session.saveEpoch) {
+      session.saveEpoch[next] = session.saveEpoch[previous]
+      delete session.saveEpoch[previous]
     }
+    var drafts = Object.assign({}, session.drafts)
+    if (previous in drafts) {
+      drafts[next] = drafts[previous]
+      delete drafts[previous]
+    }
+    session.drafts = drafts
     var pending = Object.assign({}, session.savesPending)
     if (previous in pending) {
       pending[next] = pending[previous]
@@ -244,9 +264,9 @@ Item {
         session.noteReady(result.editable === false, result.reason || "")
         if (result.recovered) {
           session.dirty = true
-          session.drafts[path] = { document: editor.snapshotDocument(),
+          session.setDraft(path, { document: editor.snapshotDocument(),
               view: session.editingView, epoch: session.saveEpoch[path] || 0,
-              error: "Recovered unsaved changes", conflict: result.conflict }
+              error: "Recovered unsaved changes", conflict: result.conflict })
           session.report("Recovered unsaved changes")
           if (result.conflict) {
             session.showConflict(path, result.conflict)
@@ -325,6 +345,17 @@ Item {
     return (session.savesPending[session.resolvedPath(path)] || 0) > 0
   }
 
+  // `draft` is { document, view, epoch, error, conflict }; null drops it.
+  function setDraft(path, draft) {
+    var drafts = Object.assign({}, session.drafts)
+    if (draft) {
+      drafts[path] = draft
+    } else {
+      delete drafts[path]
+    }
+    session.drafts = drafts
+  }
+
   function countSave(path, delta) {
     path = session.resolvedPath(path)
     var count = (session.savesPending[path] || 0) + delta
@@ -342,7 +373,7 @@ Item {
     path = session.resolvedPath(path)
     if (path) {
       session.saveEpoch[path] = (session.saveEpoch[path] || 0) + 1
-      delete session.drafts[path]
+      session.setDraft(path, null)
     }
   }
 
@@ -401,8 +432,8 @@ Item {
     }
     if (result.error) {
       if (recovery.document && recovery.unsaved && !session.drafts[path]) {
-        session.drafts[path] = { document: recovery.document, view: recovery.view,
-            error: result.error, epoch: recovery.epoch }
+        session.setDraft(path, { document: recovery.document, view: recovery.view,
+            error: result.error, epoch: recovery.epoch })
         if (path === session.currentPath) {
           session.dirty = true
         }
@@ -427,7 +458,7 @@ Item {
     var epoch = (session.saveEpoch[path] || 0) + 1
     session.saveEpoch[path] = epoch
     var draft = { document: editor.snapshotDocument(), view: session.editingView, epoch: epoch, error: "" }
-    session.drafts[path] = draft
+    session.setDraft(path, draft)
     session.dirty = false
     session.loadedVersion = ""
     session.countSave(path, 1)
@@ -461,7 +492,7 @@ Item {
           session.dirty = true
         }
       } else {
-        delete session.drafts[path]
+        session.setDraft(path, null)
         if (path === session.currentPath && !session.dirty && result.version) {
           session.loadedVersion = result.version
         }
