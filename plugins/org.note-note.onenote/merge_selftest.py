@@ -920,7 +920,7 @@ class SaveTests(unittest.TestCase):
         with (patch.object(onenote, "graph_raw", self.raw_transport),
               patch.object(onenote, "access_token", return_value="synthetic-token"),
               patch.object(onenote.msgraph.settings, "rate_key", None),
-              patch.object(onenote.msgraph.urllib.request, "urlopen", side_effect=endpoint)):
+              patch.object(onenote.msgraph.OPENER, "open", side_effect=endpoint)):
             yield
 
     def response(self, request):

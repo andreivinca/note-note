@@ -16,17 +16,23 @@ exactly the ones recorded before the insert, so appending can never lose a
 block it just wrote.
 
 No network: `notion.api` is replaced with a recorder, and nothing here reads
-or writes a real token, cache or page.
+or writes a real token, cache or page. The transport's own tests keep `api`
+and answer at its opener instead, or from a server on 127.0.0.1
+(tests/localhttp.py).
 
     python3 plugins/org.note-note.notion/selftest.py [-v]
 """
 import argparse
 import contextlib
+import email.message
 import io
 import json
 import os
 import sys
 import tempfile
+import time
+import urllib.error
+from unittest.mock import patch
 
 # Point the state and cache directories somewhere harmless before notion.py
 # reads them into module constants at import.
@@ -35,7 +41,10 @@ os.environ["XDG_STATE_HOME"] = os.path.join(WORK, "state")
 os.environ["XDG_CACHE_HOME"] = os.path.join(WORK, "cache")
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "tests"))
 import notion  # noqa: E402
+import ratelimit  # noqa: E402
+from localhttp import LocalServer, answer_with, drip  # noqa: E402
 
 FAILURES = []
 
@@ -484,6 +493,266 @@ def test_a_new_integration_never_shows_the_old_ones_notes(verbose):
     return failures
 
 
+# ------------------------------------------------------------- the transport
+#
+# The tests above replace `api`; these keep it, and answer at the opener
+# every request goes through (`notion.OPENER`), so what `api` repeats, what it
+# tells the job and what reaches the network are the real ones.
+
+class Response(io.BytesIO):
+    def __init__(self, status, raw):
+        super().__init__(raw)
+        self.status = status
+
+
+def as_appended(sent):
+    """A block as Notion answers it once appended: each run with every
+    annotation and its plain text, and the block's colour (and a heading's
+    toggle) at Notion's defaults."""
+    kind = sent["type"]
+    fields = dict(sent[kind])
+    fields["rich_text"] = [answered_run(piece) for piece in fields.get("rich_text", [])]
+    fields.setdefault("color", "default")
+    if kind.startswith("heading_"):
+        fields.setdefault("is_toggleable", False)
+    return {"type": kind, kind: fields}
+
+
+def answered_run(sent):
+    """A run as Notion answers it: `run`'s shape, with the sent link kept."""
+    link = sent["text"].get("link")
+    answered = run(sent["text"]["content"], **sent.get("annotations", {}))
+    answered["text"]["link"] = link
+    answered["href"] = link["url"] if link else None
+    return answered
+
+
+class Workspace:
+    """A scripted api.notion.com holding one page: its top-level blocks in
+    order, as Notion appends and deletes them, and the pages created under
+    it. `refusals` maps a write — "create" or "append" — to the statuses its
+    attempts answer with, in order, once each has been carried out or not:
+    a 503 commits first, as Notion can; a 429 never does."""
+
+    def __init__(self, refusals=None):
+        self.refusals = {kind: list(statuses) for kind, statuses in (refusals or {}).items()}
+        self.calls = []
+        self.created = []
+        self.blocks = paragraphs(OLD_IDS)
+
+    def open(self, req, timeout=None):
+        method, path = req.get_method(), req.full_url[len(notion.API):]
+        data = json.loads(req.data) if req.data else None
+        self.calls.append((method, path))
+        status, body = self.answer(method, path, data)
+        if status >= 400:
+            fields = email.message.Message()
+            fields["Retry-After"] = "0"
+            raw = json.dumps({"object": "error", "status": status, "message": "Notion is unavailable"}).encode()
+            raise urllib.error.HTTPError(req.full_url, status, "", fields, io.BytesIO(raw))
+        return Response(status, json.dumps(body).encode())
+
+    def refused(self, kind):
+        statuses = self.refusals.get(kind) or [200]
+        return statuses.pop(0)
+
+    def answer(self, method, path, data):
+        if method == "POST" and path == "/pages":
+            status = self.refused("create")
+            if status != 429:
+                self.created.append(data)
+            return status, {"id": "made-%d" % len(self.created), "properties": {}, "parent": {}}
+        if method == "GET" and path.startswith("/pages/"):
+            return 200, {"properties": {"Name": {"type": "title", "title": [{"plain_text": TITLE}]}}}
+        if method == "GET" and path.startswith("/blocks/"):
+            return 200, {"results": [dict(block, has_children=False) for block in self.blocks], "has_more": False}
+        if method == "PATCH" and path.endswith("/children"):
+            status = self.refused("append")
+            if status != 429:
+                self.blocks += [dict(as_appended(sent), id="new-%d-%d" % (len(self.calls), i))
+                                for i, sent in enumerate(data["children"])]
+            return status, {"results": []}
+        if method == "DELETE" and path.startswith("/blocks/"):
+            self.blocks = [block for block in self.blocks if block["id"] != path[len("/blocks/"):]]
+            return 200, {}
+        raise AssertionError("unscripted call: %s %s" % (method, path))
+
+    def texts(self):
+        return ["".join(run["text"]["content"] for run in block[block["type"]]["rich_text"])
+                for block in self.blocks]
+
+    def count(self, method, wanted):
+        return len([path for m, path in self.calls if m == method and wanted(path)])
+
+
+@contextlib.contextmanager
+def fresh_budget():
+    """A rate state of its own: a cooldown one test records never reaches
+    the next, and nothing here is paced behind another test's requests."""
+    with tempfile.TemporaryDirectory(dir=WORK) as directory, \
+            patch.dict(os.environ, {"NOTE_NOTE_RATE_DIR": directory}):
+        yield
+
+
+def run_command(function, *args):
+    """A command against the scripted workspace: (answer, exit code,
+    Throttled or None) — `main()` turns the last into the throttled kind."""
+    printed, code, throttled = io.StringIO(), None, None
+    with contextlib.redirect_stdout(printed):
+        try:
+            function(*args)
+        except SystemExit as e:
+            code = e.code
+        except ratelimit.Throttled as t:
+            throttled = t
+    lines = printed.getvalue().splitlines()
+    return (json.loads(lines[-1]) if lines else {}), code, throttled
+
+
+def payload(title=TITLE, body=BODY):
+    handle, path = tempfile.mkstemp(dir=WORK, suffix=".json")
+    with os.fdopen(handle, "w") as f:
+        json.dump({"title": title, "body": body}, f)
+    return path
+
+
+def test_an_uncertain_write_is_never_sent_twice(verbose):
+    """A 503 is Notion unavailable, and the request may have been carried
+    out before it said so. It used to be sent again in the same process like
+    a 429: a create made the page twice and answered ok, an append left the
+    new body on the page twice."""
+    notion.save_private(notion.TOKEN_FILE, {"token": "secret", "workspace": "Test"})
+    failures = 0
+
+    workspace = Workspace({"create": [503]})
+    with fresh_budget(), patch.object(notion.OPENER, "open", workspace.open):
+        answer, code, throttled = run_command(notion.cmd_create, "parent-page", payload())
+        cooled = ratelimit.cooldown_remaining(notion.RATE_KEY) > 0
+    failures += check("an uncertain create is sent once", len(workspace.created) == 1,
+                      "%d pages made" % len(workspace.created))
+    failures += check("and fails as the error it is, never re-run", code == 1 and "error" in answer
+                      and "kind" not in answer and throttled is None, "exit %r, %r, %r" % (code, answer, throttled))
+    failures += check("an uncertain create still records the cooldown", cooled)
+
+    workspace = Workspace({"create": [429]})
+    with fresh_budget(), patch.object(notion.OPENER, "open", workspace.open):
+        answer, code, _ = run_command(notion.cmd_create, "parent-page", payload())
+    failures += check("a refused create is sent again and made once",
+                      workspace.count("POST", lambda p: p == "/pages") == 2 and len(workspace.created) == 1
+                      and answer.get("ok") is True, "%r, %r" % (workspace.calls, answer))
+
+    workspace = Workspace({"append": [503]})
+    with fresh_budget(), patch.object(notion.OPENER, "open", workspace.open):
+        answer, code, throttled = run_command(notion.cmd_update, PAGE_ID, payload())
+    failures += check("an uncertain append is sent once",
+                      workspace.count("PATCH", lambda p: p.endswith("/children")) == 1, "%r" % (workspace.calls,))
+    failures += check("so the page never holds the new body twice", workspace.texts().count("Milk") == 1,
+                      "%r" % (workspace.texts(),))
+    failures += check("and parks the job, deleting nothing", throttled is not None and code is None
+                      and workspace.count("DELETE", lambda p: True) == 0, "exit %r, %r" % (code, answer))
+    # The lane runs the job again once the wait is over. It reads the page
+    # afresh, so the append that did land is replaced with everything else.
+    with fresh_budget(), patch.object(notion.OPENER, "open", workspace.open):
+        answer, code, _ = run_command(notion.cmd_update, PAGE_ID, payload())
+    failures += check("the job run again leaves the new body once", answer == {"ok": True}
+                      and workspace.texts() == ["Milk", "and bread"], "%r, %r" % (answer, workspace.texts()))
+
+    workspace = Workspace({"append": [429]})
+    with fresh_budget(), patch.object(notion.OPENER, "open", workspace.open):
+        answer, _, _ = run_command(notion.cmd_update, PAGE_ID, payload())
+    failures += check("a refused append is sent again in place", answer == {"ok": True}
+                      and workspace.texts() == ["Milk", "and bread"], "%r, %r" % (answer, workspace.texts()))
+    if verbose:
+        print("  last run: %r" % (workspace.calls,))
+    print("a write Notion may have carried out is never sent twice")
+    print("  %d checks failed" % failures if failures else "  all green")
+    return failures
+
+
+def test_the_secret_goes_to_notion_only(verbose):
+    """urllib copies a request's headers to wherever a redirect points; a
+    3xx now comes back as it is, and the secret stays where it was sent."""
+    failures = 0
+    with LocalServer(answer_with(200)) as elsewhere, \
+            LocalServer(answer_with(302, Location=elsewhere.url + "/stolen")) as server, \
+            fresh_budget(), patch.object(notion, "API", server.url + "/v1"):
+        status, _ = notion.api("GET", "/users/me", tok="secret")
+    failures += check("a redirect is answered with its 302", status == 302, "%r" % (status,))
+    failures += check("and the secret never reaches the other origin", elsewhere.seen == [],
+                      "%r" % (elsewhere.seen,))
+    print("the integration secret goes to Notion and nowhere else")
+    print("  %d checks failed" % failures if failures else "  all green")
+    return failures
+
+
+def test_a_drip_fed_answer_ends_at_the_deadline(verbose):
+    """TIMEOUT is a deadline for the whole answer. A body that arrives a
+    byte at a time never trips the socket timeout, and was read to its end
+    however long that took."""
+    failures = 0
+    with LocalServer(drip(200)) as server, fresh_budget(), \
+            patch.object(notion, "API", server.url + "/v1"), patch.object(notion, "TIMEOUT", 0.5):
+        started = time.monotonic()
+        answer, code, _ = run_command(notion.api, "GET", "/users/me", None, "secret")
+        elapsed = time.monotonic() - started
+    failures += check("a drip-fed success ends at the deadline", elapsed < 1.5, "%.1fs" % elapsed)
+    failures += check("as a network error", code == 1 and "network error" in answer.get("error", ""),
+                      "%r" % (answer,))
+    with LocalServer(drip(404)) as server, fresh_budget(), \
+            patch.object(notion, "API", server.url + "/v1"), patch.object(notion, "TIMEOUT", 0.5):
+        started = time.monotonic()
+        status, _ = notion.api("GET", "/users/me", tok="secret")
+        elapsed = time.monotonic() - started
+    failures += check("a drip-fed error ends at the deadline", elapsed < 1.5, "%.1fs" % elapsed)
+    failures += check("and keeps its status", status == 404, "%r" % (status,))
+    print("a drip-fed answer ends at the attempt's deadline")
+    print("  %d checks failed" % failures if failures else "  all green")
+    return failures
+
+
+def test_logout_says_what_it_could_not_remove(verbose):
+    """A secret that could not be deleted used to be answered `{"ok": true}`,
+    and the setup screen showed it still configured. The secret is the
+    sign-out; the page cache is only a cache, reported apart."""
+    failures = 0
+    locked = os.path.join(WORK, "locked")
+    open_dir = os.path.join(WORK, "open")
+    os.makedirs(locked, exist_ok=True)
+    os.makedirs(open_dir, exist_ok=True)
+    cases = (("the secret", os.path.join(locked, "token.json"), os.path.join(open_dir, "cache.json")),
+             ("the cache", os.path.join(open_dir, "token.json"), os.path.join(locked, "cache.json")))
+    for name, secret, cache in cases:
+        for path in (secret, cache):
+            notion.save_private(path, {"token": "secret"})
+        os.chmod(locked, 0o500)
+        try:
+            if os.access(locked, os.W_OK):
+                print("  (skipped: this user can write to any directory)")
+                return failures
+            with patch.object(notion, "TOKEN_FILE", secret), patch.object(notion, "CACHE", cache):
+                answer, code, _ = run_command(notion.cmd_logout)
+        finally:
+            os.chmod(locked, 0o700)
+        if name == "the secret":
+            failures += check("a secret that stays fails the sign-out", code == 1 and "error" in answer
+                              and os.path.exists(secret) and os.path.exists(cache), "exit %r, %r" % (code, answer))
+        else:
+            failures += check("a cache that stays is a warning on a finished sign-out", code is None
+                              and answer.get("ok") is True and "cache" in answer.get("warning", "")
+                              and not os.path.exists(secret), "exit %r, %r" % (code, answer))
+        for path in (secret, cache):
+            if os.path.exists(path):
+                os.remove(path)
+    with patch.object(notion, "TOKEN_FILE", os.path.join(open_dir, "token.json")), \
+            patch.object(notion, "CACHE", os.path.join(open_dir, "cache.json")):
+        answer, code, _ = run_command(notion.cmd_logout)
+    failures += check("nothing left to remove is a sign-out", answer == {"ok": True} and code is None,
+                      "exit %r, %r" % (code, answer))
+    print("a sign-out says what it could not remove")
+    print("  %d checks failed" % failures if failures else "  all green")
+    return failures
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -500,6 +769,10 @@ def main():
         total += test_a_page_changed_in_notion_since_it_opened_is_not_saved_over(args.verbose)
         total += test_a_body_notion_cannot_keep_is_refused(args.verbose)
         total += test_a_new_integration_never_shows_the_old_ones_notes(args.verbose)
+        total += test_an_uncertain_write_is_never_sent_twice(args.verbose)
+        total += test_the_secret_goes_to_notion_only(args.verbose)
+        total += test_a_drip_fed_answer_ends_at_the_deadline(args.verbose)
+        total += test_logout_says_what_it_could_not_remove(args.verbose)
     finally:
         import shutil
         shutil.rmtree(WORK, ignore_errors=True)

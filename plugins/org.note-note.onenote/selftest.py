@@ -18,7 +18,6 @@ import sys
 import tempfile
 import time
 import urllib.error
-import urllib.request
 from unittest.mock import patch
 
 # Both modules read these into constants at import, so they are set first: a
@@ -106,13 +105,9 @@ class Endpoint:
 
 @contextlib.contextmanager
 def scripted(endpoint):
-    real, printed = urllib.request.urlopen, io.StringIO()
-    urllib.request.urlopen = endpoint.urlopen
-    try:
-        with contextlib.redirect_stdout(printed):
-            yield printed
-    finally:
-        urllib.request.urlopen = real
+    printed = io.StringIO()
+    with patch.object(msgraph.OPENER, "open", endpoint.urlopen), contextlib.redirect_stdout(printed):
+        yield printed
 
 
 def answered(printed):

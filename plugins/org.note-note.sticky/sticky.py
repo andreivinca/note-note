@@ -33,6 +33,7 @@ CACHE = os.path.join(CACHE_DIR, "note-note-sticky.json")
 MAX_NOTES = 500                 # sticky notes listed
 MAX_LIST_BODY = 4 * 1024 * 1024  # one page of the listing
 MAX_NOTE_BODY = 256 * 1024      # a single note's text; a longer one is cut and opens read-only
+MAX_CACHE = 32 * 1024 * 1024    # the listing kept on disk; a larger one is not read back but fetched again
 
 
 def to_note(m):
@@ -54,7 +55,7 @@ def to_note(m):
 
 def cmd_list(cached):
     if cached:
-        c = msgraph.load_for_session(CACHE, None)
+        c = msgraph.load_for_session(CACHE, None, MAX_CACHE)
         if c is not None:
             out({"notes": c.get("notes", []), "cached": True})
             return
@@ -69,7 +70,12 @@ def cmd_list(cached):
             fail((res.get("error") or {}).get("message", "Graph error %s" % status) if isinstance(res.get("error"), dict)
                  else str(res.get("error", status)))
         notes.extend(to_note(m) for m in res.get("value", []))
-        url = res.get("@odata.nextLink")
+        # The next page's address comes from the response, and the request
+        # for it carries the sign-in: only a Graph URL is followed.
+        next_link = res.get("@odata.nextLink")
+        url = msgraph.graph_url(next_link)
+        if next_link and not url:
+            fail("Microsoft returned an invalid link to the next page of notes")
     notes = notes[:MAX_NOTES]
     msgraph.save_for_session(CACHE, {"notes": notes, "fetched": time.time()})
     out({"notes": notes, "cached": False})
@@ -87,7 +93,7 @@ def cmd_update(note_id, path):
         fail((res.get("error") or {}).get("message", "Graph error %s" % status) if isinstance(res.get("error"), dict)
              else str(res.get("error", status)))
     # Keep the cache in step so a reopen shows the edit even before a refresh.
-    c = msgraph.load_for_session(CACHE, {"notes": []})
+    c = msgraph.load_for_session(CACHE, {"notes": []}, MAX_CACHE)
     for n in c.get("notes", []):
         if n["id"] == note_id:
             n["body"] = body
@@ -107,7 +113,7 @@ def cmd_create():
         fail((res.get("error") or {}).get("message", "Graph error %s" % status) if isinstance(res.get("error"), dict)
              else str(res.get("error", status)))
     note = to_note(res)
-    c = msgraph.load_for_session(CACHE, {"notes": []})
+    c = msgraph.load_for_session(CACHE, {"notes": []}, MAX_CACHE)
     c["notes"] = [note] + [n for n in c.get("notes", []) if n["id"] != note["id"]]
     msgraph.save_for_session(CACHE, c)
     out({"ok": True, "note": note})
@@ -120,7 +126,7 @@ def cmd_delete(note_id):
     if status not in (204, 200, 404):
         fail((res.get("error") or {}).get("message", "Graph error %s" % status) if isinstance(res.get("error"), dict)
              else str(res.get("error", status)))
-    c = msgraph.load_for_session(CACHE, {"notes": []})
+    c = msgraph.load_for_session(CACHE, {"notes": []}, MAX_CACHE)
     c["notes"] = [n for n in c.get("notes", []) if n["id"] != note_id]
     msgraph.save_for_session(CACHE, c)
     out({"ok": True})

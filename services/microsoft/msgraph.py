@@ -12,7 +12,7 @@ function here writes to stdout on a script's behalf.
   msgraph.py status              -> {"configured":bool,"signedIn":bool,"account":str}
   msgraph.py login               -> line 1: {"userCode","verificationUri","message"}
                                     then blocks; last line: {"ok":true,"account":...}
-  msgraph.py logout
+  msgraph.py logout              -> {"ok":true} once the token is gone, else {"error"}
 
 The app registration is the provider's own (its `microsoftClientId`, handed
 in through the environment below), registered once by the plugin author;
@@ -31,8 +31,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "lib"))
 import ratelimit  # noqa: E402
 from provider_io import (  # noqa: E402
-    out, fail, fail_throttled, load_json, save_private, read_bounded, transient_message,
-    THROTTLED_STATUSES, TRANSIENT_STATUSES, HOME, STATE_DIR,
+    out, fail, fail_throttled, load_json, save_private, discard, read_bounded, read_error_body,
+    transient_message, NoRedirect, THROTTLED_STATUSES, TRANSIENT_STATUSES, HOME, STATE_DIR,
+    MAX_PRIVATE_FILE,
 )
 
 CONFIG = os.environ.get("NOTE_NOTE_ACCOUNT_CONFIG") or os.path.join(os.environ.get("XDG_CONFIG_HOME", HOME + "/.config"), "omarchy/note-note.json")
@@ -49,6 +50,12 @@ ACCOUNT = os.environ.get("NOTE_NOTE_MS_ACCOUNT", "")
 CLIENT_ID = os.environ.get("NOTE_NOTE_MS_CLIENT_ID", "")
 TENANT = "common"
 GRAPH = "https://graph.microsoft.com/v1.0"
+# What the two files this module owns may weigh when read back
+# (provider_io.load_json). A token file is a few kilobytes of JWT and refresh
+# token; the account config is the user's note-note.json, which the settings
+# writer caps the same way (services/settings/config_io.py).
+MAX_TOKEN_FILE = 64 * 1024
+MAX_CONFIG_FILE = 1024 * 1024
 
 
 class GraphError(Exception):
@@ -106,7 +113,7 @@ def configure(rate_key, rate_windows, scopes=None, optional_scopes=None):
 def config():
     """The registration this provider signs in through: its own, unless the
     user gave it one of theirs under its id in CONFIG."""
-    entries = load_json(CONFIG, {}).get("microsoft", {})
+    entries = load_json(CONFIG, {}, MAX_CONFIG_FILE).get("microsoft", {})
     own = entries.get(ACCOUNT, {}) if isinstance(entries, dict) and ACCOUNT else {}
     if not isinstance(own, dict):
         own = {}
@@ -120,6 +127,42 @@ MAX_BODY = 8 * 1024 * 1024
 
 
 GRAPH_ORIGIN = "https://graph.microsoft.com/"
+GRAPH_HOST = "graph.microsoft.com"
+
+# Every request this module sends — Graph's, and the sign-in endpoints',
+# whose form bodies carry refresh tokens and device codes — goes through this
+# opener, which answers a redirect with the 3xx it is instead of following it
+# (provider_io.NoRedirect). A test replaces its `open`.
+OPENER = urllib.request.build_opener(NoRedirect)
+
+
+def graph_url(url):
+    """`url` when a Graph credential may be sent to it, otherwise "".
+
+    Graph hands out absolute URLs of its own — a listing's
+    `@odata.nextLink`, a page's `self` — and they arrive in responses, so
+    they are remote content (docs/security.md rule 4). One is accepted only
+    if it is https to exactly graph.microsoft.com — no userinfo, no port, so
+    `graph.microsoft.com.evil.example` and `graph.microsoft.com@evil.example`
+    both fail — under /v1.0/, with no dot segment and no fragment. A
+    provider may narrow this for its own resources (OneNote's
+    notebook_inventory.graph_url), never widen it. The sign-in endpoints are
+    not Graph and carry no bearer token: they are built from constants
+    (`token_url`), not checked here.
+    """
+    if not isinstance(url, str):
+        return ""
+    try:
+        parsed = urllib.parse.urlsplit(url)
+    except ValueError:
+        return ""
+    if parsed.scheme != "https" or parsed.netloc != GRAPH_HOST or parsed.fragment:
+        return ""
+    if not parsed.path.startswith("/v1.0/"):
+        return ""
+    if any(part in (".", "..") for part in urllib.parse.unquote(parsed.path).split("/")):
+        return ""
+    return url
 
 
 def rate_key_for(url):
@@ -187,23 +230,35 @@ def http(method, url, data=None, headers=None, form=False, max_bytes=MAX_BODY,
 
 def request(method, url, body=None, headers=None, max_bytes=MAX_BODY,
             timeout=30, retry_policy=None):
-    """Shared bounded transport; response decoding belongs to the caller."""
+    """Shared bounded transport; response decoding belongs to the caller.
+
+    A request that carries a bearer token goes only to a `graph_url`, and
+    nowhere else even by redirect (OPENER). Each attempt has an absolute
+    deadline, `timeout` seconds after it starts: no socket wait is longer
+    than that, and the body — an error's too — is read against the
+    deadline, so a peer that drips a byte at a time cannot keep the attempt
+    alive past it (provider_io.read_bounded).
+    """
     if retry_policy is None:
         retry_policy = RetryPolicy.REPLAY if method in ("GET", "HEAD") else RetryPolicy.RESTART
     if not isinstance(retry_policy, RetryPolicy):
         raise ValueError("retry_policy must be a RetryPolicy")
     req = urllib.request.Request(url, data=body, method=method, headers=headers or {})
+    if req.has_header("Authorization") and not graph_url(url):
+        raise GraphError("refused to send the sign-in to an address outside Microsoft Graph")
     rate_key = rate_key_for(url)
 
     def once():
+        deadline = time.monotonic() + timeout
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as response:
-                return response.status, read_bounded(response, max_bytes)
+            with OPENER.open(req, timeout=timeout) as response:
+                return response.status, read_bounded(response, max_bytes, deadline)
         except OverflowError as error:
             raise GraphError(str(error)) from error
+        except TimeoutError as error:
+            raise GraphError("network error: no answer within %g seconds" % timeout) from error
         except urllib.error.HTTPError as error:
-            with error:
-                raw = error.read(max_bytes + 1)[:max_bytes]
+            raw = read_error_body(error, max_bytes, deadline)
             if error.code in THROTTLED_STATUSES:
                 wait = wait_asked_by(error)
                 if error.code == 429 or retry_policy is RetryPolicy.REPLAY:
@@ -236,7 +291,7 @@ def signed_in(client_id):
     token works only with the registration that issued it, so a token from
     another one — a provider given a registration of its own, or the user's
     override changing — is no sign-in at all, and the provider asks again."""
-    tok = load_json(TOKENS, None)
+    tok = load_json(TOKENS, None, MAX_TOKEN_FILE)
     if not tok or tok.get("client_id") != client_id:
         return None
     return tok
@@ -267,14 +322,19 @@ def forget_token(expected_refresh=None):
     out of a grant that is perfectly alive, so the file goes only while it
     still holds the very token whose refresh failed. `cmd_logout` passes
     nothing and means it unconditionally.
+
+    A token that is already gone is as good as removed. One that cannot be
+    removed — its directory unwritable, say — is a GraphError: the sign-in
+    is still on disk, and the next status would find it there, so nothing
+    may report it gone.
     """
-    with token_lock():
-        if expected_refresh is not None and (load_json(TOKENS, None) or {}).get("refresh_token") != expected_refresh:
-            return
-        try:
-            os.remove(TOKENS)
-        except OSError:
-            pass
+    try:
+        with token_lock():
+            if expected_refresh is not None and (load_json(TOKENS, None, MAX_TOKEN_FILE) or {}).get("refresh_token") != expected_refresh:
+                return
+            discard(TOKENS)
+    except OSError as error:
+        raise GraphError("the sign-in could not be removed: %s" % (error.strerror or error)) from error
 
 
 def access_token(force=False):
@@ -364,7 +424,11 @@ def graph(method, path, data=None, extra_headers=None, max_bytes=MAX_BODY, retry
     """One Graph request, signed — and signed again once if the 401 says the
     token was revoked rather than merely old. The second pass is the same one
     call with `force`, so there is no second copy of the request to keep in
-    step with the first."""
+    step with the first.
+
+    `path` is relative to GRAPH, or an absolute URL that Graph handed out;
+    one that is not a `graph_url` is refused by `request` before anything is
+    sent."""
     url = path if path.startswith("http") else GRAPH + path
 
     def send(force):
@@ -386,9 +450,10 @@ def current_session():
     return (signed_in(config()[0]) or {}).get("cacheSession", "")
 
 
-def load_for_session(path, default):
-    """A cache of the signed-in account's; another account's stays unread."""
-    cached = load_json(path, None)
+def load_for_session(path, default, cap=MAX_PRIVATE_FILE):
+    """A cache of the signed-in account's; another account's stays unread.
+    `cap` is the cache's own byte limit (provider_io.load_json)."""
+    cached = load_json(path, None, cap)
     if not isinstance(cached, dict) or cached.get("cacheSession", "") != current_session():
         return default
     return cached
@@ -495,6 +560,8 @@ def cmd_login():
 
 def cmd_logout():
     # Providers keep their own caches and clear them on their "signed out".
+    # `ok` means the token is gone: one that could not be removed is raised by
+    # forget_token, and the entry point answers with that error instead.
     forget_token()
     out({"ok": True})
 

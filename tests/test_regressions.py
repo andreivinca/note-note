@@ -1,6 +1,8 @@
 """Content preservation and confirmed IO regressions; temporary files only."""
 import html
 import base64
+import contextlib
+import io
 import json
 import os
 from pathlib import Path
@@ -215,6 +217,84 @@ class Files(unittest.TestCase):
         result = subprocess.run([sys.executable, "-c", script, str(fifo)], env=env,
                                 capture_output=True, text=True, timeout=2, check=True)
         self.assertEqual(result.stdout.strip(), "0")
+
+
+class ProviderFiles(unittest.TestCase):
+    """What a provider script reads back — tokens, config, caches, payloads
+    (lib/provider_io.py) — is bounded in bytes, never read through a symlink
+    or from a FIFO, and is a JSON object or nothing."""
+
+    def setUp(self):
+        self.work = tempfile.TemporaryDirectory(prefix="note-note-provider-files-")
+        self.root = Path(self.work.name)
+
+    def tearDown(self):
+        self.work.cleanup()
+
+    def stored(self, name, data):
+        path = self.root / name
+        path.write_bytes(data)
+        return str(path)
+
+    def from_stdin(self, data):
+        """`read_payload("-")` with `data` on stdin: (payload, failure)."""
+        import provider_io
+        printed = io.StringIO()
+        with patch.object(sys, "stdin", io.TextIOWrapper(io.BytesIO(data), encoding="utf-8")), \
+                contextlib.redirect_stdout(printed):
+            try:
+                return provider_io.read_payload("-"), None
+            except SystemExit:
+                return None, json.loads(printed.getvalue())
+
+    def test_json_files_are_bounded_objects(self):
+        import provider_io
+        cap = 1024
+        whole = self.stored("whole.json", b'{"pad": "' + b"x" * (cap - 11) + b'"}')
+        self.assertEqual(os.path.getsize(whole), cap)
+        self.assertEqual(provider_io.load_json(whole, None, cap), {"pad": "x" * (cap - 11)})
+        over = self.stored("over.json", b'{"pad": "' + b"x" * (cap - 10) + b'"}')
+        self.assertEqual(provider_io.load_json(over, "fallback", cap), "fallback")
+        nine_mib = self.stored("nine.json", b'{"pad": "' + b"x" * (9 * 1024 * 1024) + b'"}')
+        self.assertEqual(provider_io.load_json(nine_mib, "fallback"), "fallback")
+        link = self.root / "link.json"
+        link.symlink_to(whole)
+        self.assertEqual(provider_io.load_json(str(link), "fallback"), "fallback")
+        for name, data in (("latin1.json", b'{"name": "\xe9"}'), ("list.json", b'[{"token": "t"}]'),
+                           ("string.json", b'"token"'), ("broken.json", b'{"token": ')):
+            self.assertEqual(provider_io.load_json(self.stored(name, data), "fallback"), "fallback", name)
+        self.assertEqual(provider_io.load_json(str(self.root / "missing.json"), "fallback"), "fallback")
+
+    def test_a_fifo_is_refused_without_waiting(self):
+        fifo = self.root / "token.json"
+        os.mkfifo(fifo)
+        script = "import provider_io, sys; print(provider_io.load_json(sys.argv[1], 'fallback'))"
+        env = dict(os.environ, PYTHONPATH=str(ROOT / "lib"))
+        result = subprocess.run([sys.executable, "-c", script, str(fifo)], env=env,
+                                capture_output=True, text=True, timeout=2, check=True)
+        self.assertEqual(result.stdout.strip(), "fallback")
+
+    def test_the_payload_limit_counts_bytes(self):
+        head, tail, wide = b'{"body": "', b'"}', "漢".encode("utf-8")
+        room = fileio.MAX_PAYLOAD - len(head) - len(tail)
+        count, filler = room // len(wide), room % len(wide)
+        at_limit = head + wide * count + b"a" * filler + tail
+        self.assertEqual(len(at_limit), fileio.MAX_PAYLOAD)
+        payload, failure = self.from_stdin(at_limit)
+        self.assertIsNone(failure)
+        self.assertEqual(len(payload["body"]), count + filler)
+        payload, failure = self.from_stdin(head + wide * count + b"a" * (filler + 1) + tail)
+        self.assertEqual((payload, failure), (None, {"error": "payload too large"}))
+        self.assertEqual(self.from_stdin(b'{"body": "\xff"}'), (None, None))
+        self.assertEqual(self.from_stdin(b'["body"]'), (None, None))
+
+    def test_a_payload_file_is_bounded_too(self):
+        import provider_io
+        oversized = self.stored("payload.json", b'{"body": "' + b"x" * fileio.MAX_PAYLOAD + b'"}')
+        printed = io.StringIO()
+        with contextlib.redirect_stdout(printed), self.assertRaises(SystemExit):
+            provider_io.read_payload(oversized)
+        self.assertEqual(json.loads(printed.getvalue()), {"error": "payload too large"})
 
 
 class Content(unittest.TestCase):

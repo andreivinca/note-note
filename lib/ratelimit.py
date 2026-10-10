@@ -36,7 +36,7 @@ import time
 import uuid
 
 import fileio
-from provider_io import CACHE_DIR
+from provider_io import CACHE_DIR, load_json
 
 # One directory, two files per key: <key>.json (the state) and <key>.lock (the
 # flock). Overridable so the selftest never touches the real budget.
@@ -124,24 +124,14 @@ class _State(dict):
 
 def _load(key):
     st = _State(stamps=[], holders=[], cooldownUntil=0.0)
-    # Read cap+1 bytes once and use *those* bytes — never a size check followed
-    # by a separate open, which is not a bound (docs/security.md rule 1). A
-    # budget that cannot be read is a budget of nothing spent, which is the
-    # safe way round: the request goes through, and the next 429 records a
-    # cooldown the same as ever.
-    try:
-        with open(state_path(key), "rb") as f:
-            blob = f.read(MAX_STATE_BYTES + 1)
-    except OSError:
-        return st
-    if len(blob) > MAX_STATE_BYTES:
-        return st
-    try:
-        raw = json.loads(blob)
-    except ValueError:
-        return st
-    if not isinstance(raw, dict):
-        return st
+    # Read the one bounded way (provider_io.load_json over lib/readfile.py,
+    # docs/security.md rules 1 and 9): cap+1 bytes once, never through a
+    # symlink, and never waiting on a FIFO — this runs under the key's flock,
+    # so a read that blocked would stall every process on the key. A budget
+    # that cannot be read is a budget of nothing spent, which is the safe way
+    # round: the request goes through, and the next 429 records a cooldown the
+    # same as ever.
+    raw = load_json(state_path(key), {}, MAX_STATE_BYTES)
     stamps = raw.get("stamps")
     if isinstance(stamps, list):
         st["stamps"] = [float(s) for s in stamps if isinstance(s, (int, float))][-MAX_STAMPS:]

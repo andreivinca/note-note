@@ -532,6 +532,21 @@ to its merge journal (`accepted_fields=("body",)`) before the title request,
 so a title throttled into a rerun finishes the title, and the rerun merges
 against the body it wrote rather than sending it again.
 
+`request()` sends a bearer token only to a `msgraph.graph_url()` — https to
+exactly `graph.microsoft.com`, no userinfo or port, a `/v1.0/` path with no
+dot segment or fragment — so an absolute URL taken from a response, such as
+an `@odata.nextLink`, is checked before it is signed. Every request goes
+through `msgraph.OPENER`, which answers a redirect with its 3xx instead of
+following it. Each attempt's `timeout` is a deadline for its whole answer,
+error bodies included.
+
+`notion.api()` follows the same rule. A 429 is sent again in place, whatever
+the request; a 503 records the cooldown, and only a GET is sent again in
+place. Another request that meets a 503 follows `transient_5xx`: a page
+update parks the lane as `throttled` and runs again, since it reads the page
+afresh and replaces every block, while a create passes `transient_5xx=False`
+and its 503 is delivered as the error it is.
+
 ### Rate keys
 
 Each provider paces against its own key, and shares none: a OneNote throttle
@@ -582,13 +597,18 @@ scopes it asked for — so nothing about one provider's account touches
 another's. It exposes `configured`, `signedIn`, `account`, `hasScope(s)`,
 `login()`, `relogin()`, `logout()`, `refresh()`, `env` (environment for
 processes that run `msgraph.py`-based scripts), `scriptDir`, and the signals
-`updated()`, `signedOut()` and `statusFailed(error)`. `updated()` fires for
-every answer; `signedOut()` is the transition — a status answer of signed
-out, or a sign-out — and is the one signal on which to throw the account's
-caches and queued work away. A probe that could not answer leaves the
-sign-in as it was and fires `statusFailed` instead: say it on the status
-line, and do not read it as signed out. The host renders the device-code
-screen for any account it created. What providers share is only the code. A user who prefers a
+`updated()`, `signedOut()`, `statusFailed(error)` and `signOutFailed(error)`.
+`updated()` fires for every answer; `signedOut()` is the transition — a
+status answer of signed out, or a sign-out the script confirmed — and is the
+one signal on which to throw the account's caches and queued work away. A
+probe that could not answer leaves the sign-in as it was and fires
+`statusFailed` instead: say it on the status line, and do not read it as
+signed out. `msgraph.py logout` answers `{"ok": true}` only once the token
+file is gone (one already absent counts); a token it could not delete is an
+error, and so is a script that crashed or answered anything else. The
+account then stays signed in, drops a pending `relogin()`, and fires
+`signOutFailed`, which the host shows as a notice. The host renders the
+device-code screen for any account it created. What providers share is only the code. A user who prefers a
 registration of their own gives it to your provider alone, in
 `~/.config/omarchy/note-note.json` as
 `{"microsoft": {"<providerId>": {"clientId": "…", "tenant": "…"}}}`.

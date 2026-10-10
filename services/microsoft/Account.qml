@@ -49,12 +49,16 @@ Item {
   property bool loggingIn: false
 
   signal updated()
-  // The sign-in is gone: a status answer said so, or the user signed out. A
-  // provider throws the account's caches away on this, and only on this —
-  // `updated()` fires for every answer, and a probe that could not answer
-  // at all leaves the state as it was rather than reading as signed out.
+  // The sign-in is gone: a status answer said so, or the script confirmed a
+  // sign-out. A provider throws the account's caches away on this, and only
+  // on this — `updated()` fires for every answer, and a probe that could
+  // not answer at all leaves the state as it was rather than reading as
+  // signed out.
   signal signedOut()
   signal statusFailed(string error)
+  // A sign-out the script could not confirm: the token may still be on
+  // disk, so the account stays signed in and says why instead.
+  signal signOutFailed(string error)
   signal codeReceived(string code, string uri)
   signal loginSucceeded()
   signal loginFailed(string error)
@@ -157,7 +161,16 @@ Item {
     id: logoutProc
     command: ["python3", root.script, "logout"]
     environment: root.env
-    onFinished: {
+    onFinished: function(result) {
+      // Only an answer of `ok` is a sign-out. Anything else — the token
+      // could not be deleted, the script failed or never answered — leaves
+      // it on disk, where the next status would find it signed in again.
+      if (result.error || result.ok !== true) {
+        root.reloginPending = false
+        root.signOutFailed(result.error || "the sign-out could not be confirmed")
+        root.updated()
+        return
+      }
       var wasSignedIn = root.signedIn
       root.signedIn = false
       root.account = ""

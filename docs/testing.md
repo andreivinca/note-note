@@ -141,6 +141,13 @@ The status bar has a focused suite, `python3 tests/statusbar_selftest.py`, for
 registration, left/right layouts, visibility, font sizes, narrow windows and
 custom dropdown interaction. See [the component contract](status-bar.md).
 
+Signing out has a focused suite, `python3 tests/signout_selftest.py`, run
+in the native harness against stand-ins for `msgraph.py` and `notion.py`: a
+Microsoft account and the Notion provider sign out only on a confirmed
+`ok`, and a token or secret that could not be removed, a script that
+crashed or one that answered nothing keeps the sign-in and says why. CTest
+runs it as `native-signout`.
+
 The notebook tabs have a focused suite, `python3 tests/tabstrip_selftest.py`
 (`--shell` for Quickshell), for the curve gap on either side of the selected
 tab, stable face widths, clicks on overlapping shoulders, and narrow-window

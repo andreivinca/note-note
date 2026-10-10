@@ -26,8 +26,8 @@ import ratelimit  # noqa: E402
 # own copies of these until they were lifted into lib/provider_io.py; see its
 # docstring for why one of each is the point.
 from provider_io import (  # noqa: E402
-    out, fail, fail_throttled, fail_transient, load_json, save_private, read_payload,
-    THROTTLED_STATUSES, TRANSIENT_STATUSES, read_bounded, STATE_DIR, CACHE_DIR,
+    out, fail, fail_throttled, fail_transient, load_json, save_private, discard, read_payload,
+    NoRedirect, THROTTLED_STATUSES, TRANSIENT_STATUSES, read_bounded, read_error_body, STATE_DIR, CACHE_DIR,
 )
 import notion_md  # noqa: E402
 
@@ -103,35 +103,71 @@ def drop_cache():
         pass
 
 
+# Every Notion request goes through this opener, which answers a redirect with
+# the 3xx it is instead of following it (provider_io.NoRedirect): the secret in
+# the Authorization header goes to api.notion.com and nowhere else. A test
+# replaces its `open`.
+OPENER = urllib.request.build_opener(NoRedirect)
+# Seconds one attempt has for its whole answer, not for one socket read (`api`).
+TIMEOUT = 30
+
+
 def api(method, path, data=None, tok=None, transient_5xx=True):
     """One Notion request, paced across processes and retried.
 
     Notion answers a 429 with a `Retry-After`, and its limit is per second
     rather than a long lockout, so a missing header means a short wait rather
-    than a real cooldown. A 502 used to wait here too; it is a bad gateway
-    rather than a busy account, so it goes back as "transient" with the other
-    server errors and re-runs the one job (lib/provider_io.py).
+    than a real cooldown. A 429 refuses a request before anything is done,
+    so it is waited out and sent again here, whatever the request.
 
-    `transient_5xx` is the caller saying whether that re-run is safe. A 502 or
-    a 504 is the gateway losing the answer to a request that may well have
-    been carried out, so only a repeatable one may be run again — `cmd_create`
-    is not, and says so.
+    A 503 is Notion being unavailable, and says nothing about whether the
+    request was carried out first. Its cooldown is recorded either way, but
+    only a GET is sent again in this process: a create or an append repeated
+    here is the same page, or the same body, twice over. Any other request
+    is left to `transient_5xx`, below.
+
+    A 502 used to wait here too; it is a bad gateway rather than a busy
+    account, so it goes back as "transient" with the other server errors and
+    re-runs the one job (lib/provider_io.py).
+
+    `transient_5xx` is the caller saying whether running the whole job again
+    is safe after an answer that leaves the outcome uncertain. A 502 or a 504
+    is the gateway losing the answer to a request that may well have been
+    carried out, and a 503 may be too. An update may run again: it reads the
+    page afresh and replaces every block on it, a doubled append included,
+    so its 503 parks the lane as throttled and the job runs again once the
+    wait is over. `cmd_create` may not, and says so: its 503, like its 502,
+    is handed back as the error it is.
+
+    Each attempt has an absolute deadline, TIMEOUT seconds after it starts:
+    no socket wait is longer than that, and the body — an error's too — is
+    read against the deadline, so a peer that drips a byte at a time cannot
+    keep the attempt alive past it (provider_io.read_bounded).
     """
     headers = {"Authorization": "Bearer " + (tok or token()), "Notion-Version": VERSION, "Content-Type": "application/json"}
     req = urllib.request.Request(API + path, data=json.dumps(data).encode() if data is not None else None, method=method, headers=headers)
 
     def once():
+        deadline = time.monotonic() + TIMEOUT
         try:
-            with urllib.request.urlopen(req, timeout=30) as r:
-                raw = read_bounded(r, MAX_BODY)
+            with OPENER.open(req, timeout=TIMEOUT) as r:
+                raw = read_bounded(r, MAX_BODY, deadline)
                 return r.status, (json.loads(raw) if raw else {})
         except OverflowError as e:
             fail(str(e))
+        except TimeoutError:
+            fail("network error: Notion did not answer within %g seconds" % TIMEOUT)
         except urllib.error.HTTPError as e:
-            raw = e.read(MAX_BODY + 1)[:MAX_BODY]
+            raw = read_error_body(e, MAX_BODY, deadline)
             if e.code in THROTTLED_STATUSES:
                 wait = ratelimit.retry_after_of(e.headers)
-                raise ratelimit.Retry(wait if wait is not None else ratelimit.SHORT_RETRY)
+                if wait is None:
+                    wait = ratelimit.SHORT_RETRY
+                if e.code == 429 or method == "GET":
+                    raise ratelimit.Retry(wait)
+                ratelimit.report_throttle(RATE_KEY, wait)
+                if transient_5xx:
+                    raise ratelimit.Throttled(wait)
             if transient_5xx and e.code in TRANSIENT_STATUSES:
                 fail_transient(e.code, raw)
             try:
@@ -194,11 +230,23 @@ def cmd_setup(path):
 
 
 def cmd_logout():
-    for p in (TOKEN_FILE, CACHE):
-        try:
-            os.remove(p)
-        except OSError:
-            pass
+    """Remove the integration secret, then the page cache.
+
+    The secret is the sign-out: one that cannot be removed fails the command
+    with everything left as it was, since the next status would find it
+    there. Only a secret that is already gone counts as removed. The cache
+    goes afterwards, and one that will not go does not undo a finished
+    sign-out: it is answered as a warning beside `ok`.
+    """
+    try:
+        discard(TOKEN_FILE)
+    except OSError as error:
+        fail("the integration secret could not be removed: %s" % (error.strerror or error))
+    try:
+        discard(CACHE)
+    except OSError as error:
+        out({"ok": True, "warning": "the cached page list could not be removed: %s" % (error.strerror or error)})
+        return
     out({"ok": True})
 
 

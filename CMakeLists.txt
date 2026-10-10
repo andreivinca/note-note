@@ -108,6 +108,8 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/tabstrip_selftest.py)
     add_test(NAME native-ordering COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/ordering_selftest.py)
+    add_test(NAME native-signout COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/signout_selftest.py)
     add_test(NAME onenote-page-order COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/plugins/org.note-note.onenote/page_order_selftest.py)
     add_test(NAME onenote-blank-lines COMMAND ${Python3_EXECUTABLE}

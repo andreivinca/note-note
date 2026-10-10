@@ -18,7 +18,8 @@ that itself fails must take the dead token off the disk and answer with the
 same "not signed in" the app already shows when there is no token, so the UI
 offers a sign-in instead of a Graph error string.
 
-No network and no real state: `urlopen` is replaced with a scripted stand-in,
+No network and no real state: the opener every request goes through
+answers from a scripted stand-in (local test servers aside),
 and every directory msgraph reads — the token file included — is redirected
 into a temporary one before it is imported.
 
@@ -35,7 +36,6 @@ import sys
 import tempfile
 import time
 import urllib.error
-import urllib.request
 from unittest.mock import patch
 
 # msgraph reads all of these into module constants at import, so they are set
@@ -51,8 +51,10 @@ os.environ["NOTE_NOTE_MS_CLIENT_ID"] = CLIENT_ID
 os.environ["NOTE_NOTE_MS_ACCOUNT"] = "selftest"
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "tests"))
 import msgraph  # noqa: E402
 import ratelimit  # noqa: E402
+from localhttp import LocalServer, answer_with, drip  # noqa: E402
 
 FAILURES = []
 
@@ -110,7 +112,7 @@ class Endpoint:
         self.calls = []
         self.queues = {"graph": list(graph), "token": list(token)}
 
-    def urlopen(self, req, timeout=None):
+    def open(self, req, timeout=None):
         url = req.full_url
         where = "token" if "login.microsoftonline.com" in url else "graph"
         self.calls.append((where, req.get_method(), url, req.get_header("Authorization")))
@@ -130,15 +132,12 @@ class Endpoint:
 
 @contextlib.contextmanager
 def scripted(endpoint):
-    """`urlopen` replaced for the duration, and stdout collected — every
-    failure path in msgraph prints one JSON line and exits."""
-    real, printed = urllib.request.urlopen, io.StringIO()
-    urllib.request.urlopen = endpoint.urlopen
-    try:
-        with contextlib.redirect_stdout(printed):
-            yield printed
-    finally:
-        urllib.request.urlopen = real
+    """The transport's opener answered by `endpoint` for the duration, and
+    stdout collected — every failure path in msgraph prints one JSON line
+    and exits."""
+    printed = io.StringIO()
+    with patch.object(msgraph.OPENER, "open", endpoint.open), contextlib.redirect_stdout(printed):
+        yield printed
 
 
 def answered(printed):
@@ -621,6 +620,145 @@ def test_bounded_reader_holds_size_and_time(verbose):
     return failures
 
 
+def test_credentials_go_only_to_graph(verbose):
+    """Graph hands out absolute URLs (a listing's nextLink), so they are
+    remote content: a signed request goes only to https://graph.microsoft.com
+    itself. It used to be signed for any URL starting "http", plain http to
+    another host included."""
+    failures = 0
+    refused = {
+        "plain http": "http://graph.microsoft.com/v1.0/me/messages",
+        "another host": "https://evil.example/v1.0/me/messages",
+        "a lookalike host": "https://graph.microsoft.com.evil.example/v1.0/me/messages",
+        "userinfo": "https://someone@graph.microsoft.com/v1.0/me/messages",
+        "a port": "https://graph.microsoft.com:8443/v1.0/me/messages",
+        "a dot segment": "https://graph.microsoft.com/v1.0/me/../../evil",
+        "another API version": "https://graph.microsoft.com/beta/me/messages",
+    }
+    for name, url in refused.items():
+        sign_in()
+        endpoint = Endpoint()
+        error = None
+        with scripted(endpoint):
+            try:
+                msgraph.graph("GET", url)
+            except Exception as e:  # the unfixed transport reached the scripted endpoint
+                error = e
+        failures += check("a signed request to %s is refused" % name,
+                          isinstance(error, msgraph.GraphError), "%r" % (error,))
+        failures += check("a signed request to %s sends nothing" % name, endpoint.calls == [],
+                          "%r" % (endpoint.calls,))
+    endpoint = Endpoint()
+    error = None
+    with scripted(endpoint):
+        try:
+            msgraph.request("GET", refused["another host"], headers={"Authorization": "Bearer token"})
+        except Exception as e:
+            error = e
+    failures += check("the shared transport refuses a bearer token for another host",
+                      isinstance(error, msgraph.GraphError) and endpoint.calls == [], "%r" % (error,))
+    sign_in()
+    following = "https://graph.microsoft.com/v1.0/me/messages?$skip=100"
+    endpoint = Endpoint(graph=[(200, {"value": []}, headers())])
+    with scripted(endpoint):
+        status, _ = msgraph.graph("GET", following)
+    failures += check("Graph's own next page is still followed",
+                      status == 200 and [call[2:] for call in endpoint.calls] == [(following, "Bearer old")],
+                      "%r" % (endpoint.calls,))
+    print("a credential goes to Graph and nowhere else")
+    print("  %d checks failed" % failures if failures else "  all green")
+    return failures
+
+
+def test_redirects_are_answered_not_followed(verbose):
+    """urllib copies a request's headers to wherever a redirect points, so a
+    3xx comes back to the caller as it is: neither a bearer token nor a
+    refresh token in a form body follows it to another origin."""
+    failures = 0
+    with LocalServer(answer_with(200)) as elsewhere, \
+            LocalServer(answer_with(302, Location=elsewhere.url + "/stolen")) as graph:
+        status, _ = msgraph.request("POST", graph.url + "/common/oauth2/v2.0/token",
+                                    b"grant_type=refresh_token&refresh_token=secret-refresh",
+                                    {"Content-Type": "application/x-www-form-urlencoded"},
+                                    retry_policy=msgraph.RetryPolicy.NEVER)
+        failures += check("a redirected token request is answered with its 302", status == 302, "%r" % (status,))
+        # Graph itself redirecting: the local server stands in for it.
+        with patch.object(msgraph, "graph_url", side_effect=lambda url: url):
+            status, _ = msgraph.request("GET", graph.url + "/v1.0/me", headers={"Authorization": "Bearer secret"},
+                                        retry_policy=msgraph.RetryPolicy.NEVER)
+        failures += check("a redirected Graph request is answered with its 302", status == 302, "%r" % (status,))
+        failures += check("nothing reaches the other origin", elsewhere.seen == [], "%r" % (elsewhere.seen,))
+    print("a redirect is answered, never followed")
+    print("  %d checks failed" % failures if failures else "  all green")
+    return failures
+
+
+def test_drip_fed_bodies_meet_the_deadline(verbose):
+    """An attempt's timeout is a deadline for its whole answer. A body that
+    arrives a byte at a time never trips a socket timeout, and used to be
+    read to the end however long it took — an error's body with a plain
+    blocking read, a success's without the deadline the reader offers."""
+    failures = 0
+    for status in (200, 404):
+        with LocalServer(drip(status)) as server:
+            started = time.monotonic()
+            answer = None
+            try:
+                answer = msgraph.request("GET", server.url + "/v1.0/me", timeout=0.5,
+                                         retry_policy=msgraph.RetryPolicy.NEVER)
+            except msgraph.GraphError as error:
+                answer = error
+            elapsed = time.monotonic() - started
+        failures += check("a drip-fed %d ends at the deadline" % status, elapsed < 1.5, "%.1fs" % elapsed)
+        if status == 200:
+            failures += check("a drip-fed success is a network error", isinstance(answer, msgraph.GraphError)
+                              and answer.kind is None and "network error" in str(answer), "%r" % (answer,))
+        else:
+            failures += check("a drip-fed error keeps its status", answer == (404, b""), "%r" % (answer,))
+    print("a drip-fed body ends at the attempt's deadline")
+    print("  %d checks failed" % failures if failures else "  all green")
+    return failures
+
+
+def test_a_sign_out_that_did_not_happen_is_an_error(verbose):
+    """A token that cannot be deleted used to be answered `{"ok": true}`, and
+    the next status found it signed in again. Only an already absent token
+    counts as removed."""
+    failures = 0
+    locked = os.path.join(WORK, "locked")
+    os.makedirs(locked, exist_ok=True)
+    with patch.object(msgraph, "TOKENS", os.path.join(locked, "token.json")):
+        sign_in()
+        with msgraph.token_lock():
+            pass
+        os.chmod(locked, 0o500)
+        try:
+            if os.access(locked, os.W_OK):
+                print("  (skipped: this user can write to any directory)")
+                return failures
+            printed, code = io.StringIO(), None
+            with contextlib.redirect_stdout(printed):
+                try:
+                    msgraph.run(["msgraph.py", "logout"])
+                except SystemExit as e:
+                    code = e.code
+            reply = answered(printed)
+            failures += check("an undeletable token fails the sign-out", code == 1 and "error" in reply
+                              and "ok" not in reply, "exit %r, %r" % (code, reply))
+            failures += check("and the token is where it was", os.path.exists(msgraph.TOKENS))
+        finally:
+            os.chmod(locked, 0o700)
+        for attempt in ("removes the token", "with no token left is still a sign-out"):
+            printed = io.StringIO()
+            with contextlib.redirect_stdout(printed):
+                msgraph.run(["msgraph.py", "logout"])
+            failures += check("a sign-out " + attempt, answered(printed) == {"ok": True}
+                              and not os.path.exists(msgraph.TOKENS), printed.getvalue())
+    print("a sign-out is answered ok only once the token is gone")
+    print("  %d checks failed" % failures if failures else "  all green")
+    return failures
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -643,6 +781,10 @@ def main():
         total += test_the_entry_point_answers_for_the_library(args.verbose)
         total += test_background_admission_leaves_foreground_available(args.verbose)
         total += test_bounded_reader_holds_size_and_time(args.verbose)
+        total += test_credentials_go_only_to_graph(args.verbose)
+        total += test_redirects_are_answered_not_followed(args.verbose)
+        total += test_drip_fed_bodies_meet_the_deadline(args.verbose)
+        total += test_a_sign_out_that_did_not_happen_is_an_error(args.verbose)
     finally:
         shutil.rmtree(WORK, ignore_errors=True)
 

@@ -17,6 +17,7 @@ count was never exceeded, and the concurrency cap was never exceeded.
 import argparse
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -159,6 +160,67 @@ def test_cooldown(directory, verbose):
         pass
     failures += check("expired cooldown cleared", read_state(key)["cooldownUntil"] == 0)
     print("cooldowns")
+    print("  %d checks failed" % failures if failures else "  all green")
+    return failures
+
+
+class Stalled(Exception):
+    """What a read that waits runs into (`within`)."""
+
+
+def within(seconds, function):
+    """`function()`, or Stalled once it has run `seconds`: a read that waits
+    on a FIFO must fail this suite, not hang it."""
+    def expire(signum, frame):
+        raise Stalled()
+
+    previous = signal.signal(signal.SIGALRM, expire)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        return function()
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+
+
+def write(path, data):
+    with open(path, "wb") as handle:
+        handle.write(data)
+
+
+def test_state_file_is_read_safely(directory, verbose):
+    """The state file is read under the key's flock, so a read that waited —
+    `open()` on a FIFO waits for a writer — stalled every process on the key.
+    It is read the bounded way instead (docs/security.md rule 9), and any
+    file that is not the key's own small JSON object reads as no state at
+    all: a budget that cannot be read fails open."""
+    failures = 0
+    elsewhere = os.path.join(directory, "elsewhere.json")
+    write(elsewhere, json.dumps({"cooldownUntil": time.time() + 3600}).encode())
+    cases = {
+        "a FIFO": os.mkfifo,
+        "a symlink": lambda path: os.symlink(elsewhere, path),
+        "too large": lambda path: write(path, b'{"cooldownUntil": 1e12, "pad": "'
+                                        + b"x" * ratelimit.MAX_STATE_BYTES + b'"}'),
+        "not UTF-8": lambda path: write(path, b'{"cooldownUntil": 1e12, "pad": "\xff"}'),
+        "not an object": lambda path: write(path, b'[{"cooldownUntil": 1e12}]'),
+    }
+    empty = {"stamps": [], "holders": [], "cooldownUntil": 0.0}
+    for name, make in cases.items():
+        key = fresh(directory, "unreadable")
+        make(ratelimit.state_path(key))
+
+        def look():
+            with ratelimit._locked(key) as st:
+                return dict(st)
+
+        try:
+            state = within(2.0, look)
+        except Stalled:
+            state = "still waiting after 2s"
+        failures += check("a state file that is %s reads as no state, at once" % name, state == empty, "%r" % (state,))
+        fresh(directory, key)
+    print("an unreadable state file fails open without waiting")
     print("  %d checks failed" % failures if failures else "  all green")
     return failures
 
@@ -459,6 +521,7 @@ def main():
         total = 0
         total += test_windows(directory, args.verbose)
         total += test_cooldown(directory, args.verbose)
+        total += test_state_file_is_read_safely(directory, args.verbose)
         total += test_concurrency(directory, args.verbose)
         total += test_attempt_loop(directory, args.verbose)
         total += test_retry_after(args.verbose)

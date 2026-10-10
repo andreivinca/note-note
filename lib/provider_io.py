@@ -18,12 +18,18 @@ The bounded response reader and the redirect refusal are here for the same
 reason: three readers existed, and the oldest did not enforce the deadline
 its docstring promised.
 
+`load_json` and `read_payload` — how a provider reads back its tokens, the
+account config, its caches and its payloads — read through
+`lib/readfile.py` (docs/security.md, rules 1 and 9), against a cap the
+file's owner names.
+
 Standard library only, and `lib/` is already on the path of every script that
 imports this.
 """
 import json, os, sys, time, urllib.request
 
 import fileio
+import readfile
 
 # Where a provider keeps what it keeps: its state (tokens, merge records)
 # and its caches. The host names them (services/platform/Platform.qml);
@@ -31,6 +37,14 @@ import fileio
 HOME = os.path.expanduser("~")
 STATE_DIR = os.environ.get("NOTE_NOTE_STATE_DIR") or os.path.join(os.environ.get("XDG_STATE_HOME", HOME + "/.local/state"), "omarchy")
 CACHE_DIR = os.environ.get("NOTE_NOTE_CACHE_DIR") or os.path.join(os.environ.get("XDG_CACHE_HOME", HOME + "/.cache"), "omarchy")
+
+# A save's payload — a note's title and body — whether it arrives on stdin or
+# in a file: the one limit the host's own writer keeps (lib/fileio.py).
+MAX_PAYLOAD = fileio.MAX_PAYLOAD
+# A provider's own JSON file when its owner names no cap of its own. The
+# largest kept by default, OneNote's listing of up to 3,000 pages, takes a
+# few MiB.
+MAX_PRIVATE_FILE = 8 * 1024 * 1024
 
 
 def out(obj):
@@ -62,12 +76,33 @@ def fail_throttled(error):
          kind="throttled", retry_after=error.retry_after)
 
 
-def load_json(path, default):
+def json_object(text):
+    """`text` as a JSON object, or None when it is not one: not JSON, nested
+    past what the parser can follow, or JSON whose top level is not an object.
+    Every file and payload a provider reads is an object, so anything else
+    is as unreadable as a corrupt one."""
     try:
-        with open(path) as f:
-            return json.load(f)
-    except (OSError, ValueError):
+        value = json.loads(text)
+    except (ValueError, RecursionError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def load_json(path, default, cap=MAX_PRIVATE_FILE):
+    """The JSON object stored at `path`, or `default`.
+
+    Read the one bounded way (lib/readfile.py): a symlink, a FIFO or any
+    other special file is refused without waiting on it, and so is a file
+    of more than `cap` bytes. A file that is missing, unreadable, too large,
+    not UTF-8, or not a JSON object is answered with `default`, as if it were
+    not there: a cache is fetched again, and a token that cannot be read is
+    no sign-in.
+    """
+    result = readfile.read_document(path, cap)
+    if result.get("error"):
         return default
+    value = json_object(result["text"])
+    return default if value is None else value
 
 
 def save_private(path, obj):
@@ -77,18 +112,42 @@ def save_private(path, obj):
     fileio.write_atomic(path, json.dumps(obj), mode=0o600)
 
 
+def discard(path):
+    """Remove a file. One that is already gone counts as removed; every
+    other failure is raised, because a caller that reports a credential as
+    deleted must not be wrong about it."""
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+
+
 def read_payload(path):
-    """A JSON payload: from stdin when path is "-" (how the plugin passes
-    secrets and note bodies — nothing touches a shared temp directory)."""
+    """A JSON object payload, or None when it is not one: from stdin when
+    path is "-" (how the plugin passes secrets and note bodies — nothing
+    touches a shared temp directory), otherwise from the file at `path`.
+
+    The limit is MAX_PAYLOAD bytes, counted before anything is decoded: a
+    body of three-byte characters is three times as long here as it is in
+    characters. A payload over it fails the command; one that is not UTF-8
+    or not a JSON object is None.
+    """
     if path == "-":
-        raw = sys.stdin.read(8 * 1024 * 1024 + 1)
-        if len(raw) > 8 * 1024 * 1024:
+        raw = sys.stdin.buffer.read(MAX_PAYLOAD + 1)
+        if len(raw) > MAX_PAYLOAD:
             fail("payload too large")
         try:
-            return json.loads(raw)
-        except ValueError:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
             return None
-    return load_json(path, None)
+    else:
+        result = readfile.read_document(path, MAX_PAYLOAD)
+        if result.get("kind") == "too-large":
+            fail("payload too large")
+        if result.get("error"):
+            return None
+        text = result["text"]
+    return json_object(text)
 
 
 # ---------------------------------------------------------- HTTP transport
@@ -97,7 +156,13 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
     """Refuses every redirect. A request that carries a bearer token, or a
     signed download URL that is a credential in itself, goes only where it
     was addressed; an opener built with this answers a redirect with the
-    HTTPError it is, for the caller to refuse."""
+    HTTPError it is, for the caller to refuse.
+
+    `urlopen` follows redirects, and urllib copies a request's headers —
+    `Authorization` among them — to wherever the redirect points, another
+    host or plain http included. So every transport that sends a credential
+    opens through `urllib.request.build_opener(NoRedirect)`, never urlopen.
+    """
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
@@ -125,6 +190,18 @@ def read_bounded(response, max_bytes, deadline=None):
         if size > max_bytes:
             raise OverflowError("response larger than %d bytes" % max_bytes)
         chunks.append(chunk)
+
+
+def read_error_body(error, max_bytes, deadline):
+    """An HTTP error's body, bounded like any other (read_bounded), and
+    closed once read. It only explains a status the caller already has, so
+    one that is larger than `max_bytes` or has not arrived by `deadline` is
+    answered as empty and the status speaks for itself."""
+    with error:
+        try:
+            return read_bounded(error, max_bytes, deadline)
+        except (OverflowError, TimeoutError):
+            return b""
 
 
 # ------------------------------------------------------- HTTP classification

@@ -713,6 +713,11 @@ real processes at one key to check the counters actually hold.
   process, which said nothing about the other processes the host had running
   at that moment; the pacer counts them all. Children are appended in batches
   of 100 blocks.
+- A **503** says Notion is unavailable, not that the request was refused: a
+  create or an append may already have landed. Only a GET is sent again in
+  place; an append parks the lane and the update runs again from a fresh read
+  (it replaces every block, so a doubled append goes too), and a create is
+  reported as the error it is. A 429 is a refusal and is sent again in place.
 - `/v1/search` matches **page titles only** — the reference page is literally
   titled "Search by title". There is no full-text search in the public API,
   so the provider deliberately has no `search()`: content search would mean

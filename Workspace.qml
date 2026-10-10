@@ -531,6 +531,15 @@ Item {
         }
       }])
     })
+    acc.signOutFailed.connect(function(error) {
+      editor.showNotice("Sign-out failed", "You are still signed in to Microsoft for " + owner + ": " + error, "", [{
+        "label": "Try again",
+        "icon": "󰑐",
+        "action": function() {
+          acc.logout()
+        }
+      }])
+    })
     acc.updated.connect(function() {
       if (acc.signedIn && signedInNotice) {
         editor.clearNotice(signedInNotice)

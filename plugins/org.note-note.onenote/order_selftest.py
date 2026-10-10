@@ -413,7 +413,7 @@ class BoundaryTests(unittest.TestCase):
     # in for the disk there.
     def on_disk(self, stack, files):
         stack.enter_context(patch.object(onenote, "listing_lock", return_value=contextlib.nullcontext()))
-        stack.enter_context(patch.object(onenote.msgraph, "load_json", side_effect=lambda path, default=None: files.get(path, default)))
+        stack.enter_context(patch.object(onenote.msgraph, "load_json", side_effect=lambda path, default=None, cap=None: files.get(path, default)))
         stack.enter_context(patch.object(onenote.msgraph, "save_private", side_effect=files.__setitem__))
 
     def test_listing_answers_pages_before_any_order_pass(self):
@@ -573,12 +573,19 @@ class TransportTests(unittest.TestCase):
         with patch.object(remote.opener, "open", return_value=Response(bytes(order.MAX_BODY + 1))):
             with self.assertRaisesRegex(order.OrderUnavailable, "size limit"):
                 remote.request("https://graph.microsoft.com/v1.0/x")
-        # The request's own three clock reads pass; the reader's finds the
-        # deadline gone, which must come back as "timed out", not as a size
-        # limit or a bare transport error.
+        # Every clock read passes until the body starts to arrive; the
+        # reader's next one finds the deadline gone, which must come back as
+        # "timed out", not as a size limit or a bare transport error.
         early, late = remote.deadline - 100, remote.deadline + 1
-        with patch.object(remote.opener, "open", return_value=Response(b"x")):
-            with patch.object(order.time, "monotonic", side_effect=[early, early, early, late]):
+        clock = [early]
+
+        class Arriving(Response):
+            def read1(self, size=-1):
+                clock[0] = late
+                return super().read1(size)
+
+        with patch.object(remote.opener, "open", return_value=Arriving(b"x")):
+            with patch.object(order.time, "monotonic", side_effect=lambda: clock[0]):
                 with self.assertRaisesRegex(order.OrderUnavailable, "timed out"):
                     remote.request("https://graph.microsoft.com/v1.0/x")
 

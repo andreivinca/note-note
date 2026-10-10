@@ -1,5 +1,7 @@
 """Sticky Notes provider checks that need no account: how a Graph message
 becomes a note. Run: python3 plugins/org.note-note.sticky/selftest.py"""
+import contextlib
+import io
 import json
 import os
 import sys
@@ -58,6 +60,44 @@ def cache_checks():
     return results
 
 
+def listing_with_next_page(link):
+    """`list` when the first page names `link` as the next one: (every URL
+    asked for, the exit code)."""
+    asked = []
+
+    def graph(method, url, **options):
+        asked.append(url)
+        if len(asked) == 1:
+            return 200, {"value": [message("first page")], "@odata.nextLink": link}
+        return 200, {"value": []}
+
+    code = None
+    with patch.object(sticky, "graph", side_effect=graph), patch.object(sticky.msgraph, "save_for_session"), \
+            contextlib.redirect_stdout(io.StringIO()):
+        try:
+            sticky.cmd_list(cached=False)
+        except SystemExit as e:
+            code = e.code
+    return asked, code
+
+
+def pagination_checks():
+    """The next page's address is part of Graph's answer, and the request
+    for it carries the sign-in, so only a Graph URL is followed. It used to
+    be passed on whatever it named."""
+    results = []
+    own = "https://graph.microsoft.com/v1.0/me/mailFolders/notes/messages?$skip=100"
+    asked, code = listing_with_next_page(own)
+    results.append(check("Graph's own next page is followed", asked[1:] == [own] and code is None))
+    for name, link in (("on another host", "https://evil.example/v1.0/me/messages?$skip=100"),
+                       ("over plain http", "http://graph.microsoft.com/v1.0/me/messages?$skip=100"),
+                       ("with userinfo", "https://someone@graph.microsoft.com/v1.0/me/messages?$skip=100")):
+        asked, code = listing_with_next_page(link)
+        results.append(check("a next page %s is never asked for, and the listing fails" % name,
+                             len(asked) == 1 and code == 1))
+    return results
+
+
 def main():
     results = []
     short = sticky.to_note(message("first line\r\nsecond\r\n"))
@@ -71,6 +111,7 @@ def main():
                          len(cut["body"]) == limit and cut["truncatedAt"] == limit))
     results.append(check("a note with no body is empty, not an error", sticky.to_note({"id": "x"})["body"] == ""))
     results += cache_checks()
+    results += pagination_checks()
     print("%d/%d sticky checks" % (sum(results), len(results)))
     return int(not all(results))
 

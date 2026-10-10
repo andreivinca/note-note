@@ -350,7 +350,28 @@ LaneProvider {
       root.rebuild()
     }
   }
-  ProcessTask { id: logoutProc; command: ["python3", root.script, "logout"]; onFinished: { root.bodies = ({}); root.refresh() } }
+  // Removing the secret is the sign-out (notion.py logout). One the script
+  // could not remove leaves the setup as it was and says why; a page cache
+  // that stayed behind is said beside a sign-out that did happen.
+  function removeIntegration() {
+    logoutProc.start()
+  }
+  ProcessTask {
+    id: logoutProc
+    command: ["python3", root.script, "logout"]
+    onFinished: function(result) {
+      if (result.error || result.ok !== true) {
+        root.noticeRequested("Could not remove the Notion integration",
+          result.error || "the removal could not be confirmed", "", [])
+        return
+      }
+      if (result.warning) {
+        root.statusRequested(root.name + ": " + result.warning)
+      }
+      root.bodies = ({})
+      root.refresh()
+    }
+  }
 
   // ── setup: the provider's own screen ────────────────────────────────
   property bool setupBusy: false
@@ -473,7 +494,7 @@ LaneProvider {
             accent: Color.accent
             onClicked: {
               root.viewCleared()
-              logoutProc.start()
+              root.removeIntegration()
             }
           }
           Button {

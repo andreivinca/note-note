@@ -21,9 +21,20 @@ can replace or grow either file between the check and load"*).
 
 - Read `cap + 1` bytes once, and use *those bytes*. Over the cap → reject.
 - Applies to files (`lib/readfile.py`, which also enforces rule 9), HTTP
-  bodies (`read(max + 1)`), and process output.
+  bodies (`provider_io.read_bounded`; an error's body through
+  `read_error_body`), stdin payloads, and process output.
+- Count bytes, not characters: a payload on stdin is read from
+  `sys.stdin.buffer` against `MAX_PAYLOAD` and only then decoded as UTF-8
+  (`provider_io.read_payload`, like `lib/fileio.py`). Three-byte characters
+  are three bytes of the limit.
 - `FileView` in QML has no bounded read: it is **write-only** in this project.
-  Local notes and the state file are read through `lib/readfile.py`.
+  Local notes and the state file are read through `lib/readfile.py`, and so
+  are the JSON files a provider keeps — tokens, the account config, the
+  listing caches and indexes, payload files and the rate state — through
+  `provider_io.load_json(path, default, cap)`, with a cap its owner names
+  (64 KiB for a Microsoft token, 1 MiB for the account config, 32 MiB for the
+  Sticky Notes listing, 256 KiB for a rate state; 8 MiB when the owner names
+  none). What is not a JSON object within the cap is read as absent.
 - Bound collections too, not only bytes: number of notes, sections, pages,
   blocks, images.
 
@@ -70,7 +81,21 @@ Page content is attacker-controlled. An `<img src>` inside a OneNote page is
   fragment. Compare the **whole host** (`graph.microsoft.com.evil.example`
   must fail).
 - Refuse redirects (a custom `HTTPRedirectHandler` returning `None`), so a
-  302 cannot move a bearer token to another origin.
+  302 cannot move a bearer token to another origin. `urlopen` follows them
+  and copies `Authorization` along, to another host or to plain http, so
+  every transport that sends a credential opens through
+  `urllib.request.build_opener(provider_io.NoRedirect)`: `msgraph.OPENER`
+  (Graph, and the sign-in endpoints whose form bodies carry refresh tokens),
+  `notion.OPENER`, and OneNote's image, recording and metadata openers.
+- Graph's own absolute URLs — a listing's `@odata.nextLink`, a page's
+  `self` — arrive in responses and are remote content too.
+  `msgraph.graph_url()` accepts only https to exactly `graph.microsoft.com`
+  (no userinfo, no port), a `/v1.0/` path without dot segments, and no
+  fragment, and `msgraph.request()` refuses to send a bearer token to any
+  other URL. Sticky Notes' pagination and OneNote's relationship URLs are
+  checked before they are followed; OneNote narrows the rule further to its
+  own paths (`notebook_inventory.graph_url`). The sign-in endpoints carry no
+  bearer token and are built from constants, not checked by this rule.
 - Anything not allowed is never requested; it is rendered as text.
 
 OneNote section ordering additionally reads remote `.onetoc2` metadata with
@@ -136,6 +161,12 @@ applies in reverse (`services/clipboard/clipboard.py`,
   bytes and, given a deadline, in time; every transport reads through it, and
   `provider_io.NoRedirect` is the one opener that refuses to follow a
   redirect with a token or a signed URL.
+- In `msgraph.request()` and `notion.api()` each attempt has an absolute
+  deadline, its `timeout` after it starts. No socket wait is longer than
+  that, and the body is read against the deadline whether it is a success's
+  or an error's (`provider_io.read_error_body`, which answers an error body
+  that is too large or too late as empty and keeps the status). A success
+  that misses the deadline is a plain network error, never retried.
 - Cap how many items a single operation may fetch (40 images per page read;
   a save fetches at most the 4 recordings it can upload).
 - Prune caches by count *and* by total bytes (400 files / 200 MiB), oldest
@@ -216,7 +247,9 @@ is a file.
 `head`/`open()` on a user-writable path follows symlinks (a link in ~/Notes
 would read out any file the user can) and blocks on a FIFO (the reader hangs
 until a writer appears). The safe shape is `lib/readfile.py`, used for every
-local-file read:
+local-file read — the provider JSON of rule 1 included, and the rate state,
+which is read while its key's `flock` is held, so a read that waited there
+would stall every process on the key:
 
 - one `os.open()` with `O_NOFOLLOW` (the kernel refuses a symlink) and
   `O_NONBLOCK` (a FIFO's open returns instead of waiting);
@@ -253,23 +286,36 @@ replying to the reviewer.
 ## Pre-release checklist
 
 - [ ] Every new file read goes through `lib/readfile.py` (no `stat` + open, no
-      `FileView` read, no `head` on a mutable path).
-- [ ] Every new HTTP call has a byte ceiling *and* a deadline; every loop over
-      pages has a collection cap.
+      `FileView` read, no `head` on a mutable path); a JSON file through
+      `provider_io.load_json` with a cap of its own.
+- [ ] Every new HTTP call has a byte ceiling *and* a deadline for the whole
+      attempt, error bodies included; every loop over pages has a
+      collection cap.
+- [ ] A write whose outcome is uncertain (a 503, a 502/504, a timeout) is
+      never sent again in the same process; only a job that reads afresh
+      before it writes may be run again, and a create never is.
+- [ ] A sign-out answers `ok` only once the credential is gone (one already
+      absent counts); a credential that could not be deleted is an error
+      the UI shows, with the sign-in left as it is. A cache that could not
+      be cleared is reported apart from it.
 - [ ] Every new file write goes through `fileio.write_atomic` (or
       `save_private` over it), 0600, in a 0700 dir.
 - [ ] No payload, secret or note body is written to `/tmp` or
       `$XDG_RUNTIME_DIR`; scripts receive them on stdin with the four-step
       sequence.
 - [ ] No URL derived from remote content is fetched with a credential unless
-      it passes an allow-list; redirects refused.
+      it passes an allow-list (`msgraph.graph_url` or narrower); redirects
+      refused — a credentialed request opens through
+      `build_opener(provider_io.NoRedirect)`, never `urlopen`.
 - [ ] Any new subprocess has `timeout=`, resource limits, and arguments passed
       as argv (never string interpolation).
 - [ ] New caches are pruned by count and bytes.
 - [ ] Any new rate/pacing state under `~/.cache/omarchy/note-note-rate/` keeps
       the same shape as the rest: 0700 dir, 0600 files, `fileio.write_atomic`,
-      and read with a byte ceiling (`ratelimit.MAX_STATE_BYTES`) — a budget
-      that cannot be read must fail *open*, never block the request.
+      and read through `provider_io.load_json` with a byte ceiling
+      (`ratelimit.MAX_STATE_BYTES`) — no symlink, no FIFO, no wait under the
+      lock. A budget that cannot be read must fail *open*, never block the
+      request.
 - [ ] `omarchy plugin validate .` passes; `README` "Limits" and this file are
       updated if the numbers changed.
 - [ ] Nothing new runs while the window is hidden — with the one sanctioned

@@ -36,6 +36,7 @@ SUITES = [
     "tests/statusbar_selftest.py",
     "tests/tabstrip_selftest.py",
     "tests/ordering_selftest.py",
+    "tests/signout_selftest.py",
     # Each transition suite has a harness and a deadline of its own.
     *[TRANSITIONS + " --suite " + name for name in TRANSITION_SUITES],
     "tests/extensions_selftest.py",
