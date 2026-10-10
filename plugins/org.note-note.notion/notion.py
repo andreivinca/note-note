@@ -6,8 +6,8 @@ user pastes into the provider's setup screen (stored owner-only in
 ~/.local/state/omarchy/note-note-notion.json). Pages must be shared with the
 integration in Notion ("Connections") to be visible.
 
-  notion.py status                 -> {"configured":bool,"workspace":str}
-  notion.py setup <file>           -> reads {"token"}; verifies it; stores it
+  notion.py status                 -> {"configured":bool,"workspace":str,"session":str}
+  notion.py setup <file>           -> reads {"token"}; verifies it; stores it -> {"ok","workspace","session"}
   notion.py logout
   notion.py list [--cached|--max-age S] -> {"pages":[{id,title,parent,edited}],"cached":bool}
   notion.py page <id>              -> {"title","body"(markdown),"editable","reason"}
@@ -16,7 +16,7 @@ integration in Notion ("Connections") to be visible.
   notion.py delete <id>            -> archives the page
   notion.py clear-cache
 """
-import json, os, sys, time, urllib.parse, urllib.request, urllib.error
+import json, os, sys, time, urllib.parse, urllib.request, urllib.error, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "lib"))
@@ -46,13 +46,61 @@ MAX_BODY = 4 * 1024 * 1024  # one API response
 # moment; the pacer counts them all (lib/ratelimit.py).
 RATE_KEY = "notion"
 RATE_WINDOWS = [(1, 3)]
+# The integration a run is made under, as the provider last heard it from
+# `status` or `setup` — the Microsoft accounts' cacheSession, for an
+# integration secret (services/microsoft/msgraph.py). Each new secret gets a
+# new one; a secret stored before sessions existed has "".
+SESSION_ENV = "NOTE_NOTE_NOTION_SESSION"
+
+
+def integration():
+    """The integration set up now: {token, workspace, session}."""
+    return load_json(TOKEN_FILE, {})
+
+
+def made_under(cfg):
+    """Whether this run was made under the integration `cfg`: the one the
+    provider named, or — run by hand, naming none — the one set up now."""
+    return os.environ.get(SESSION_ENV, cfg.get("session", "")) == cfg.get("session", "")
 
 
 def token():
-    t = load_json(TOKEN_FILE, {}).get("token", "")
-    if not t:
+    """The secret to send. A run made under another integration than the one
+    set up now stops here, before it can act on the new one's pages."""
+    cfg = integration()
+    if not cfg.get("token"):
         fail("not configured")
-    return t
+    if not made_under(cfg):
+        fail("the Notion integration changed")
+    return cfg["token"]
+
+
+def load_cache(default):
+    """The listing cached under the integration set up now; another
+    integration's is never read."""
+    cached = load_json(CACHE, None)
+    if not isinstance(cached, dict) or cached.get("session", "") != integration().get("session", ""):
+        return default
+    return cached
+
+
+def save_cache(data):
+    """The listing, stamped with the integration it was fetched under —
+    which must still be the one set up: a listing that lands after a new
+    setup is dropped rather than shown as the new workspace's."""
+    cfg = integration()
+    if not made_under(cfg):
+        return
+    data["session"] = cfg.get("session", "")
+    save_private(CACHE, data)
+
+
+def drop_cache():
+    """The listing cache, gone; one already gone is fine."""
+    try:
+        os.remove(CACHE)
+    except FileNotFoundError:
+        pass
 
 
 def api(method, path, data=None, tok=None, transient_5xx=True):
@@ -116,8 +164,9 @@ def parent_of(page):
 # ---------------------------------------------------------------- commands
 
 def cmd_status():
-    cfg = load_json(TOKEN_FILE, {})
-    out({"configured": bool(cfg.get("token")), "workspace": cfg.get("workspace", "")})
+    cfg = integration()
+    out({"configured": bool(cfg.get("token")), "workspace": cfg.get("workspace", ""),
+         "session": cfg.get("session", "")})
 
 
 def cmd_setup(path):
@@ -129,8 +178,19 @@ def cmd_setup(path):
     if status != 200:
         fail(err(res, status))
     name = (res.get("bot") or {}).get("workspace_name") or res.get("name") or "Notion"
-    save_private(TOKEN_FILE, {"token": tok, "workspace": name})
-    out({"ok": True, "workspace": name})
+    # The same secret is the same integration, and keeps its session — its
+    # cached listing and the runs made under it. Any other secret is another
+    # integration, likely another workspace: a new session, and the old
+    # listing gone before the new secret is stored, so no step of this can
+    # leave it standing as the new workspace's.
+    previous = integration()
+    if previous.get("token") == tok:
+        session = previous.get("session", "")
+    else:
+        session = uuid.uuid4().hex
+        drop_cache()
+    save_private(TOKEN_FILE, {"token": tok, "workspace": name, "session": session})
+    out({"ok": True, "workspace": name, "session": session})
 
 
 def cmd_logout():
@@ -143,7 +203,7 @@ def cmd_logout():
 
 
 def cmd_list(cached, max_age=0):
-    c = load_json(CACHE, None)
+    c = load_cache(None)
     if cached or (max_age and c and time.time() - c.get("fetched", 0) < max_age):
         c = c or {"pages": []}
         out({"pages": c.get("pages", []), "cached": True})
@@ -165,7 +225,7 @@ def cmd_list(cached, max_age=0):
         cursor = res.get("next_cursor")
     pages = pages[:MAX_PAGES]
     os.makedirs(CACHE_DIR, exist_ok=True)
-    save_private(CACHE, {"pages": pages, "fetched": time.time()})
+    save_cache({"pages": pages, "fetched": time.time()})
     out({"pages": pages, "cached": False})
 
 
@@ -223,6 +283,14 @@ def cmd_update(page_id, path):
     old, truncated = fetch_children(page_id, [MAX_BLOCKS + 1])
     if truncated:
         fail("the existing page is too large to replace safely")
+    # The page as it is now, not as it was when it opened: whatever was added
+    # in Notion since — a toggle, a colour, a caption — would go with the
+    # blocks this save deletes, so it is checked the way loading checks it
+    # (cmd_page), before anything is written.
+    reasons = notion_md.unwritable(old)
+    if reasons:
+        fail("this page now holds %s, which Note Note cannot write back; edit it in Notion — "
+             "your draft was kept" % ", ".join(reasons))
     quoted = urllib.parse.quote(page_id, safe="")
     # Title: the page's title property (name varies; find it).
     status, pg = api("GET", "/pages/" + quoted)
@@ -279,9 +347,9 @@ def cmd_create(parent_id, path):
     if status != 200:
         fail(err(res, status))
     page = {"id": res["id"], "title": title_of(res), "parent": parent_of(res), "edited": res.get("last_edited_time", "")}
-    c = load_json(CACHE, {"pages": []})
+    c = load_cache({"pages": []})
     c["pages"] = [page] + [p for p in c.get("pages", []) if p["id"] != page["id"]]
-    save_private(CACHE, c)
+    save_cache(c)
     out({"ok": True, "page": page})
 
 
@@ -289,9 +357,9 @@ def cmd_delete(page_id):
     status, res = api("PATCH", "/pages/" + urllib.parse.quote(page_id, safe=""), {"archived": True})
     if status != 200:
         fail(err(res, status))
-    c = load_json(CACHE, {"pages": []})
+    c = load_cache({"pages": []})
     c["pages"] = [p for p in c.get("pages", []) if p["id"] != page_id]
-    save_private(CACHE, c)
+    save_cache(c)
     out({"ok": True})
 
 

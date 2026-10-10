@@ -547,6 +547,34 @@ Window {
     }
   }
 
+  // A rich paste brings only what the notebook can keep (PasteFit.js): the
+  // provider's tools and `canImages` decide. Notion has no table tool and
+  // stores no pictures, yet a pasted table and a pasted picture showed in
+  // its notes and were flattened by the save; colours it has no tool for
+  // come off and leave the rest of the formatting. The local notebook,
+  // which stores everything, keeps the paste whole.
+  function pasteFits(data) {
+    editor.enabledTools = data.tools
+    editor.canImages = data.canImages === true
+    test.statusMessages = []
+    try {
+      load({ source: "para\n" })
+      var text = editor.plainText()
+      editor.setCursorPosition(text.length)
+      clip.html = data.html
+      clip.text = data.text
+      editor.paste()
+      keys.tryVerify(function() { return editor.plainText() !== text }, 3000)
+      var markdown = read()
+      require(markdown === data.expected, "the paste saved as " + JSON.stringify(markdown))
+      var said = test.statusMessages.join("\n")
+      require(data.said ? said.indexOf(data.said) >= 0 : said === "", "the status line said " + JSON.stringify(said))
+    } finally {
+      editor.enabledTools = null
+      editor.canImages = false
+    }
+  }
+
   // Deleting a code line's characters and typing again keeps it code: the
   // paragraph's own character format is monospace (qthtml/writer.code).
   function retypeCodeLine() {
@@ -3182,6 +3210,39 @@ Window {
       test.checked("undoing a paste puts the caret back where it began, and redo replays it", true, "")
     } catch (error) {
       test.checked("undoing a paste puts the caret back where it began, and redo replays it", false, error.message)
+    }
+    // Notion's and OneNote's tools (their Provider.qml), and the local
+    // notebook's: every tool, and pictures.
+    var notionTools = ["bold", "italic", "underline", "strikeout", "highlight", "code", "h1", "h2", "h3", "p",
+                       "ul", "ol", "todo", "indent", "outdent", "quote", "codeblock", "rule", "link"]
+    var oneNoteTools = ["bold", "italic", "underline", "strikeout", "highlight", "textColor", "h1", "h2", "h3",
+                        "p", "ul", "ol", "todo", "indent", "outdent", "table", "link"]
+    var table = "<table border=\"1\"><tr><td>Name</td><td>Qty</td></tr><tr><td>Milk</td><td>2</td></tr></table>"
+    var coloured = "<p>plain <span style=\"color:#ff0000;\">red</span> <b>bold</b></p>"
+    var fits = [
+      { name: "a table pasted into a notebook without tables goes in as plain text", tools: notionTools,
+        html: table, text: "Name\tQty\nMilk\t2", expected: "paraName\tQty  \nMilk\t2\n", said: "cannot store tables" },
+      { name: "a picture pasted into a notebook without pictures goes in as plain text", tools: notionTools,
+        html: "<p>see <img src=\"https://example.com/cat.png\" /> here</p>", text: "see here",
+        expected: "parasee here\n", said: "cannot store pictures" },
+      { name: "a colour without a colour tool comes off a paste, the rest of its formatting stays",
+        tools: notionTools, html: coloured, text: "plain red bold", expected: "paraplain red **bold**\n" },
+      { name: "inline code pasted into a notebook without it goes in as plain text", tools: oneNoteTools,
+        canImages: true, html: "<p>run <code>make</code></p>", text: "run make", expected: "pararun make\n",
+        said: "cannot store inline code" },
+      { name: "a notebook that stores everything keeps a pasted colour", tools: null, canImages: true,
+        html: coloured, text: "plain red bold",
+        expected: "paraplain <span style=\"color:#ff0000;\">red</span> **bold**\n" },
+      { name: "a notebook that stores everything keeps a pasted table", tools: null, canImages: true,
+        html: table, text: "Name\tQty\nMilk\t2", expected: "para\n\n| Name | Qty |\n|---|---|\n| Milk | 2 |\n" }
+    ]
+    for (var f = 0; f < fits.length; f++) {
+      try {
+        pasteFits(fits[f])
+        test.checked(fits[f].name, true, "")
+      } catch (error) {
+        test.checked(fits[f].name, false, error.message)
+      }
     }
     try {
       retypeCodeLine()

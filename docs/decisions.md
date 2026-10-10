@@ -644,6 +644,23 @@ blocks character for character (`notion_md.unwritable`): a toggle, a colour
 the writer cannot put back, text nested under a paragraph, a mention, each
 is named in the reason. Deciding by type alone let a page with a toggle or
 a red word open editable and be rewritten without either on its first save.
+The trip compares every property of a block, not only its text: each one in
+Notion's block reference is either written from the Markdown (a to-do's
+state, a code block's language) or one the writer leaves at Notion's default
+(`notion_md.UNWRITTEN`: a block's colour, a code caption, a toggle heading,
+a list's start or numbering style), and a property Notion adds later counts
+whenever it holds anything. Comparing a chosen few let a captioned code
+block or a red paragraph open editable and lose its caption or colour to an
+unrelated edit.
+
+The check runs again on the blocks a save is about to delete (`cmd_update`),
+before the title or any block is written: the page as it is now, not as it
+was when it opened, so a toggle added in Notion meanwhile refuses the save
+and keeps the draft rather than going with the old blocks. The other way
+round, the writer refuses Markdown it has no block for (`notion_md.Unkept`:
+a table, a picture, coloured text, HTML, a fourth-level heading) before any
+request, where it used to flatten it — and a body of nothing but HTML
+converted to no blocks at all, which deleted the whole page and answered ok.
 OneNote is the mirror case: its reader refuses nothing it can read, and its
 writer refuses a save holding the four constructs it cannot write
 (engine-notes, "A quote, a code block, inline code and a rule do not
@@ -704,6 +721,38 @@ HTML flavour, strips the markers the way the save path always
 has, and inserts through the same parser inside one `atomic()` step. A
 clipboard with no HTML on offer falls back to Qt's own paste, and the plain
 paste (ctrl+shift+v) is untouched.
+
+### A rich paste brings only what the notebook can keep
+
+The provider's `tools` gated the toolbar and nothing else, so a paste put in
+whatever the clipboard held: a table, a picture or a red word showed in a
+Notion note, and the save then flattened the table into `Name | Qty`
+paragraphs, the picture into its URL and the colour into plain text — and
+reported the save done. The user saw it go only on the next fresh load. The
+writers now refuse what they cannot keep (`notion_md.Unkept`, OneNote's
+`unkept_formatting`), and the editor does not show it in the first place.
+
+`NoteEditor.fitPaste` has Qt read the clipboard's HTML in a hidden text
+edit, so what is judged is Qt's own serialisation — the dialect the
+converter and `QuoteBars.js` read — however the source wrote it, and
+`ui/PasteFit.js` judges it by the same `tools` and `canImages`:
+
+- **Colours the notebook has no tool for come off**, and the rest of the
+  formatting stays. A browser copies every run's computed colour and
+  background, which are the page's look rather than formatting anyone
+  chose; taking them off loses no text.
+- **Anything else it has no tool for**, and a picture or a recording where
+  `canImages` is false, **makes the whole paste the plain paste**, and the
+  status line names what the clipboard held ("Pasted as plain text: this
+  notebook cannot store tables").
+
+A notebook that lists no `tools` and stores pictures — the local one —
+takes the clipboard's HTML untouched, as before. *Considered:* keeping the
+supported formatting and degrading a table to its text. *Rejected:* that is
+a second writer for every construct in the editor, and the plain paste
+already gives a table's text, as the source put it on the clipboard. Each
+pattern errs towards finding: a false find costs a paste its formatting, a
+miss costs the save, which the provider refuses with the draft kept.
 
 ### A code block holds no formatted text, so a paste there is the plain paste
 

@@ -200,6 +200,11 @@ Editing-tool cases add an extra QML file to an isolated tool directory and
 verify automatic discovery, toolbar clicks, shortcuts and keyboard help.
 They cover the built-in tools' saved Markdown and undo/redo, provider and
 document restrictions, and the link panel's captured note/selection context.
+Paste cases hold a rich paste to the provider's tools and `canImages`: a
+table, a picture or inline code a notebook cannot store goes in as plain
+text and the status line says why, a colour without the colour tool comes
+off and the rest of the formatting stays, and the local notebook keeps all of
+it.
 Layout checks rearrange groups and dropdown items, exercise moved buttons
 and shortcuts, and verify omitted tools remain accessible. Settings cases
 cover malformed or duplicate entries, older configurations, JSON persistence
@@ -373,7 +378,7 @@ network — every request is answered by a stub:
 
 ```bash
 python3 plugins/org.note-note.local/selftest.py       # the listing's order, statx(2), its last line, line endings
-python3 plugins/org.note-note.notion/selftest.py      # a page is never emptied to save it
+python3 plugins/org.note-note.notion/selftest.py      # a page is never emptied or flattened to save it
 python3 plugins/org.note-note.sticky/selftest.py      # a cut note opens read-only, never as a partial note
 python3 plugins/org.note-note.onenote/selftest.py     # which writes may be run again
 python3 lib/notemerge/selftest.py         # shared merging and recovery storage
@@ -412,7 +417,15 @@ Each pins a bug that shipped, and was found by a review of the Python:
   **before** deleting the old ones. Written the other way round it deleted
   first, so a refused insert — a 400 on a block Notion will not take, or the
   app being killed — left the page permanently empty. The test forces the
-  insert to fail and asserts nothing was deleted.
+  insert to fail and asserts nothing was deleted. It also checks what a save
+  may replace: a page holding a block property the writer cannot put back
+  (a code caption, a block colour, nested ones too, a toggle heading) opens
+  read-only; one that gained such a block in Notion after it opened refuses
+  the save with no request that writes; and a body holding what Notion
+  cannot keep (a table, a picture, coloured text, HTML) is refused before
+  any request at all, for a save and a create alike. And that a new
+  integration secret never shows the old one's listing: not from the warm
+  cache, and not from a run made under the old secret that lands late.
 - **`plugins/org.note-note.onenote/selftest.py`** — `graph_raw` and `msgraph.http` share
   the bounded transport. This suite checks the raw wrapper's 401 refresh
   and its caller's gate for whether a failure may be run again. A

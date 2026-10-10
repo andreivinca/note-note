@@ -713,6 +713,21 @@ real processes at one key to check the counters actually hold.
   so the provider deliberately has no `search()`: content search would mean
   fetching every page's blocks per query.
 - Highlights are `*_background` colours in the `annotations` object.
+- A block has properties besides its text that Markdown has no syntax for:
+  a `color` on every text block, a code block's `caption`, a heading's
+  `is_toggleable`, a numbered list's `list_start_index` and `list_format`
+  (on its first item only), a paragraph's `icon`. A save writes them all at
+  their defaults, so a page holding another value opens read-only
+  (`notion_md.UNWRITTEN`).
+- A line break inside a list item is a `\n` in the item's rich text, written
+  as a Markdown hard break continued under the marker. Dropped, it glued the
+  item's two lines into one word.
+- Setup stores the secret with a `session` of its own, the way a Microsoft
+  sign-in carries its `cacheSession`: the listing cache is stamped with it,
+  each run is told it (`NOTE_NOTE_NOTION_SESSION`) and stops when another
+  secret has replaced it, and the provider refuses an answer that lands
+  after the switch (`LaneProvider.session`). A secret stored before
+  sessions existed has the session "".
 
 ---
 

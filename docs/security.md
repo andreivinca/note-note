@@ -191,6 +191,12 @@ their cached text for at least 60 seconds against eventually consistent
 reads. The index does not copy token-file fields, image bytes or image/object
 resource attributes. User-authored text and links remain searchable.
 
+The Notion integration secret carries a random `session` of the same kind:
+setup with another secret starts a new one and removes the listing cache,
+the cache is stamped with it, and a run made under an earlier secret stops
+before its next request and never writes the cache (`notion.py`, `token`,
+`save_cache`), so one workspace's page titles are never shown as another's.
+
 ### 7. Anything that decodes untrusted data gets limits and a timeout
 
 ImageMagick is invoked with

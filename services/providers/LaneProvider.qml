@@ -53,6 +53,12 @@ Item {
   property string laneKey: ""
   property var rq: null
   property var ms: null
+  // The sign-in a run is made under: what its process is told
+  // (`environment`), and what its answer must still match when it lands.
+  // The Microsoft account's, for a provider with one; a provider with a
+  // sign-in of its own (Notion's integration) sets both.
+  property string session: lane.ms ? lane.ms.cacheSession : ""
+  property var environment: lane.ms ? lane.ms.env : ({})
   Component.onCompleted: {
     if (services && services.requests && lane.laneKey) {
       lane.rq = services.requests.queueFor(lane.laneKey, lane)
@@ -106,12 +112,12 @@ Item {
   // An answer is for the account the request was made under: one that
   // arrives after a sign-out or a switch is refused, not applied.
   function runProcess(runner, args, payload, callback) {
-    var session = lane.ms ? lane.ms.cacheSession : ""
+    var session = lane.session
     return runner.run({ command: ["python3", lane.script].concat(args),
-                       environment: lane.ms ? lane.ms.env : ({}),
+                       environment: lane.environment,
                        payload: payload,
                        timeoutMs: 600000 }, function(result) {
-      callback(session === (lane.ms ? lane.ms.cacheSession : "") ? result : { error: "the signed-in account changed" })
+      callback(session === lane.session ? result : { error: "the signed-in account changed" })
     })
   }
 
@@ -119,5 +125,5 @@ Item {
   function clearCache() {
     clearProc.start()
   }
-  ProcessTask { id: clearProc; environment: lane.ms ? lane.ms.env : ({}); command: ["python3", lane.script, "clear-cache"] }
+  ProcessTask { id: clearProc; environment: lane.environment; command: ["python3", lane.script, "clear-cache"] }
 }

@@ -9,6 +9,7 @@ import "EditContext.js" as EditContext
 import "Dialect.js" as Dialect
 import "MarkdownBlocks.js" as MarkdownBlocks
 import "AudioObjects.js" as AudioObjects
+import "PasteFit.js" as PasteFit
 import "../services/shortcuts/stroke.js" as Stroke
 
 // The note pane: the formatting tools pinned across its top the way an IDE
@@ -417,7 +418,9 @@ Item {
   // Insert at the selection's end and remove second — pastePlain's order,
   // same block-start reason. A clipboard with no HTML flavour is Qt's own
   // paste after all. Inside a code block the HTML is never wanted: the
-  // clipboard's text goes in as code (pastePlain).
+  // clipboard's text goes in as code (pastePlain). Nor is what the
+  // notebook cannot keep (fitPaste): a clipboard holding any of it is the
+  // plain paste, and the status line says what it held.
   function pasteRich() {
     if (selectionInCode()) {
       pastePlain()
@@ -436,11 +439,17 @@ Item {
         area.paste()
         return
       }
+      var pasted = root.fitPaste(Dialect.documentHtml(html))
+      if (pasted.lacking.length > 0) {
+        root.statusRequested("Pasted as plain text: this notebook cannot store " + pasted.lacking.join(", "))
+        pastePlain()
+        return
+      }
       var from = Math.min(area.selectionStart, area.selectionEnd)
       var to = Math.max(area.selectionStart, area.selectionEnd)
       var before = area.length, added = 0
       atomic(function() {
-        area.insert(to, AudioObjects.pastedHtml(Dialect.documentHtml(html), root.audioIdentifiers(), root.audioHeld))
+        area.insert(to, AudioObjects.pastedHtml(pasted.html, root.audioIdentifiers(), root.audioHeld))
         added = area.length - before
         if (from !== to) {
           area.remove(from, to)
@@ -449,6 +458,31 @@ Item {
       area.cursorPosition = from + added
       root.edited()
     })
+  }
+
+  // The clipboard's HTML as this notebook can store it, and what it holds
+  // that the notebook cannot (PasteFit.js): judged by the provider's tools
+  // and `canImages`, on Qt's own reading of the HTML. A notebook that
+  // stores everything — the local one — takes the HTML untouched.
+  function fitPaste(html) {
+    if (root.enabledTools === null && root.canImages) {
+      return { html: html, lacking: [] }
+    }
+    pasteReader.text = html
+    var read = Dialect.documentHtml(pasteReader.getFormattedText(0, pasteReader.length))
+    pasteReader.text = ""
+    return PasteFit.fit(read, function(capability) {
+      return editing.supports(capability)
+    }, root.canImages, root.codeChipColour)
+  }
+  // Never shown: it reads a clipboard's HTML the way the note would, in the
+  // note's own font, so its serialisation is what a copy from the note gives.
+  TextEdit {
+    id: pasteReader
+    visible: false
+    textFormat: TextEdit.RichText
+    baseUrl: area.baseUrl
+    font: area.font
   }
 
   // Ctrl+Shift+V: the clipboard's text and nothing that rode along with it —

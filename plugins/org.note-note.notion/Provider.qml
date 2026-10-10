@@ -37,6 +37,25 @@ LaneProvider {
   property string workspace: ""
   property var pages: []          // [{ id, title, parent, edited }]
   property var bodies: ({})       // id -> { title, body, editable }
+  // The integration the runs are made under (notion.py, SESSION_ENV): a new
+  // one with every new secret. Each run carries it, and an answer that lands
+  // after another has taken its place is refused (LaneProvider).
+  property string integration: ""
+  session: root.integration
+  environment: ({ NOTE_NOTE_NOTION_SESSION: root.integration })
+
+  // Another secret is another integration, likely another workspace: what
+  // was listed and read under the old one goes before the new one lists,
+  // so none of it is shown as the new workspace's.
+  function switchIntegration(integration) {
+    if (integration === root.integration) {
+      return
+    }
+    root.integration = integration
+    root.pages = []
+    root.bodies = ({})
+    root.rebuild()
+  }
 
   function idOf(path) { return path.substring(root.id.length + 1) }
   function pathOf(id) { return root.id + ":" + id }
@@ -306,17 +325,24 @@ LaneProvider {
         rebuild()
         return
       }
+      root.switchIntegration(st.session || "")
+      cachedProc.session = root.integration
       cachedProc.start()
       root.listPages(false)
     }
   }
   // The cache, read straight off disk: no request, so no lane — the sidebar
-  // fills instantly and keeps filling while Notion is parked.
+  // fills instantly and keeps filling while Notion is parked. A reading that
+  // lands after another integration was set up is the old one's, unshown.
   ProcessTask {
     id: cachedProc
+    property string session: ""
     command: ["python3", root.script, "list", "--cached"]
     raw: true
     onFinished: function(result) {
+      if (cachedProc.session !== root.integration) {
+        return
+      }
       var res = root.parse(result.text || "")
       if (!res.error && Array.isArray(res.pages)) {
         root.pages = res.pages
@@ -356,6 +382,7 @@ LaneProvider {
           return
         }
         root.setupError = ""
+        root.switchIntegration(r.session || "")
         root.viewCleared()
         root.refresh()
       })
