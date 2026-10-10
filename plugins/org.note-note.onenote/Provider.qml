@@ -196,7 +196,8 @@ LaneProvider {
       return candidate.id === bookId
     })
     var role = book ? (book.userRole || "").toLowerCase() : ""
-    return (role === "owner" || role === "contributor") && /^0-[0-9a-f]{16}![0-9]+$/i.test(book.id)
+    return (role === "owner" || role === "contributor")
+      && /^0-[0-9a-f]{16}!(?:[0-9]+|s[0-9a-f]{32})$/i.test(book.id)
   }
 
   function pageOrderingAvailable(section) {

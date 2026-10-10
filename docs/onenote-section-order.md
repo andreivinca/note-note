@@ -65,6 +65,14 @@ It also contains historical/deleted entries, so sorting the TOC alone is
 incorrect. The provider joins filenames to live OneDrive children, whose
 IDs match the live Graph section IDs after adding the personal `0-` prefix.
 
+OneDrive personal item IDs come in two shapes: the 16-digit drive ID, `!` and
+the item's number (`{drive}!8167`), or, for items OneDrive has created since it
+changed formats, the drive ID, `!s` and a 32-digit GUID. Live-verified on
+2026-10-10: a section added to Family Room has the Graph ID `0-{drive}!s{guid}`,
+its `.one` file has the OneDrive ID `{drive}!s{guid}`, and OneNote's revision
+service opens the section under it. `notebook_inventory.PERSONAL_ID` accepts
+both shapes and nothing else.
+
 Graph documents [listing children of package items](https://learn.microsoft.com/en-us/graph/api/driveitem-list-children?view=graph-rest-1.0),
 and OneNote notebooks have a [package facet](https://learn.microsoft.com/en-us/graph/api/resources/package?view=graph-rest-1.0).
 The endpoint requires `Files.Read` at minimum, which

@@ -110,14 +110,20 @@ def fixture(names=("Food.one", "Welcome.one", "Health.one"), orders=(3, 1, 5),
         0x7A, exguid(index) + toc.TOC_SCHEMA, [node(0x15, b"\0", parts)])
 
 
-BOOK = "0-0123456789ABCDEF!10"
-TOC = "0123456789ABCDEF!12"
+def item(number, guid=False):
+    """A personal OneDrive item ID: numbered, or "s" and a GUID, the format
+    OneDrive gives the items it has created since it changed formats."""
+    return "0123456789ABCDEF!" + ("s%032x" % number if guid else str(number))
 
 
-def sections():
-    return [{"id": "0-0123456789ABCDEF!" + str(index), "name": name,
-             "notebookId": BOOK, "notebook": "Test", "modified": "stamp"}
-            for index, name in [(30, "Food"), (31, "Health"), (32, "Welcome"), (33, "New")]]
+BOOK = "0-" + item(10)
+TOC = item(12)
+
+
+def sections(guid=False):
+    return [{"id": "0-" + item(number, guid), "name": name,
+             "notebookId": "0-" + item(10, guid), "notebook": "Test", "modified": "stamp"}
+            for number, name in [(30, "Food"), (31, "Health"), (32, "Welcome"), (33, "New")]]
 
 
 def alphabetical():
@@ -125,9 +131,10 @@ def alphabetical():
 
 
 class Remote:
-    def __init__(self, etag="v1"):
+    def __init__(self, etag="v1", guid=False):
         self.etag, self.downloads, self.calls = etag, 0, []
-        self.children = [{"id": s["id"][2:], "name": s["name"] + ".one", "file": {}} for s in sections()]
+        self.book = item(10, guid)
+        self.children = [{"id": s["id"][2:], "name": s["name"] + ".one", "file": {}} for s in sections(guid)]
         self.children.append({"id": TOC, "name": "Open Notebook.onetoc2", "file": {}, "eTag": etag})
 
     def get(self, path):
@@ -136,7 +143,7 @@ class Remote:
             return {"value": self.children}
         if path == order.item_path(TOC):
             return {"eTag": self.etag}
-        return {"id": BOOK[2:], "name": "Test", "package": {"type": "oneNote"}}
+        return {"id": self.book, "name": "Test", "package": {"type": "oneNote"}}
 
     def download(self, item):
         self.downloads += 1
@@ -211,14 +218,21 @@ class OrderingTests(unittest.TestCase):
         self.assertTrue(warnings)
         self.assertFalse(saved["files"])
 
+    def test_guid_item_ids_join_like_numbered_ones(self):
+        result, _, warnings = order.arrange(sections(guid=True), remote=Remote(guid=True))
+        self.assertEqual([s["name"] for s in result], ["Welcome", "Food", "Health", "New"])
+        self.assertFalse(warnings)
+
     def test_unsupported_ids_never_probe_drive(self):
-        entries, remote = sections(), Remote()
-        entries[0] = dict(entries[0], notebookId="1-work-notebook", notebook="Work")
-        entries[1] = dict(entries[1], notebookId="1-work-notebook", notebook="Work")
-        result, _, warnings = order.arrange(entries, remote=remote)
-        self.assertEqual(result[0], entries[0])
-        self.assertTrue(warnings)
-        self.assertFalse(any("work-notebook" in call for call in remote.calls))
+        for notebook in ("1-work-notebook", "0-0123456789ABCDEF!s0123", "0-0123456789ABCDEF!x" + "0" * 32):
+            entries, remote = sections(), Remote()
+            entries[0] = dict(entries[0], notebookId=notebook, notebook="Work")
+            entries[1] = dict(entries[1], notebookId=notebook, notebook="Work")
+            with self.subTest(notebook=notebook):
+                result, _, warnings = order.arrange(entries, remote=remote)
+                self.assertEqual(result[0], entries[0])
+                self.assertTrue(warnings)
+                self.assertFalse(any(call.startswith(order.item_path(notebook[2:])) for call in remote.calls))
 
     def test_removed_notebooks_prune_metadata(self):
         _, cached, _ = order.arrange(sections(), remote=Remote())

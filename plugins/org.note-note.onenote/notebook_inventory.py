@@ -10,6 +10,12 @@ import urllib.parse
 
 
 ROOT_PATH = re.compile(r"^/v1\.0/(?:me|users/[^/]+|users\('[^']+'\)|groups/[^/]+|sites/[^/]+)/onenote/")
+# HIGH-RISK WORKAROUND: observed personal-ID shape, not a documented mapping.
+# A personal notebook or section ID is "0-" and its OneDrive item ID: the
+# drive ID, "!", then the item's number or, for items OneDrive created since
+# it changed formats, "s" and a GUID (docs/onenote-section-order.md). Keep
+# this restriction; do not infer support for other notebook ID formats.
+PERSONAL_ID = re.compile(r"0-([0-9A-Fa-f]{16}!(?:[0-9]+|s[0-9A-Fa-f]{32}))\Z")
 SECTION_FIELDS = "id,displayName,lastModifiedDateTime,pagesUrl,self"
 NOTEBOOK_EXPAND = "sections($select=" + SECTION_FIELDS + "),sectionGroups($expand=sections)"
 RECENT_NOTEBOOKS = "/me/onenote/notebooks/getRecentNotebooks(includePersonalNotebooks=true)"

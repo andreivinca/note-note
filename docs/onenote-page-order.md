@@ -44,7 +44,8 @@ drafts and running jobs survive.
 
 The section's file is looked up as `/drives/{owner}/items/{item}`, the owner
 being the item ID's drive prefix, and must be that personal drive's `.one`
-file. `/me/drive/items` reaches only the account's own drive; for a notebook
+file. The item ID is the section ID without its `0-`, in either of OneDrive's
+personal ID shapes ([onenote-section-order.md](onenote-section-order.md)). `/me/drive/items` reaches only the account's own drive; for a notebook
 shared with the account it returned 400.
 
 This integration is a compatibility boundary, not a supported Graph write

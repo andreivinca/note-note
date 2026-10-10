@@ -1224,6 +1224,11 @@ ShellRoot {
     orderingSource.onNotebooks = [{ id: orderingBook, name: "Book", userRole: "Contributor" }]
     check("notebooks shared for editing expose reorder capabilities",
           orderingSource.pageOrderingAvailable(orderingSource.onSections[0]))
+    var guidBook = "0-0000000000000001!s0123456789abcdef0123456789abcdef"
+    orderingSource.onNotebooks = [{ id: guidBook, name: "Book", userRole: "Owner" },
+                                  { id: guidBook.slice(0, -1), name: "Short", userRole: "Owner" }]
+    check("notebooks OneDrive gave a GUID ID are personal and expose reorder capabilities",
+          orderingSource.pageOrderingNotebook(guidBook) && !orderingSource.pageOrderingNotebook(guidBook.slice(0, -1)))
     orderingSource.destroy()
     var creations = []
     var creationHost = {

@@ -17,6 +17,7 @@ import urllib.request
 import uuid
 
 import msgraph
+from notebook_inventory import PERSONAL_ID
 import provider_io
 import ratelimit
 
@@ -24,7 +25,6 @@ NIL = "00000000-0000-0000-0000-000000000000|0"
 # The web client's unknown-root sentinel, resolved by the server on reads.
 UNKNOWN_ROOT = "40c4a0be-3ff1-49c7-b169-ba9d74e0724c|1"
 ENDPOINT = "https://onenote.officeapps.live.com/o/OneNote.ashx"
-PERSONAL_ITEM = re.compile(r"0-([0-9A-Fa-f]{16}![0-9]+)\Z")
 EDITOR_ROLES = ("owner", "contributor")
 MAX_BODY = 16 * 1024 * 1024
 MAX_SECONDS = 120
@@ -44,7 +44,7 @@ def writable_notebook(notebook):
     pageOrderingNotebook() offers drags on the same terms.
     """
     return (str(notebook.get("userRole", "")).lower() in EDITOR_ROLES
-            and bool(PERSONAL_ITEM.fullmatch(str(notebook.get("id", "")))))
+            and bool(PERSONAL_ID.fullmatch(str(notebook.get("id", "")))))
 
 
 def write_granted():
@@ -57,7 +57,7 @@ def write_granted():
 
 
 def personal_item(identifier):
-    match = PERSONAL_ITEM.fullmatch(str(identifier))
+    match = PERSONAL_ID.fullmatch(str(identifier))
     if not match:
         raise WebError("OneNote's revision service reaches only sections of personal notebooks")
     return match[1]

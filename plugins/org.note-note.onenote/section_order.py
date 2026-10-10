@@ -27,6 +27,7 @@ import urllib.parse
 import urllib.request
 
 import msgraph
+from notebook_inventory import PERSONAL_ID
 import provider_io
 import ratelimit
 
@@ -42,9 +43,6 @@ MAX_CACHE_BYTES = 1024 * 1024
 # OneDrive metadata failures must not park the normal OneNote request lane.
 RATE_KEY = "graph-onenote-section-order"
 RATE_WINDOWS = [(60, 30), (3600, 180)]
-# HIGH-RISK WORKAROUND: observed personal-ID shape, not a documented mapping.
-# Keep this restriction; do not infer support for other notebook ID formats.
-ITEM_ID = re.compile(r"0-([0-9A-Fa-f]{16}![0-9]+)\Z")
 # Graph's UTC stamps: fixed width up to the second, then up to seven digits.
 TIMESTAMP = re.compile(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,7}))?Z\Z")
 DOWNLOAD_HOSTS = (".files.1drv.com", ".storage.live.com", ".sharepoint.com",
@@ -261,7 +259,7 @@ class Ordering:
         return ordered
 
     def notebook(self, notebook_id, name):
-        match = ITEM_ID.fullmatch(notebook_id)
+        match = PERSONAL_ID.fullmatch(notebook_id)
         if not match:
             raise OrderUnavailable("custom section order currently supports personal OneDrive notebooks")
         item = self.remote.get(item_path(match[1]) + "?$select=id,name,package")

@@ -179,27 +179,37 @@ class TransportTests(unittest.TestCase):
             web.frame_info(raw, "0123456789ABCDEF!456")
 
     def test_a_section_file_is_found_in_its_owners_drive(self):
-        """A notebook shared with the account is reached by the owner's drive."""
-        item = "0123456789ABCDEF!123"
-        path = "/drives/0123456789ABCDEF/items/0123456789ABCDEF%21123"
-        metadata = {"id": item, "name": "Section.one", "file": {},
-                    "parentReference": {"driveId": "0123456789abcdef", "driveType": "personal"}}
-        info = {"wopiSrc": "https://my.microsoftpersonalcontent.com/personal/0123456789abcdef/_vti_bin/wopi.ashx/files/" + item,
-                "wopiTokenAppAndUser": "private", "wopiTokenAppAndUserTtl": int((time.time() + 60) * 1000)}
-        frame = ("var g_fileInfo = " + json.dumps(info) + ";").encode()
-        preview = {"getUrl": "https://my.microsoftpersonalcontent.com/personal/0123456789abcdef/_layouts/15/embed.aspx?access_token=private"}
-        graph = Mock(side_effect=[(200, metadata), (200, preview)])
-        with patch.object(web.Transport, "request", return_value=(200, frame, {})):
-            session = web.Session.for_section({"id": "0-" + item}, graph)
-        self.assertEqual([call.args[:2] for call in graph.call_args_list],
-                         [("GET", path + "?$select=id,name,file,parentReference"), ("POST", path + "/preview")])
-        self.assertEqual(session.headers["X-AccessToken"], "private")
-        for parent in ({"driveId": "FEDCBA9876543210", "driveType": "personal"},
-                       {"driveId": "0123456789ABCDEF", "driveType": "business"}, None):
-            graph = Mock(return_value=(200, dict(metadata, parentReference=parent)))
-            with self.subTest(parent=parent), self.assertRaises(web.WebError):
-                web.Session.for_section({"id": "0-" + item}, graph)
-            graph.assert_called_once()
+        """A notebook shared with the account is reached by the owner's drive,
+        whether OneDrive numbered the section's file or gave it a GUID ID."""
+        for number in ("123", "s0123456789abcdef0123456789abcdef"):
+            item = "0123456789ABCDEF!" + number
+            path = "/drives/0123456789ABCDEF/items/0123456789ABCDEF%21" + number
+            metadata = {"id": item, "name": "Section.one", "file": {},
+                        "parentReference": {"driveId": "0123456789abcdef", "driveType": "personal"}}
+            info = {"wopiSrc": "https://my.microsoftpersonalcontent.com/personal/0123456789abcdef/_vti_bin/wopi.ashx/files/" + item,
+                    "wopiTokenAppAndUser": "private", "wopiTokenAppAndUserTtl": int((time.time() + 60) * 1000)}
+            frame = ("var g_fileInfo = " + json.dumps(info) + ";").encode()
+            preview = {"getUrl": "https://my.microsoftpersonalcontent.com/personal/0123456789abcdef/_layouts/15/embed.aspx?access_token=private"}
+            graph = Mock(side_effect=[(200, metadata), (200, preview)])
+            with self.subTest(item=item), patch.object(web.Transport, "request", return_value=(200, frame, {})):
+                session = web.Session.for_section({"id": "0-" + item}, graph)
+            self.assertEqual([call.args[:2] for call in graph.call_args_list],
+                             [("GET", path + "?$select=id,name,file,parentReference"), ("POST", path + "/preview")])
+            self.assertEqual(session.headers["X-AccessToken"], "private")
+            for parent in ({"driveId": "FEDCBA9876543210", "driveType": "personal"},
+                           {"driveId": "0123456789ABCDEF", "driveType": "business"}, None):
+                graph = Mock(return_value=(200, dict(metadata, parentReference=parent)))
+                with self.subTest(item=item, parent=parent), self.assertRaises(web.WebError):
+                    web.Session.for_section({"id": "0-" + item}, graph)
+                graph.assert_called_once()
+
+    def test_only_personal_item_ids_reach_the_revision_service(self):
+        graph = Mock()
+        for section in ("1-business-id", "0-0123456789ABCDEF!s0123", "0-0123456789ABCDEF!x" + "0" * 32,
+                        "0-0123456789ABCDE!123", "0-0123456789ABCDEF!12a"):
+            with self.subTest(section=section), self.assertRaises(web.WebError):
+                web.Session.for_section({"id": section}, graph)
+        graph.assert_not_called()
 
     def test_read_discovers_version_and_retries_rejected_key_challenge(self):
         with patch.object(self.session, "request", side_effect=[
@@ -315,8 +325,10 @@ class CommandTests(unittest.TestCase):
 
     def test_revisions_require_a_personal_notebook_the_account_can_edit(self):
         personal = "0-0123456789abcdef!12"
+        guid = "0-0123456789abcdef!s0123456789abcdef0123456789abcdef"
         for role, notebook, allowed in (("Owner", personal, True), ("owner", personal, True),
                                         ("Contributor", personal, True), ("Reader", personal, False),
+                                        ("Owner", guid, True), ("Owner", guid[:-1], False),
                                         ("Owner", "1-business-id", False), (None, personal, False)):
             cache = {"notebooks": [{"id": notebook, "userRole": role}],
                      "sections": [{"id": "s", "notebookId": notebook}]}
