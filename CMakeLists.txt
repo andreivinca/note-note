@@ -94,8 +94,14 @@ if(BUILD_TESTING)
     add_test(NAME standalone COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/standalone_selftest.py $<TARGET_FILE:note-note>
         --harness $<TARGET_FILE:note-note-harness>)
-    add_test(NAME native-transitions COMMAND ${Python3_EXECUTABLE}
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests/transition_selftest.py --standalone)
+    # Each transition suite has a harness and a deadline of its own; the
+    # names are tests/transition_selftest.py's SUITES.
+    foreach(suite core tools lists blocks toolbar diacritics tables keys)
+        add_test(NAME native-transitions-${suite} COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/transition_selftest.py --standalone --suite ${suite})
+        set_tests_properties(native-transitions-${suite} PROPERTIES
+            ENVIRONMENT "NOTE_NOTE_HARNESS=$<TARGET_FILE:note-note-harness>" TIMEOUT 240)
+    endforeach()
     add_test(NAME native-extensions COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/extensions_selftest.py)
     add_test(NAME native-tabstrip COMMAND ${Python3_EXECUTABLE}
@@ -116,8 +122,6 @@ if(BUILD_TESTING)
     endif()
     set_tests_properties(native-extensions PROPERTIES
         ENVIRONMENT "NOTE_NOTE_HARNESS=$<TARGET_FILE:note-note-harness>" TIMEOUT 120)
-    set_tests_properties(native-transitions PROPERTIES
-        ENVIRONMENT "NOTE_NOTE_HARNESS=$<TARGET_FILE:note-note-harness>" TIMEOUT 240)
     set_tests_properties(native-tabstrip PROPERTIES
         ENVIRONMENT "NOTE_NOTE_HARNESS=$<TARGET_FILE:note-note-harness>" TIMEOUT 90)
     set_tests_properties(native-ordering PROPERTIES

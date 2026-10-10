@@ -32,7 +32,7 @@ write completes, using synthetic processes without an account. Run
 `python3 tests/standalone_selftest.py --host` to send the close through
 Hyprland's actual window-close dispatcher on Wayland.
 
-The shared transition suite also runs through the native host. Run it directly
+The shared transition suites also run through the native host. Run them directly
 with `python3 tests/transition_selftest.py --standalone`; the harness
 executable defaults to `build/note-note-harness` and can be selected with
 `NOTE_NOTE_HARNESS`. `tests/standalone_selftest.py` takes the product binary
@@ -72,7 +72,7 @@ required dependencies, runtime crashes, QML errors and malformed results fail
 the run. The offscreen suites use the generic Qt platform theme so desktop
 theme integration cannot prevent document tests from starting.
 
-The transition suite starts a separate Quickshell with a temporary home,
+Each transition suite starts a separate Quickshell with a temporary home,
 configuration, cache and notebooks. `--host` connects to the current Wayland
 compositor to load the host's window types; the host keeps its windows closed.
 It neither restarts nor alters the desktop shell.
@@ -113,7 +113,7 @@ everything in this project was verified:
 
 ```bash
 C="omarchy-shell shell call io.github.andreivinca.note-note"
-$C debugState ""                 # currentPath, loading, dirty/saving, status, words, readOnly, providers
+$C debugState ""                 # currentPath, loading, dirty/saving, status, words, readOnly, conflict, providers
                                  # rows/revision/rowWrites/offset: what the list is doing
 $C selectPath "local:/home/you/Notes/x.md"
 $C editorTool h1                 # any toolbar tool id
@@ -171,9 +171,26 @@ Qt 6 runner — plain `qml` is Qt 5 and will silently load nothing.
 
 ```bash
 python3 tests/test_regressions.py
-python3 tests/transition_selftest.py [--host]
-python3 tests/transition_selftest.py --notes [--standalone]  # note sessions and OneNote mutations only
+python3 tests/transition_selftest.py [--standalone]          # every suite, one harness each
+python3 tests/transition_selftest.py --suite tools           # one suite
+python3 tests/transition_selftest.py --host                  # the core suite, with the Omarchy host
+python3 tests/transition_selftest.py --notes [--standalone]  # note sessions, settings drains and OneNote mutations only
 ```
+
+The transition scenarios come in suites, each run by a harness of its own:
+`core` holds the controllers, providers and the host, and the others group
+the real-key editor scenarios (`tests/EditorKeys.qml`) — `tools` (every
+tool's round trip), `lists`, `blocks`, `toolbar` (menus, panels and the
+calendar), `diacritics`, `tables` and `keys` (links, Enter, paste, Delete
+and conflicts). Every suite has the same nested deadlines: the QML deadline
+(150 s) reports what is unfinished, naming the editor scenario still
+running; the runner stops a harness after 180 s; `tests/selftest.py` and
+CTest allow 240 s. The longest suite takes about a minute. Editor scenarios
+run one per turn of the event loop, and a deadline stops them after the one
+it caught and quits then: a scenario waits on its events in a nested event
+loop, and Quickshell, made to quit under it, starts the shell over instead.
+Their time goes to the converter, which runs a process per conversion; none
+waits on a timer the test could shorten.
 
 The Python cases verify complete UTF-8 reads, explicit failures, atomic write
 failure, missing notes, nonblocking image reads, lossless Notion text chunks,
@@ -183,6 +200,9 @@ The QML cases drive the actual editor, note-session controller, provider
 lifecycle, process runner and local provider. They control callback order to
 check A → B → A loads, stale formatting/paste callbacks, save failures after
 selection changes, failed deletes, and settings changes while writes drain.
+Loads, deletes, save conflicts and settings drains finishing in either order
+leave the editor exactly as writable as the session's state says, and a
+document its provider opened read-only stays read-only.
 OneNote creation cases open editable drafts before any network response,
 append several pages in creation order, retain them during listings, and
 transfer early saves and conversions to the permanent page identity. They
@@ -217,7 +237,7 @@ mouse and keyboard insertion, selection replacement, pending formatting,
 lists, tables, code blocks, saving/reloading, undo/redo and the helperless host.
 They also check cancellation and rejection after the caret, note, region or
 write permission changes.
-Run these cases independently with `python3 tests/transition_selftest.py --diacritics`,
+Run these cases independently with `python3 tests/transition_selftest.py --suite diacritics`,
 or add `--standalone` to use the native harness.
 Run `python3 services/platform/selftest.py` for timezone file, override, alias
 and missing-data checks.
@@ -269,7 +289,10 @@ inside and below the list, then save/reload and undo/redo. Enter splits nested
 and outer items; the native suite also verifies that normalization leaves
 every imported fixture's list margins unchanged.
 Conflict-panel checks use the real editor loader and click every action,
-including replacing an already-open conflict with fresh data.
+including replacing an already-open conflict with fresh data. The review
+outlasts the notices cleared over it, keeping its choices, and reopens with
+its note. Through the whole workspace, in the native harness, it survives
+hiding and summoning the window and a close refused for the conflicted draft.
 Pointer events check link previews in the view bar, directly opening editable
 and read-only links, selecting link text without opening it, and clearing the
 preview when the pointer leaves or the note changes. These checks capture

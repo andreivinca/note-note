@@ -414,8 +414,9 @@ replacement retain the existing stale-note checks and atomic undo behavior.
 
 ## Verification
 
-Run `python3 tests/transition_selftest.py --tools` for focused tool checks,
-`python3 tests/transition_selftest.py` for all real editor cases, and
+Run `python3 tests/transition_selftest.py --suite tools` (or `lists`,
+`blocks`, `toolbar`, `diacritics`, `tables`, `keys`) for focused tool checks,
+`python3 tests/transition_selftest.py` for every suite, and
 `python3 tests/transition_selftest.py --host` for host integration. The runner
 copies the tool directory into a temporary workspace and adds an extra QML
 tool to verify discovery, toolbar clicks, shortcuts and help without modifying

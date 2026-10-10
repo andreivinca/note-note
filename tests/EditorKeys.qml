@@ -12,10 +12,13 @@ import "../services/notes" as Notes
 import "../services/shortcuts" as Shortcuts
 
 // Real keys and the real converter, in the transition runner's isolated
-// offscreen window. The optional desktop host check keeps this window shut.
+// offscreen window. Only the editor suites (`suites`, below) open it; the
+// core suite and the desktop host check keep it shut.
 Window {
   id: test
-  property bool runKeys: true
+  // The suite this run covers (tests/transition_selftest.py, --suite).
+  property string suite: ""
+  readonly property bool runKeys: test.suites.hasOwnProperty(test.suite)
   property var openedLinks: []
   property var statusMessages: []
   property int editSignals: 0
@@ -248,6 +251,50 @@ Window {
     resolved.callback({})
     require(!editor.showingNotice && !editor.readOnly && !mergeSession.dirty && !mergeSession.busy,
             "resolved save did not release the conflict")
+  }
+
+  // The review is the session's own (review finding #13). The workspace
+  // clears notices whenever it opens, also after refusing to close over a
+  // conflicted draft, and accounts and providers clear theirs: none of that
+  // may take the review away and leave its note read-only with no way out.
+  function conflictReviewStays() {
+    var conflict = { id: "kept", parts: [
+      { id: "body:0", field: "body", base: "original", local: "ours", remote: "theirs" }
+    ] }
+    mergeSession.selectPath("test:kept")
+    keys.tryVerify(function() { return !mergeSession.loadingNote }, 3000)
+    editor.restoreDocument({ title: "Groceries", body: "<p>ours</p>", base: "" })
+    mergeSession.onEdited()
+    mergeSession.flushSave()
+    mergeSave().callback({ error: "conflict", conflict: conflict })
+    keys.wait(50)
+    keys.mouseClick(conflictControl("choose-body:0-both"))
+    editor.clearNotice()
+    keys.wait(50)
+    require(conflictControl("mergeConflict").visible && editor.readOnly,
+            "clearing the notices took the review away from its read-only note")
+    var notice = editor.showNotice("Signed in", "Fetching your notes…", "", [])
+    keys.wait(50)
+    require(!conflictControl("mergeConflict").visible && editor.noticeTitle === "Signed in" && editor.readOnly,
+            "a notice did not stand over the review")
+    editor.clearNotice(notice)
+    keys.wait(50)
+    require(conflictControl("mergeConflict").visible && conflictControl("resolveConflict").enabled,
+            "the review did not come back, choices and all, once the notice over it cleared")
+
+    mergeSession.selectPath("test:elsewhere")
+    keys.tryVerify(function() { return !mergeSession.loadingNote }, 3000)
+    require(!editor.showingNotice && !editor.readOnly, "another note opened under the review, or read-only")
+    mergeSession.selectPath("test:kept")
+    keys.wait(50)
+    require(conflictControl("mergeConflict").visible && editor.readOnly && editor.plainText() === "ours",
+            "returning to the conflicted note did not reopen its review")
+    keys.mouseClick(conflictControl("continueEditing"))
+    require(!editor.showingNotice && !editor.readOnly && mergeSession.dirty,
+            "Continue editing did not give the draft back")
+    mergeSession.flushSave()
+    mergeSave().callback({})
+    require(!mergeSession.dirty && !mergeSession.busy, "the draft was not saved after the review")
   }
 
   function require(ok, message) {
@@ -2936,21 +2983,21 @@ Window {
     }
   }
 
-  function diacriticsCases() {
-    return [
-      { name: "diacritics preselect the system timezone's language and preserve language-specific letter cases", run: diacriticsRegions },
-      { name: "diacritics insert through Insert with mouse and keys, formatting, saving and undo", run: diacriticsInsertion },
-      { name: "diacritics offer every language, which the timezone only preselects", run: diacriticsLanguageChoice },
-      { name: "diacritics cancel and reject changed notes, carets, regions and read-only contexts", run: diacriticsGuards },
-      { name: "diacritics retain formatting and code blocks without the native helper", run: diacriticsWithoutHelper }
-    ]
-  }
+  // The suites of real-key scenarios (tests/transition_selftest.py,
+  // --suite), each a list of { name, run } in the order they run. Each has
+  // a harness and a deadline of its own, so none outgrows its time.
+  readonly property var suites: ({
+    tools: function() { return test.toolCases() },
+    lists: function() { return test.listCases() },
+    blocks: function() { return test.blockCases() },
+    toolbar: function() { return test.toolbarCases() },
+    diacritics: function() { return test.diacriticsCases() },
+    tables: function() { return test.tableCases() },
+    keys: function() { return test.keyCases() }
+  })
 
-  function modularToolCases() {
-    if (Platform.env("NOTE_NOTE_TEST_DIACRITICS_ONLY")) {
-      runToolCases(diacriticsCases())
-      return
-    }
+  // Every built-in tool on a word: its saved Markdown, then undo and redo.
+  function toolCases() {
     var table = "| A | B |\n|---|---|\n| one | two |\n"
     var cases = [
       { id: "bold", select: "word", expected: "**word**\n" },
@@ -2963,43 +3010,44 @@ Window {
       { id: "h2", expected: "## word\n" },
       { id: "h3", expected: "### word\n" },
       { id: "p", source: "## word\n", expected: "word\n" },
-      { id: "ul", source: "one\n\ntwo\n", select: "one\u2029two", expected: "- one\n- two\n" },
+      { id: "ul", source: "one\n\ntwo\n", select: "one two", expected: "- one\n- two\n" },
       { id: "ol", expected: "1. word\n" },
       { id: "todo", expected: "- [ ] word\n" },
-      { id: "indent", expected: "\u00a0\u00a0\u00a0\u00a0word\n" },
-      { id: "outdent", source: "\u00a0\u00a0\u00a0\u00a0word\n", expected: "word\n" },
+      { id: "indent", expected: "    word\n" },
+      { id: "outdent", source: "    word\n", expected: "word\n" },
       { id: "quote", expected: "> word\n" },
       { id: "codeblock", expected: "```\nword\n```\n" },
       { id: "codeblock", source: "```\nword\n```\n", expected: "word\n" },
       { id: "rule", expected: "word\n\n---\n" },
       { id: "table", expected: "word\n\n|  |  |\n|---|---|\n|  |  |\n",
-        plainText: "\uFDD0\uFDD0\uFDD0\uFDD0\uFDD1" },
+        plainText: "﷐﷐﷐﷐﷑" },
       { id: "addRow", source: table, cursorText: "one", expected: table + "|  |  |\n" },
       { id: "delRow", source: table, cursorText: "one", expected: "| A | B |\n|---|---|\n" },
       { id: "addCol", source: table, cursorText: "one", expected: "| A | B |  |\n|---|---|---|\n| one | two |  |\n" },
       { id: "delCol", source: table, cursorText: "two", expected: "| A |\n|---|\n| one |\n" }
     ]
-    for (var i = 0; i < cases.length; i++) {
-      try {
-        toolRoundTrip(cases[i])
-        test.checked("modular " + cases[i].id + " saves and undoes", true, "")
-      } catch (error) {
-        test.checked("modular " + cases[i].id + " saves and undoes", false, error.message)
-      }
-    }
-    for (var id of ["todo", "ul", "ol"]) {
-      for (var check of [listToolTargeting, listToolSelections, listToolTables, listToolTyping, listToolBoundaries,
-                         listToolBackspace, listToolShortcut, listToolWithoutHelper]) {
-        try {
-          check(id)
-          test.checked(id + " " + check.name, true, "")
-        } catch (error) {
-          test.checked(id + " " + check.name, false, error.message)
-        }
-      }
-    }
-    var behavior = [
+    return cases.map(function(data) {
+      return { name: "modular " + data.id + " saves and undoes", run: function() { toolRoundTrip(data) } }
+    }).concat([
       { name: "undoing a tool puts the caret back where the tool ran", run: toolUndoCaret },
+      { name: "turning Bold off survives saving, undo, redo and reopening", run: unboldReload }
+    ])
+  }
+
+  function listCases() {
+    var checks = [listToolTargeting, listToolSelections, listToolTables, listToolTyping, listToolBoundaries,
+                  listToolBackspace, listToolShortcut, listToolWithoutHelper]
+    var scenarios = []
+    ;["todo", "ul", "ol"].forEach(function(id) {
+      checks.forEach(function(check) {
+        scenarios.push({ name: id + " " + check.name, run: function() { check(id) } })
+      })
+    })
+    return scenarios
+  }
+
+  function blockCases() {
+    return [
       { name: "Quote starts on empty paragraphs, saves, reloads, toggles and undoes", run: quoteToolEmptyParagraphs },
       { name: "Quote preserves paragraph boundaries in both toggle directions", run: quoteToolParagraphs },
       { name: "Quote transforms the current paragraph, including text typed below tables", run: function() { blockToolTargeting("quote") } },
@@ -3015,9 +3063,12 @@ Window {
       { name: "Code block explains unsupported tables, rules and images without losing content", run: codeBlockUnavailable },
       { name: "Code block toggles selected code off without interpreting literal text or the final paragraph break", run: codeBlockToggleSelection },
       { name: "Code block transforms and toggles without the native helper", run: function() { blockToolWithoutHelper("codeblock") } },
-      { name: "notebook controls and list refreshes remain usable", run: notebookChrome },
-      { name: "note wheel and scrollbar dragging preserve editing and respect content bounds", run: noteScrolling },
-      { name: "Right after inserting blocks leaves an empty line through typing and undo", run: insertedBlockLanding },
+      { name: "Right after inserting blocks leaves an empty line through typing and undo", run: insertedBlockLanding }
+    ]
+  }
+
+  function toolbarCases() {
+    return [
       { name: "text color palette applies, resets, saves, undoes and rejects stale contexts", run: textColorTool },
       { name: "tools enforce provider and document permissions on every entry point", run: toolPermissions },
       { name: "one added file supplies its action, toolbar button, shortcut and help", run: toolDiscovery },
@@ -3025,95 +3076,44 @@ Window {
       { name: "tool-owned link panel preserves context and undo", run: toolLinkPanel },
       { name: "invalid tools are isolated and cannot take app shortcuts", run: toolRegistryValidation },
       { name: "one heading dropdown previews and applies all four styles and respects provider and list restrictions", run: toolMenuAndTyping },
-      { name: "turning Bold off survives saving, undo, redo and reopening", run: unboldReload },
       { name: "narrow toolbars scroll on one row with Insert pinned and menus inside the editor", run: toolbarOverflow },
       { name: "settings rearrange groups and dropdowns without changing actions or documents", run: toolLayout },
       { name: "nested menus support pointer and keyboard navigation and dismiss with editor changes", run: toolSubmenus },
-      ...diacriticsCases(),
       { name: "calendar dates follow locale, leap years and month boundaries", run: calendarDates },
       { name: "current month inserts through its menu, saves and restores with undo", run: function() { calendarInsertion("currentMonth") } },
       { name: "next month inserts through its menu, saves and restores with undo", run: function() { calendarInsertion("nextMonth") } },
       { name: "custom month collects input and inserts ordinary or nested calendars with undo", run: customMonthInsertion },
-      { name: "custom month validates input, cancels and rejects changed editor contexts", run: customMonthPanelGuards },
-      { name: "tables insert and edit inside another table without changing neighbouring cells", run: function() { nestedTableInsertion("table") } },
-      { name: "calendar tables insert and edit inside another table without losing dates", run: function() { nestedTableInsertion("currentMonth") } },
-      { name: "double Enter adds a row to the innermost table and undoes", run: nestedTableEnter },
-      { name: "tables and calendars insert into empty cells and reload without extra content", run: nestedTableEmptyCell },
-      { name: "Backspace after a table removes it, preserving neighbours and undo", run: tableBackspace },
-      { name: "typing below loaded tables preserves the text and caret through keyboard and API undo", run: tableTypingHistory },
-      { name: "table Backspace respects cell boundaries, text selections and read-only notes", run: tableBackspaceBoundaries },
-      { name: "Backspace removes table checkboxes without stray markers and restores their state on undo", run: checkboxBackspace }
+      { name: "custom month validates input, cancels and rejects changed editor contexts", run: customMonthPanelGuards }
     ]
-    runToolCases(behavior)
   }
 
-  function runToolCases(behavior) {
-    for (var j = 0; j < behavior.length; j++) {
-      try {
-        behavior[j].run()
-        test.checked(behavior[j].name, true, "")
-      } catch (error) {
-        test.checked(behavior[j].name, false, error.message)
-      } finally {
-        notebookPreview.visible = false
-        editor.visible = true
-        viewBar.visible = true
-        editor.toolbarLayout = ToolbarSettings.defaults()
-        editor.enabledTools = null
-        editor.plain = false
-        editor.hasNote = true
-        editor.readOnly = false
-        editor.clearNotice()
-      }
-    }
+  function diacriticsCases() {
+    return [
+      { name: "diacritics preselect the system timezone's language and preserve language-specific letter cases", run: diacriticsRegions },
+      { name: "diacritics insert through Insert with mouse and keys, formatting, saving and undo", run: diacriticsInsertion },
+      { name: "diacritics offer every language, which the timezone only preselects", run: diacriticsLanguageChoice },
+      { name: "diacritics cancel and reject changed notes, carets, regions and read-only contexts", run: diacriticsGuards },
+      { name: "diacritics retain formatting and code blocks without the native helper", run: diacriticsWithoutHelper }
+    ]
   }
 
-  function run() {
-    plugins.load({})
-    keys.tryVerify(function() { return editor.tools.ready }, 10000)
-    require(editor.tools.ready && editor.tools.errors.length === 0, "editing tools did not load: " + editor.tools.errors.join("; "))
-    modularToolCases()
-    if (Platform.env("NOTE_NOTE_TEST_TOOLS_ONLY")) {
-      test.finished()
-      return
-    }
-    var linkCases = [
-      { name: "typed URLs track their own destination and undo together", run: typedLinks },
-      { name: "URL detection respects punctuation, code and named links", run: linkBoundaries },
-      { name: "plain-text notes detect URLs without adding markup", run: plainLinks },
-      { name: "URL highlighting leaves cursor movement and editing unchanged", run: linkCaretEditing },
-      { name: "URLs open in wrapped lines and tables without changing Markdown", run: linkPresentation }
-    ]
-    for (var l = 0; l < linkCases.length; l++) {
-      try {
-        linkCases[l].run()
-        test.checked(linkCases[l].name, true, "")
-      } catch (error) {
-        test.checked(linkCases[l].name, false, error.message)
-      }
-    }
-    try {
-      linkInheritance()
-      test.checked("new list items do not inherit a link", true, "")
-    } catch (error) {
-      test.checked("new list items do not inherit a link", false, error.message)
-    }
-    try {
-      links()
-      test.checked("links preview and open without editing or intercepting selection", true, "")
-    } catch (error) {
-      editor.readOnly = false
-      test.checked("links preview and open without editing or intercepting selection", false, error.message)
-    }
+  // Scenarios that run one check over each of its cases, named by the case.
+  function each(cases, check) {
+    return cases.map(function(data) {
+      return { name: data.name, run: function() { check(data) } }
+    })
+  }
+
+  function tableCases() {
     var table = "| a | b |\n|---|---|\n| 1 | 2 |\n"
     var blank = "|  |  |\n"
-    var legacyEmptyCell = "<table><tr><td>a</td><td>b</td></tr><tr><td>1</td><td>\u00a0</td></tr></table><p>After</p>"
-    var cases = [
+    var legacyEmptyCell = "<table><tr><td>a</td><td>b</td></tr><tr><td>1</td><td> </td></tr></table><p>After</p>"
+    var rows = [
       { name: "table ends the note", source: table, expected: table + blank, columns: 2 },
       { name: "paragraph follows the table", source: table + "\nAfter\n",
         expected: table + blank + "\nAfter\n", columns: 2 },
-      { name: "blank landing follows the table", source: table + "\n\u00a0\n",
-        expected: table + blank + "\n\u00a0\n", columns: 2 },
+      { name: "blank landing follows the table", source: table + "\n \n",
+        expected: table + blank + "\n \n", columns: 2 },
       { name: "first of two tables", source: table + "\nBetween\n\n" + table,
         expected: table + blank + "\nBetween\n\n" + table, columns: 2 },
       { name: "second of two tables", source: table + "\nBetween\n\n" + table + "\nAfter\n",
@@ -3142,45 +3142,34 @@ Window {
             + "<tr><td><p>1</p><p>extra</p></td><td><p>2</p></td></tr></table><p>After</p>",
         expected: "Before\n\n| a more | b |\n|---|---|\n| 1 extra | 2 |\n" + blank + "\nAfter\n", columns: 2 }
     ]
-    for (var i = 0; i < cases.length; i++) {
-      try {
-        addRow(cases[i])
-        test.checked(cases[i].name, true, "")
-      } catch (error) {
-        test.checked(cases[i].name, false, error.message)
-      }
-    }
     var ordinary = [
       { name: "last cell of an earlier row", source: table, cellText: "b" },
       { name: "earlier cell of the last row", source: table, cellText: "1" },
       { name: "Shift+Enter stays inside the last cell", source: table, cellText: "2", modifiers: Qt.ShiftModifier }
     ]
-    for (var j = 0; j < ordinary.length; j++) {
-      try {
-        ordinaryEnter(ordinary[j])
-        test.checked(ordinary[j].name, true, "")
-      } catch (error) {
-        test.checked(ordinary[j].name, false, error.message)
-      }
-    }
+    return [
+      { name: "tables insert and edit inside another table without changing neighbouring cells", run: function() { nestedTableInsertion("table") } },
+      { name: "calendar tables insert and edit inside another table without losing dates", run: function() { nestedTableInsertion("currentMonth") } },
+      { name: "double Enter adds a row to the innermost table and undoes", run: nestedTableEnter },
+      { name: "tables and calendars insert into empty cells and reload without extra content", run: nestedTableEmptyCell },
+      { name: "Backspace after a table removes it, preserving neighbours and undo", run: tableBackspace },
+      { name: "typing below loaded tables preserves the text and caret through keyboard and API undo", run: tableTypingHistory },
+      { name: "table Backspace respects cell boundaries, text selections and read-only notes", run: tableBackspaceBoundaries },
+      { name: "Backspace removes table checkboxes without stray markers and restores their state on undo", run: checkboxBackspace }
+    ].concat(each(rows, addRow), each(ordinary, ordinaryEnter))
+  }
+
+  function keyCases() {
+    var code = "```\ncode\n```\n"
     var escapes = [
-      { name: "Right leaves code without a space", source: "```\ncode\n```\n" },
+      { name: "Right leaves code without a space", source: code },
       { name: "Right leaves multiline code without a space", source: "Before\n\n```\nfirst\nsecond\n```\n" },
       { name: "Right leaves empty code without a space", source: "```\n\n```\n" },
       { name: "Right leaves a rule without a space", source: "---\n" },
-      { name: "Enter leaves code without a space", source: "```\ncode\n```\n", key: Qt.Key_Return },
+      { name: "Enter leaves code without a space", source: code, key: Qt.Key_Return },
       { name: "Enter leaves an empty code block from its only line", source: "```\n\n```\n",
         key: Qt.Key_Return, direct: true }
     ]
-    for (var k = 0; k < escapes.length; k++) {
-      try {
-        escapeBlock(escapes[k])
-        test.checked(escapes[k].name, true, "")
-      } catch (error) {
-        test.checked(escapes[k].name, false, error.message)
-      }
-    }
-    var code = "```\ncode\n```\n"
     var pastes = [
       { name: "paste lands as code and the block still leaves", source: code,
         html: "<span style=\"font-family:'Nimbus Sans';\">function void test() {</span>",
@@ -3197,20 +3186,6 @@ Window {
       { name: "paste in prose is Qt's own", source: "para\n", html: "<b>bold</b>", text: "bold",
         expected: "para**bold**\n", caret: 8 }
     ]
-    for (var p = 0; p < pastes.length; p++) {
-      try {
-        pasteIntoCode(pastes[p])
-        test.checked(pastes[p].name, true, "")
-      } catch (error) {
-        test.checked(pastes[p].name, false, error.message)
-      }
-    }
-    try {
-      pasteHistory()
-      test.checked("undoing a paste puts the caret back where it began, and redo replays it", true, "")
-    } catch (error) {
-      test.checked("undoing a paste puts the caret back where it began, and redo replays it", false, error.message)
-    }
     // Notion's and OneNote's tools (their Provider.qml), and the local
     // notebook's: every tool, and pictures.
     var notionTools = ["bold", "italic", "underline", "strikeout", "highlight", "code", "h1", "h2", "h3", "p",
@@ -3236,70 +3211,30 @@ Window {
       { name: "a notebook that stores everything keeps a pasted table", tools: null, canImages: true,
         html: table, text: "Name\tQty\nMilk\t2", expected: "para\n\n| Name | Qty |\n|---|---|\n| Milk | 2 |\n" }
     ]
-    for (var f = 0; f < fits.length; f++) {
-      try {
-        pasteFits(fits[f])
-        test.checked(fits[f].name, true, "")
-      } catch (error) {
-        test.checked(fits[f].name, false, error.message)
-      }
-    }
-    try {
-      retypeCodeLine()
-      test.checked("retyping an emptied code line keeps it code", true, "")
-    } catch (error) {
-      test.checked("retyping an emptied code line keeps it code", false, error.message)
-    }
-    try {
-      releasedAtTop()
-      test.checked("a note released from read-only stays at its top", true, "")
-    } catch (error) {
-      test.checked("a note released from read-only stays at its top", false, error.message)
-    }
-    try {
-      titleDownAndViewState()
-      test.checked("Down from the title lands on the first line; a reload keeps the view", true, "")
-    } catch (error) {
-      test.checked("Down from the title lands on the first line; a reload keeps the view", false, error.message)
-    }
-    try {
-      typeAfterRule()
-      test.checked("typing on a rule creates one undo step", true, "")
-    } catch (error) {
-      test.checked("typing on a rule creates one undo step", false, error.message)
-    }
     var ordered = "1. **one**\n2. two\n"
     var listHtml = "<ol><li><b>one</b></li><li>two</li></ol>"
     var deletions = [
-      { name: "Delete before a blank filler preserves numbering", source: "\u00a0\n\n" + ordered, expected: ordered },
-      { name: "Delete after a blank filler preserves numbering", source: "\u00a0\n\n" + ordered, cursor: 1, expected: ordered },
+      { name: "Delete before a blank filler preserves numbering", source: " \n\n" + ordered, expected: ordered },
+      { name: "Delete after a blank filler preserves numbering", source: " \n\n" + ordered, cursor: 1, expected: ordered },
       { name: "Delete an empty heading preserves list text styles",
         html: '<h1 style="-qt-paragraph-type:empty;"><br /></h1>' + listHtml, expected: ordered },
       { name: "Delete a heading filler preserves list text styles",
-        html: '<h1><span style="font-size:xx-large; font-weight:700;">\u00a0</span></h1>' + listHtml,
+        html: '<h1><span style="font-size:xx-large; font-weight:700;"> </span></h1>' + listHtml,
         cursor: 1, expected: ordered },
       { name: "Delete before a single-item list preserves its marker",
-        source: "\u00a0\n\n1. one\n", expected: "1. one\n" },
+        source: " \n\n1. one\n", expected: "1. one\n" },
       { name: "Delete before a bullet list preserves its markers",
-        source: "\u00a0\n\n- one\n- two\n", expected: "- one\n- two\n" },
+        source: " \n\n- one\n- two\n", expected: "- one\n- two\n" },
       { name: "Delete before a checklist preserves check states",
-        source: "\u00a0\n\n- [x] one\n- [ ] two\n", expected: "- [x] one\n- [ ] two\n" },
+        source: " \n\n- [x] one\n- [ ] two\n", expected: "- [x] one\n- [ ] two\n" },
       { name: "Delete before a numbered list preserves its start",
-        html: '<p>\u00a0</p><ol start="7"><li>one</li><li>two</li></ol>', expected: "7. one\n8. two\n" },
+        html: '<p> </p><ol start="7"><li>one</li><li>two</li></ol>', expected: "7. one\n8. two\n" },
       { name: "Delete before a list preserves nested code",
-        source: "\u00a0\n\n1. Run\n\n   ```\n   command\n   ```\n2. Done\n",
+        source: " \n\n1. Run\n\n   ```\n   command\n   ```\n2. Done\n",
         expected: "1. Run\n\n   ```\n   command\n   ```\n2. Done\n" },
       { name: "keyboard undo replays list formatting without edits", source: "Lead\n\n" + ordered, cursor: 4 },
       { name: "API undo replays list formatting without edits", source: "Lead\n\n" + ordered, cursor: 4, api: true }
     ]
-    for (var d = 0; d < deletions.length; d++) {
-      try {
-        deleteParagraph(deletions[d])
-        test.checked(deletions[d].name, true, "")
-      } catch (error) {
-        test.checked(deletions[d].name, false, error.message)
-      }
-    }
     var shopping = "Before\n\n- Coffee beans\n- Oat milk\n  - the barista one\n- Bread\n\nAfter\n"
     var listEdits = [
       { name: "typing before a nested list preserves spacing", source: shopping, word: "Before" },
@@ -3311,21 +3246,92 @@ Window {
       { name: "typing preserves spacing when a list ends with deeper items",
         source: "Before\n\n- parent\n  - child\n    - grandchild\n\nAfter\n", word: "After" }
     ]
-    for (var l = 0; l < listEdits.length; l++) {
-      try {
-        editNestedList(listEdits[l])
-        test.checked(listEdits[l].name, true, "")
-      } catch (error) {
-        test.checked(listEdits[l].name, false, error.message)
-      }
-    }
+    return [
+      { name: "notebook controls and list refreshes remain usable", run: notebookChrome },
+      { name: "note wheel and scrollbar dragging preserve editing and respect content bounds", run: noteScrolling },
+      { name: "typed URLs track their own destination and undo together", run: typedLinks },
+      { name: "URL detection respects punctuation, code and named links", run: linkBoundaries },
+      { name: "plain-text notes detect URLs without adding markup", run: plainLinks },
+      { name: "URL highlighting leaves cursor movement and editing unchanged", run: linkCaretEditing },
+      { name: "URLs open in wrapped lines and tables without changing Markdown", run: linkPresentation },
+      { name: "new list items do not inherit a link", run: linkInheritance },
+      { name: "links preview and open without editing or intercepting selection", run: links }
+    ].concat(each(escapes, escapeBlock), each(pastes, pasteIntoCode), [
+      { name: "undoing a paste puts the caret back where it began, and redo replays it", run: pasteHistory }
+    ], each(fits, pasteFits), [
+      { name: "retyping an emptied code line keeps it code", run: retypeCodeLine },
+      { name: "a note released from read-only stays at its top", run: releasedAtTop },
+      { name: "Down from the title lands on the first line; a reload keeps the view", run: titleDownAndViewState },
+      { name: "typing on a rule creates one undo step", run: typeAfterRule }
+    ], each(deletions, deleteParagraph), each(listEdits, editNestedList), [
+      { name: "conflict passages and all actions work through the real editor", run: conflictPanel },
+      { name: "a conflict review outlasts the notices cleared over it and reopens with its note", run: conflictReviewStays }
+    ])
+  }
+
+  // Each scenario starts from the editor every other one starts from.
+  function resetEditor() {
+    notebookPreview.visible = false
+    editor.visible = true
+    viewBar.visible = true
+    editor.toolbarLayout = ToolbarSettings.defaults()
+    editor.enabledTools = null
+    editor.plain = false
+    editor.hasNote = true
+    editor.readOnly = false
+    editor.clearNotice()
+  }
+
+  // The suite's scenarios still to run, and what is running: what a
+  // deadline that fires first reports (tests/transitions.qml).
+  property var queue: []
+  property string running: ""
+  property bool stopped: false
+
+  function start() {
+    test.running = "loading the editing tools"
     try {
-      conflictPanel()
-      test.checked("conflict passages and all actions work through the real editor", true, "")
+      plugins.load({})
+      keys.tryVerify(function() { return editor.tools.ready }, 10000)
+      require(editor.tools.ready && editor.tools.errors.length === 0, "editing tools did not load: " + editor.tools.errors.join("; "))
     } catch (error) {
-      test.checked("conflict passages and all actions work through the real editor", false, error.message)
+      test.checked("editing tools load", false, error.message)
+      test.running = ""
+      test.finished()
+      return
     }
-    test.finished()
+    test.queue = test.suites[test.suite]()
+    Qt.callLater(test.runNext)
+  }
+
+  // Ends the run once what is running has returned. Nothing may quit under
+  // it: a scenario waits on its events in a nested event loop, and
+  // Quickshell, made to quit there, starts the shell over instead
+  // (tests/transitions.qml, report).
+  function stop() {
+    test.stopped = true
+  }
+
+  // One scenario for each turn of the event loop, so a run stopped by its
+  // deadline ends with the scenario it is in. The suite used to run as one
+  // call, which kept the harness alive until its very last scenario.
+  function runNext() {
+    if (test.stopped || test.queue.length === 0) {
+      test.running = ""
+      test.finished()
+      return
+    }
+    var scenario = test.queue.shift()
+    test.running = scenario.name
+    try {
+      scenario.run()
+      test.checked(scenario.name, true, "")
+    } catch (error) {
+      test.checked(scenario.name, false, error.message)
+    } finally {
+      test.resetEditor()
+    }
+    Qt.callLater(test.runNext)
   }
 
   Timer {
@@ -3333,7 +3339,7 @@ Window {
     running: true
     onTriggered: {
       if (test.runKeys) {
-        test.run()
+        test.start()
       } else {
         test.finished()
       }

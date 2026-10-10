@@ -1580,6 +1580,7 @@ Item {
       "readOnly": editor.readOnly,
       "words": editor.wordCount,
       "notice": editor.noticeTitle,
+      "conflict": editor.conflictReview !== null,
       "viewFocused": editor.viewHasFocus,
       "dirty": root.dirty,
       "saving": root.saveInFlight(root.currentPath),
@@ -2474,7 +2475,6 @@ Item {
     id: lifecycle
     host: root
     session: session
-    editor: editor
     settings: settingsStore
     onBusyChanged: Qt.callLater(root.finishClose)
   }

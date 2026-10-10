@@ -14,7 +14,19 @@ Item {
   property bool loadingNote: false
   property bool loadFailed: false
   property bool dirty: false
+  // Held by an operation that must not see the note change (lock).
   property bool locked: false
+  // Whether the provider lets the displayed document be written: what its
+  // load said (noteReady). One of the conditions `writable` weighs.
+  property bool documentEditable: false
+  // The merge conflict under review for the open note, or null. The review
+  // is the session's own: it stands in the editor until the user answers it
+  // or the note goes, whatever notices come and go over it meanwhile.
+  property var conflict: null
+  // The editor may change the document: one is shown, loaded, the
+  // provider's to write, held by no operation and under no review.
+  readonly property bool writable: session.currentPath !== "" && !session.loadingNote && !session.loadFailed
+    && !session.locked && session.conflict === null && session.documentEditable
   property string loadingPath: ""
   property var loadHandle: null
   property string loadedVersion: ""
@@ -71,13 +83,33 @@ Item {
     }
   }
 
+  // The editor's read-only flag, from the session's state alone. Every
+  // change to what `writable` weighs ends here; nothing restores a flag
+  // saved from before, which a transition finishing meanwhile made stale.
+  function updateReadOnly() {
+    editor.readOnly = !session.writable
+  }
+
+  // Holds the open note still while an operation that must not see it
+  // change finishes — a delete, a settings change draining its writes.
+  function lock() {
+    session.locked = true
+    session.updateReadOnly()
+  }
+
+  function unlock() {
+    session.locked = false
+    session.updateReadOnly()
+  }
+
   function showConflict(path, conflict) {
     path = session.resolvedPath(path)
     if (path !== session.currentPath || session.saveInFlight(path)) {
       return
     }
     var provider = session.providerFor(path)
-    editor.readOnly = true
+    session.conflict = conflict
+    session.updateReadOnly()
     editor.showConflict({
       conflict: conflict,
       remoteName: provider ? provider.name : "Elsewhere",
@@ -85,26 +117,31 @@ Item {
         if (path !== session.currentPath) {
           return
         }
-        editor.clearNotice()
-        editor.readOnly = false
+        session.closeConflict()
         session.flushSave()
       },
       continueEditing: function() {
         if (path !== session.currentPath) {
           return
         }
-        editor.clearNotice()
-        editor.readOnly = false
+        session.closeConflict()
       },
       resolve: function(choices) {
         if (path !== session.currentPath) {
           return
         }
-        editor.clearNotice()
-        editor.readOnly = false
+        session.closeConflict()
         session.flushSave({ id: conflict.id, choices: choices })
       }
     })
+  }
+
+  // The review goes — answered, or its note put away — and the note is
+  // editable again unless something else holds it.
+  function closeConflict() {
+    session.conflict = null
+    editor.clearConflict()
+    session.updateReadOnly()
   }
 
   function cancelLoad() {
@@ -153,7 +190,7 @@ Item {
     // keeps the caret and the scroll where the reader had them.
     var view = reload ? editor.viewState() : null
     editor.clearNotice()
-    editor.readOnly = true
+    session.closeConflict()
     editor.documentBase = ""
     if (!reload) {
       editor.setNote("", "")
@@ -240,26 +277,27 @@ Item {
   // `reason` is the provider's own words for why the note is read-only, said
   // once on the status line; the view bar keeps showing "Read-only" after it.
   function noteReady(readOnly, reason) {
-    editor.readOnly = readOnly || session.locked
+    session.documentEditable = !readOnly
     session.loadFailed = false
     session.loadingNote = false
     session.loadingPath = ""
     session.dirty = false
+    session.updateReadOnly()
     if (readOnly && reason) {
       session.report(reason)
     }
   }
 
   function noteUnavailable(message) {
-    editor.readOnly = true
     session.loadFailed = true
     session.loadingNote = false
     session.loadingPath = ""
+    session.updateReadOnly()
     session.report(message)
   }
 
   function onEdited() {
-    if (session.loadingNote || session.locked || !session.currentPath || editor.readOnly) {
+    if (!session.writable) {
       return
     }
     session.dirty = true
@@ -329,14 +367,12 @@ Item {
     var recovery = current ? editor.snapshotDocument() : (session.drafts[path] || {}).document
     var recoveryView = current ? session.editingView : (session.drafts[path] || {}).view
     var unsaved = current ? session.dirty || session.saveInFlight(path) : !!session.drafts[path]
-    var readOnly = editor.readOnly
     session.cancelPendingSave(path)
     var deletions = Object.assign({}, session.pendingDeletions)
     deletions[path] = { document: recovery, view: recoveryView, unsaved: unsaved,
                         epoch: session.saveEpoch[path] }
     session.pendingDeletions = deletions
-    session.locked = true
-    editor.readOnly = true
+    session.lock()
     provider.remove(path, function(result) {
       path = session.resolvedPath(path)
       if (!result.pending) {
@@ -345,8 +381,7 @@ Item {
       if (current) {
         session.dirty = !!result.error && unsaved
       }
-      editor.readOnly = readOnly
-      session.locked = false
+      session.unlock()
       callback(result)
     })
   }
@@ -382,7 +417,7 @@ Item {
 
   function flushSave(resolution) {
     var path = session.currentPath
-    if (!session.dirty || !path || editor.readOnly) {
+    if (!session.dirty || !session.writable) {
       return
     }
     var provider = session.providerFor(path)

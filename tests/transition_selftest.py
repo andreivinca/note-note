@@ -1,4 +1,9 @@
-"""Run the actual QML controllers, editor and local provider in an isolated shell."""
+"""Run the actual QML controllers, editor and local provider in an isolated shell.
+
+The scenarios come in suites, each run by a harness of its own within its
+own deadline. Every suite runs by default; --suite runs one.
+"""
+import argparse
 import json
 import os
 from pathlib import Path
@@ -8,10 +13,47 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
+# "core" is the controllers, providers and hosts (tests/transitions.qml); the
+# others are groups of the real-key editor scenarios (tests/EditorKeys.qml).
+SUITES = ("core", "tools", "lists", "blocks", "toolbar", "diacritics", "tables", "keys")
+# Seconds, the same for every suite, and nested: the QML deadline reports
+# what is unfinished, the process limit stops a harness that cannot, and the
+# aggregate runners (tests/selftest.py, CTest) allow more than either. The
+# longest suite takes about a minute on a loaded machine.
+QML_DEADLINE = 150
+PROCESS_LIMIT = 180
+
+
+def arguments():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--suite", choices=SUITES, help="run this suite only")
+    parser.add_argument("--standalone", action="store_true", help="run through the native harness, not Quickshell")
+    parser.add_argument("--host", action="store_true",
+                        help="also compile and instantiate the Omarchy host on Wayland (core suite)")
+    parser.add_argument("--notes", action="store_true", help="only the note-session and OneNote cases (core suite)")
+    parser.add_argument("-v", "--verbose", action="store_true", help="print the end of the harness output")
+    args = parser.parse_args()
+    # The editor suites open their key-event window, which --host would put
+    # on the desktop; --notes narrows the core suite only.
+    if (args.host or args.notes) and args.suite not in (None, "core"):
+        parser.error("--host and --notes run the core suite only")
+    return args
 
 
 def main():
-    standalone = "--standalone" in sys.argv
+    args = arguments()
+    if args.suite:
+        suites = [args.suite]
+    elif args.host or args.notes:
+        suites = ["core"]
+    else:
+        suites = list(SUITES)
+    failures = [suite for suite in suites if run(suite, args)]
+    return int(bool(failures))
+
+
+def run(suite, args):
+    standalone = args.standalone
     with tempfile.TemporaryDirectory(prefix="note-note-transitions-") as directory:
         work = Path(directory)
         (work / "app").symlink_to(ROOT, target_is_directory=True)
@@ -124,9 +166,9 @@ def main():
                    NOTE_NOTE_TEST_TOOLS=(tool_ui / "tools").as_uri(),
                    NOTE_NOTE_TEST_INVALID_TOOLS=invalid_tools.as_uri(),
                    NOTE_NOTE_TEST_PLUGIN_TOOLS=plugin_tools.as_uri(),
-                   NOTE_NOTE_TEST_TOOLS_ONLY="1" if "--tools" in sys.argv or "--diacritics" in sys.argv else "",
-                   NOTE_NOTE_TEST_DIACRITICS_ONLY="1" if "--diacritics" in sys.argv else "",
-                   NOTE_NOTE_TEST_NOTES_ONLY="1" if "--notes" in sys.argv else "",
+                   NOTE_NOTE_TEST_SUITE=suite,
+                   NOTE_NOTE_TEST_DEADLINE_MS=str(QML_DEADLINE * 1000),
+                   NOTE_NOTE_TEST_NOTES_ONLY="1" if args.notes else "",
                    NOTE_NOTE_TEST_STANDALONE="1" if standalone else "",
                    TZ="Europe/Bucharest",
                    QT_QUICK_BACKEND="software",
@@ -136,7 +178,7 @@ def main():
             env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=" + str(work / "no-session-bus")
             env["HOST_XDG_CONFIG_HOME"] = str(work / "config")
             env["HOST_XDG_STATE_HOME"] = str(work / "state")
-        if "--host" in sys.argv:
+        if args.host:
             display = os.environ.get("WAYLAND_DISPLAY")
             if not display:
                 print("FAILED: --host requires a Wayland compositor")
@@ -149,25 +191,25 @@ def main():
                         "--qml", str(work / "shell.qml")] if standalone
                        else ["qs", "-p", str(work / "shell.qml"), "--no-color"])
             proc = subprocess.run(command,
-                                  env=env, capture_output=True, text=True, timeout=210)
+                                  env=env, capture_output=True, text=True, timeout=PROCESS_LIMIT)
         except subprocess.TimeoutExpired as error:
-            print("FAILED:", error)
+            print("FAILED (%s suite):" % suite, error)
             for captured in (error.stdout, error.stderr):
                 if captured:
                     text = captured.decode(errors="replace") if isinstance(captured, bytes) else captured
                     print(text[-8000:])
             return 1
         except (OSError, subprocess.SubprocessError) as error:
-            print("FAILED:", error)
+            print("FAILED (%s suite):" % suite, error)
             return 1
         output = proc.stdout + proc.stderr
         if proc.returncode or "<<<RESULT>>>" not in output:
-            print("FAILED: QML runtime\n" + output[-8000:])
+            print("FAILED (%s suite): QML runtime\n" % suite + output[-8000:])
             return 1
         try:
             results = json.loads(output.split("<<<RESULT>>>")[1].split("<<<END>>>")[0])
         except (ValueError, IndexError) as error:
-            print("FAILED: invalid QML result", error)
+            print("FAILED (%s suite): invalid QML result" % suite, error)
             return 1
         failed = [result for result in results if not result["ok"]]
         for result in failed:
@@ -177,10 +219,10 @@ def main():
                  and "<<<RESULT>>>" not in line]
         if noise:
             failed.append({"name": "unexpected QML errors"})
-            print("FAILED: unexpected QML errors\n" + "\n".join(noise))
-        if failed or "-v" in sys.argv:
+            print("FAILED (%s suite): unexpected QML errors\n" % suite + "\n".join(noise))
+        if failed or args.verbose:
             print(output[-8000:])
-        print("%d/%d transition checks" % (len(results) - len(failed), len(results)))
+        print("%d/%d transition checks in the %s suite" % (len(results) - len(failed), len(results), suite))
         return int(bool(failed))
 
 

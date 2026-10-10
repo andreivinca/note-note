@@ -8,7 +8,10 @@ from pathlib import Path
 import subprocess
 import sys
 
+from transition_selftest import SUITES as TRANSITION_SUITES
+
 ROOT = Path(__file__).resolve().parents[1]
+TRANSITIONS = "tests/transition_selftest.py"
 SUITES = [
     "plugins/org.note-note.onenote/audio_selftest.py",
     "lib/notemerge/selftest.py",
@@ -33,7 +36,8 @@ SUITES = [
     "tests/statusbar_selftest.py",
     "tests/tabstrip_selftest.py",
     "tests/ordering_selftest.py",
-    "tests/transition_selftest.py",
+    # Each transition suite has a harness and a deadline of its own.
+    *[TRANSITIONS + " --suite " + name for name in TRANSITION_SUITES],
     "tests/extensions_selftest.py",
 ]
 
@@ -42,10 +46,12 @@ def main():
     failures = []
     env = dict(os.environ, QT_QPA_PLATFORMTHEME="generic")
     for suite in SUITES:
-        command = [sys.executable, suite]
+        command = [sys.executable, *suite.split()]
         if suite in ("tests/extensions_selftest.py", "tests/tabstrip_selftest.py"):
             command.append("--shell")
-        if suite == "tests/transition_selftest.py" and "--host" in sys.argv:
+        # The host check belongs to the core suite; the editor suites stay
+        # offscreen, as they are without it.
+        if suite == TRANSITIONS + " --suite core" and "--host" in sys.argv:
             command.append("--host")
         try:
             result = subprocess.run(command, cwd=ROOT, env=env, capture_output=True, text=True, timeout=240)

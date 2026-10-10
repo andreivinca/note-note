@@ -29,8 +29,13 @@ ShellRoot {
   }
   property var results: []
   property int processes: 0
-  property bool localFinished: false
-  property bool watchFinished: false
+  // What this run covers (tests/transition_selftest.py, --suite): "core" is
+  // the controllers, providers and hosts here; any other suite is a group
+  // of real-key editor scenarios, which EditorKeys runs by itself.
+  readonly property string suite: Platform.env("NOTE_NOTE_TEST_SUITE")
+  readonly property bool core: test.suite === "core"
+  property bool localFinished: !test.core
+  property bool watchFinished: !test.core
   property bool editorFinished: false
   property var appHost: null
   function hostOrderingCases() {
@@ -102,6 +107,58 @@ ShellRoot {
     check("a retired provider's late answer reports nothing", app.statusText.indexOf("late answer") < 0)
     app.providers = []
     app.rebuildRows()
+  }
+  // Review finding #13 through the workspace itself: hiding it and
+  // summoning it again, and a close it refuses for the conflicted draft,
+  // clear the notices — and leave the session's review over its note. It
+  // starts once the workspace has loaded its providers (hostConflict, below)
+  // and follows the close as it settles, never waiting in a nested event
+  // loop, which is no place to quit from (report).
+  function hostConflictCases() {
+    var app = test.appHost
+    var saves = []
+    var source = { id: "conflicted", name: "Conflicted", markdown: false, hasTitle: false, canDelete: true, sections: [],
+      crumb: function(path) { return "Conflicted" },
+      load: function(path, callback) { callback({ body: path }) },
+      save: function(path, title, body, callback) { saves.push(callback) },
+      remove: function(path, callback) { callback({}) },
+      noteEdited: function(path) {},
+      refresh: function() {},
+      saveState: function() { return {} } }
+    var state = function() { return JSON.parse(app.debugState()) }
+    var reviewed = function() { return state().conflict && state().readOnly && app.dirty }
+    app.providers = [source]
+    app.open("{}")
+    app.selectPath("conflicted:a")
+    app.onEdited()
+    app.flushSave()
+    saves.shift()({ error: "conflict", conflict: { id: "workspace", parts: [] } })
+    check("a save conflict opens its review over the read-only note", reviewed(), app.debugState())
+    app.dismiss()
+    app.open("{}")
+    check("hiding and summoning the workspace leaves the review and the read-only note", reviewed(), app.debugState())
+    var refused = function() {
+      if (app.closing) {
+        return
+      }
+      app.closingChanged.disconnect(refused)
+      // Once the refusal has reopened the workspace.
+      Qt.callLater(function() {
+        check("a close refused for the conflicted draft leaves the review over the note", app.opened && reviewed(),
+              app.debugState())
+        app.selectPath("conflicted:b")
+        check("another note opens editable, out from under the review", !state().conflict && !state().readOnly)
+        app.selectPath("conflicted:a")
+        check("returning to the conflicted note reopens its review", reviewed(), app.debugState())
+        app.requestDelete("conflicted:a")
+        app.confirmDelete()
+        check("deleting the conflicted note puts its review away", !state().conflict && app.currentPath === "")
+        app.providers = []
+        test.processes--
+      })
+    }
+    app.closingChanged.connect(refused)
+    app.requestClose()
   }
   function hostSearchCases() {
     var app = test.appHost
@@ -193,12 +250,30 @@ ShellRoot {
     test.results.push({ name: name, ok: !!ok, detail: detail || "" })
   }
   ProcessRunner { id: runner }
+  // Only in the native harness, where an open workspace shows nothing: the
+  // Omarchy host's windows follow `opened`, onto the desktop --host must
+  // leave alone.
+  Connections {
+    id: hostConflict
+    target: test.appHost
+    enabled: Platform.env("NOTE_NOTE_TEST_STANDALONE") === "1"
+    function onProvidersLoadedChanged() {
+      test.processes++
+      Qt.callLater(test.hostConflictCases)
+    }
+  }
   FileStore { id: files }
   Local.Provider { id: local; notesDir: Platform.env("NOTE_NOTE_TEST_DIR") }
   Tests.EditorKeys {
-    runKeys: !Platform.env("NOTE_NOTE_TEST_HOST")
+    id: editorKeys
+    suite: test.suite
     onChecked: function(name, ok, detail) { test.check(name, ok, detail) }
-    onFinished: test.editorFinished = true
+    onFinished: {
+      test.editorFinished = true
+      if (test.reported) {
+        Qt.callLater(Qt.quit)
+      }
+    }
   }
 
   QtObject {
@@ -289,13 +364,14 @@ ShellRoot {
     property string documentBase: ""
     property bool readOnly: false
     property var conversions: []
-    property var viewProps: null
+    property var conflictReview: null
     function cursorPosition() { return 0 }
     function setCursorPosition(position) {}
     function viewState() { return { cursor: 0, scroll: 0 } }
     function restoreViewState(state) {}
-    function clearNotice() { viewProps = null }
-    function showConflict(props) { viewProps = props }
+    function clearNotice() {}
+    function showConflict(props) { conflictReview = props }
+    function clearConflict() { conflictReview = null }
     function setNote(t, b, shown) {
       title = t
       body = b
@@ -347,16 +423,16 @@ ShellRoot {
     mergeSession.flushSave()
     document.conversions.shift()("ours", true)
     provider.saves.shift().callback({ error: "conflict", conflict: conflictPane.conflict })
-    check("conflict holds the draft and pauses saving", mergeSession.dirty && document.readOnly && !!document.viewProps)
+    check("conflict holds the draft and pauses saving", mergeSession.dirty && document.readOnly && !!document.conflictReview)
     conflictPane.choose("body:0", "both")
     check("conflict view enables save after each choice", conflictPane.complete)
-    document.viewProps.resolve(conflictPane.choices)
+    document.conflictReview.resolve(conflictPane.choices)
     document.conversions.shift()("ours", true)
     var save = provider.saves.shift()
     check("resolution travels with the save snapshot", save.options.resolution.id === "conflict" &&
           save.options.resolution.choices["body:0"] === "both")
     save.callback({})
-    check("resolved save releases the draft", !mergeSession.dirty && !document.readOnly && !document.viewProps)
+    check("resolved save releases the draft", !mergeSession.dirty && !document.readOnly && !document.conflictReview)
 
     document.body = "older edit"
     mergeSession.onEdited()
@@ -366,7 +442,7 @@ ShellRoot {
     mergeSession.onEdited()
     provider.saves.shift().callback({ error: "conflict", conflict: conflictPane.conflict })
     check("older conflict cannot decide text typed during a save", document.body === "newer edit" &&
-          !document.viewProps && !document.readOnly && mergeSession.dirty)
+          !document.conflictReview && !document.readOnly && mergeSession.dirty)
     mergeSession.flushSave()
     document.conversions.shift()("newer edit", true)
     provider.saves.shift().callback({})
@@ -377,18 +453,18 @@ ShellRoot {
     document.conversions.shift()("edit before leaving", true)
     provider.loads.shift()({ body: "another note" })
     provider.saves.shift().callback({ error: "conflict", conflict: conflictPane.conflict })
-    check("late conflict preserves the selected note", document.body === "another note" && !document.viewProps)
+    check("late conflict preserves the selected note", document.body === "another note" && !document.conflictReview)
     mergeSession.selectPath("test:merge")
     check("returning to a conflicted draft opens its review", document.body === "edit before leaving" &&
-          !!document.viewProps && document.readOnly)
+          !!document.conflictReview && document.readOnly)
     mergeSession.cancelPendingSave("test:merge")
     mergeSession.dirty = false
     mergeSession.selectPath("test:recovery")
     provider.loads.shift()({ body: "recovered draft", recovered: true, conflict: conflictPane.conflict })
     check("recovery loads as unsaved and opens its conflict", mergeSession.dirty &&
-          document.body === "recovered draft" && !!document.viewProps)
-    document.viewProps.continueEditing()
-    check("conflict can return to editable draft", !document.readOnly && !document.viewProps)
+          document.body === "recovered draft" && !!document.conflictReview)
+    document.conflictReview.continueEditing()
+    check("conflict can return to editable draft", !document.readOnly && !document.conflictReview)
     mergeSession.cancelPendingSave("test:recovery")
     mergeSession.dirty = false
     mergeSession.currentPath = ""
@@ -497,7 +573,6 @@ ShellRoot {
     id: lifecycle
     host: host
     session: session
-    editor: document
     settings: configFiles
   }
   function lifecycleCases() {
@@ -570,6 +645,84 @@ ShellRoot {
     lifecycle.tryCommit()
     configFiles.callback({ ok: true })
     check("provider retires only after drain and confirmed settings write", host.retired === 1 && session.currentPath === "")
+  }
+
+  // The editor's read-only flag follows the session's own state, whatever
+  // order a load, a delete, a save and a settings change finish in (review
+  // finding #14): nothing puts back a flag saved before another finished.
+  function editabilityCases() {
+    provider.loads = []
+    provider.saves = []
+    provider.deletions = []
+    var removed = null
+    var removeOther = function() {
+      session.remove("test:other", function(result) { removed = result })
+    }
+    session.selectPath("test:A")
+    removeOther()
+    provider.loads.shift()({ body: "A" })
+    provider.deletions.shift()({})
+    check("a note that loads while another is deleted is editable once the delete ends",
+          !removed.error && !session.locked && !document.readOnly)
+    session.selectPath("test:B")
+    removeOther()
+    provider.deletions.shift()({})
+    provider.loads.shift()({ body: "B" })
+    check("a note that loads after a delete ended is editable", !session.locked && !document.readOnly)
+    session.selectPath("test:C")
+    removeOther()
+    provider.loads.shift()({ body: "C" })
+    provider.deletions.shift()({ error: "refused" })
+    check("a note that loads while a delete fails is editable once it has failed",
+          !!removed.error && !session.locked && !document.readOnly)
+    session.selectPath("test:D")
+    removeOther()
+    provider.loads.shift()({ error: "unreachable" })
+    provider.deletions.shift()({})
+    check("a load that fails during a delete leaves its note read-only", session.loadFailed && document.readOnly)
+    session.selectPath("test:E")
+    removeOther()
+    provider.loads.shift()({ body: "E", editable: false, reason: "shared for reading" })
+    provider.deletions.shift()({})
+    check("a read-only document stays read-only when a delete ends", !session.locked && document.readOnly)
+
+    var conflict = { id: "held", parts: [] }
+    session.selectPath("test:F")
+    provider.loads.shift()({ body: "F" })
+    session.onEdited()
+    session.flushSave()
+    document.conversions.shift()("F", true)
+    removeOther()
+    provider.saves.shift().callback({ error: "conflict", conflict: conflict })
+    provider.deletions.shift()({})
+    check("a conflict that lands during a delete keeps its review and its read-only note",
+          !session.locked && document.conflictReview && document.readOnly)
+    document.conflictReview.continueEditing()
+    check("answering the review gives the note back", !document.conflictReview && !document.readOnly && session.dirty)
+    session.flushSave()
+    document.conversions.shift()("F", true)
+    provider.saves.shift().callback({})
+
+    host.config = { providers: { test: { enabled: true, notebookTabs: false } } }
+    var tabs = JSON.stringify({ providers: { test: { enabled: true, notebookTabs: true } } })
+    var settled = null
+    session.selectPath("test:G")
+    lifecycle.apply(tabs, function(result) { settled = result }, configFiles.revision)
+    provider.loads.shift()({ body: "G" })
+    check("a provider-settings change refused during a load leaves the loaded note editable",
+          !!settled.error && !session.locked && !document.readOnly)
+    session.onEdited()
+    lifecycle.apply(tabs, function(result) { settled = result }, configFiles.revision)
+    document.conversions.shift()("G", true)
+    provider.saves.shift().callback({ error: "conflict", conflict: conflict })
+    lifecycle.tryCommit()
+    check("a conflict that lands while settings drain keeps its review and its read-only note",
+          !!settled.error && !session.locked && document.conflictReview && document.readOnly)
+    document.conflictReview.continueEditing()
+    session.flushSave()
+    document.conversions.shift()("G", true)
+    provider.saves.shift().callback({})
+    session.selectPath("")
   }
 
   function pureCases() {
@@ -833,10 +986,24 @@ ShellRoot {
     })
   }
 
+  // Once, then quits — never under an editor scenario still running, which
+  // waits on its events in a nested event loop: Quickshell, made to quit
+  // there, destroys the shell under the scenario and starts it over. The
+  // editor stops after that scenario, and the quit follows its end.
+  property bool reported: false
   function report() {
+    if (test.reported) {
+      return
+    }
+    test.reported = true
+    completion.stop()
     local.watch(false)
     console.log("<<<RESULT>>>" + JSON.stringify(test.results) + "<<<END>>>")
-    Qt.callLater(Qt.quit)
+    if (editorKeys.running) {
+      editorKeys.stop()
+    } else {
+      Qt.callLater(Qt.quit)
+    }
   }
   QtObject {
     id: oneNoteAccount
@@ -1152,7 +1319,7 @@ ShellRoot {
   // only an answer of "signed out" (or a sign-out) is the transition that
   // makes a provider throw its caches away. Each step's answer is chosen by
   // the stub through the account's owner (tests/transition_selftest.py).
-  property bool accountFinished: false
+  property bool accountFinished: !test.core
   property var accountEvents: []
   property var accountSteps: [
     { owner: "signed-in", expect: function() { return probeAccount.signedIn && probeAccount.account === "a" } },
@@ -1771,9 +1938,14 @@ ShellRoot {
   Component.onCompleted: {
     backend.install()
     try {
+      if (!test.core) {
+        return
+      }
       if (Platform.env("NOTE_NOTE_TEST_NOTES_ONLY")) {
         sessionCases()
         mergeCases()
+        lifecycleCases()
+        editabilityCases()
         oneNoteCases()
         oneNoteCreationCases()
         oneNoteDeletionCases()
@@ -1785,6 +1957,7 @@ ShellRoot {
       sessionCases()
       mergeCases()
       lifecycleCases()
+      editabilityCases()
       pureCases()
       oneNoteCases()
       oneNoteCreationCases()
@@ -1806,6 +1979,7 @@ ShellRoot {
     }
   }
   Timer {
+    id: completion
     interval: 250
     repeat: true
     running: true
@@ -1833,17 +2007,19 @@ ShellRoot {
       test.watchFinished = true
     }
   }
+  // The suite's deadline, which the runner sets inside its own limit for
+  // the harness (tests/transition_selftest.py): what is unfinished is
+  // reported, and the harness quits between two editor scenarios.
   Timer {
-    // Real keyboard and pointer coverage takes around 20 seconds. Leave
-    // room for the remaining cases and for slower desktop runs.
-    // The editor suite includes a save/undo/redo round trip for every tool.
-    interval: 180000
+    interval: Number(Platform.env("NOTE_NOTE_TEST_DEADLINE_MS"))
     running: true
     onTriggered: {
       test.check("all asynchronous scenarios finished", false, JSON.stringify({
+        suite: test.suite,
         local: test.localFinished,
         watcher: test.watchFinished,
         editor: test.editorFinished,
+        scenario: editorKeys.running,
         processes: test.processes,
         host: !test.appHost || test.appHost.providersLoaded
       }))

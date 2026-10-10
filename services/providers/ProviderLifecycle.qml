@@ -8,7 +8,6 @@ Item {
   id: lifecycle
   property var host: null
   property var session: null
-  property var editor: null
   property var settings: null
   property bool busy: false
   property var pending: null
@@ -82,12 +81,10 @@ Item {
       callback({ error: "A note operation is still finishing" })
       return
     }
-    var readOnly = editor.readOnly
     lifecycle.busy = true
     if (drain) {
       session.flushSave()
-      session.locked = true
-      editor.readOnly = true
+      session.lock()
     }
     var watched = []
     for (var j = 0; j < changes.length; j++) {
@@ -105,7 +102,7 @@ Item {
     // Last, with the flush under way: the commit follows the drain, which
     // may be settled already.
     lifecycle.pending = { text: text, merged: merged, changes: changes,
-                          callback: callback, readOnly: readOnly, watched: watched, drain: drain,
+                          callback: callback, watched: watched, drain: drain,
                           revision: expectedRevision }
     lifecycle.tryCommit()
   }
@@ -173,10 +170,7 @@ Item {
       pending.watched[w].busyChanged.disconnect(lifecycle.commitWhenDrained)
     }
     if (pending.drain) {
-      session.locked = false
-      if (session.currentPath) {
-        editor.readOnly = pending.readOnly
-      }
+      session.unlock()
     }
     lifecycle.busy = false
     if (host.opened) {

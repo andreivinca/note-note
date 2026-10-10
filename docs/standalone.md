@@ -218,7 +218,7 @@ Providers importing shell modules themselves remain Omarchy-specific.
 ## Verification
 
 `ctest` runs theme resolution and live-update tests, native clipboard tests, application startup and failed-save
-shutdown checks, and the shared editor/controller transition suite through
+shutdown checks, and the shared editor/controller transition suites through
 the native transport. Fixtures have temporary homes, notes and XDG storage;
 they make no requests to real accounts. Portal tests run against a fake
 service on a private D-Bus session; other native suites disconnect from the

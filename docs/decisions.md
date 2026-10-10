@@ -960,6 +960,17 @@ the old instance. A failed note or configuration write keeps the old setup.
 The process runner owns startup, stdin delivery, both output and exit, the
 deadline and exactly-once completion for providers and conversion services.
 
+The editor's read-only flag is derived, never put back: the session weighs
+the load, a failed load, the lock a delete or a settings drain holds, an open
+conflict review and what the provider said of the document
+(`NoteSession.updateReadOnly`). A flag saved before a delete or a drain and
+restored after it was stale whenever a load or a save conflict finished in
+between, and left an editable note read-only, or a note under review
+writable. The conflict review is the session's own and stands in the editor
+apart from notices and provider views. The workspace clears those whenever it
+opens, also after refusing to close over a conflicted draft; clearing the
+review with them left its note read-only with no way to answer it.
+
 Notion text is split into bounded rich-text entries, then recombined by style
 when read back. Outgoing requests are validated before the first mutation;
 unrepresentable documents produce an error instead of losing their tail.

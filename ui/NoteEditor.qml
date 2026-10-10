@@ -160,7 +160,10 @@ Item {
   // the pane's width, set by the window and the splitter, is the line
   // length the user chose.
   readonly property int titleSize: Math.round(root.bodyFontSize * 2)
-  readonly property bool showingNotice: noticeText.length > 0 || customView !== null
+  // A notice or a provider view is up. Either stands over a conflict review.
+  readonly property bool noticeShown: noticeText.length > 0 || customView !== null
+  // Something stands in the note's place: a notice, a view or a review.
+  readonly property bool showingNotice: noticeShown || conflictReview !== null
   readonly property bool showingSkeleton: root.hasNote && root.loading && !root.showingNotice
   // A provider-supplied view under `title`, in the note's place. Loading a
   // Component can finish synchronously, so its properties are supplied
@@ -183,21 +186,35 @@ Item {
     })
     return ++noticeSerial
   }
-  // A merge conflict, shown as the editor's own view: the session says
-  // what the conflict is and what to do about it (services/notes/
-  // NoteSession.qml, showConflict), and owns no view of its own.
+  // A merge conflict under review: what the session says it is and what to
+  // do about it (services/notes/NoteSession.qml, showConflict). The review
+  // is the session's, not a notice: notices and provider views come and go
+  // over it, clearNotice leaves it standing, and only the session closes it.
+  property var conflictReview: null
   Component {
     id: conflictView
     MergeConflict {}
   }
+  // Even the same conflict is reviewed afresh, with none of the earlier
+  // choices.
   function showConflict(props) {
-    return showView("", conflictView, props)
+    conflictReview = null
+    conflictReview = props
+    Qt.callLater(function() {
+      if (conflictLoader.item) {
+        conflictLoader.item.forceActiveFocus()
+      }
+    })
+  }
+  function clearConflict() {
+    conflictReview = null
   }
   function clearView() {
     customView = null
     customViewProps = ({})
   }
-  readonly property bool viewHasFocus: customLoader.item ? customLoader.item.activeFocus : false
+  readonly property bool viewHasFocus: (customLoader.item ? customLoader.item.activeFocus : false)
+    || (conflictLoader.item ? conflictLoader.item.activeFocus : false)
   function showNotice(title, text, code, actions) {
     clearView()
     noticeTitle = title
@@ -1913,8 +1930,25 @@ Item {
         }
       }
 
+      // Kept while a notice covers it, so the choices made so far survive.
+      Loader {
+        id: conflictLoader
+        active: root.conflictReview !== null
+        visible: active && !root.noticeShown
+        width: parent.width
+        height: visible ? parent.height - y : 0
+        sourceComponent: conflictView
+        onLoaded: {
+          for (var k in root.conflictReview) {
+            if (item.hasOwnProperty(k)) {
+              item[k] = root.conflictReview[k]
+            }
+          }
+        }
+      }
+
       Column {
-        visible: root.showingNotice && root.customView === null
+        visible: root.noticeShown && root.customView === null
         width: parent.width
         spacing: Style.spacing.lg
         leftPadding: Style.spacing.md
