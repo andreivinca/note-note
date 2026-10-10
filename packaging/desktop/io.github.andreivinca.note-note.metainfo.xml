@@ -34,6 +34,23 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.0.39" date="2026-10-10">
+      <description>
+        <p>Content Note Note cannot edit is no longer lost when you save. A
+        local note with HTML, nested quotes or a list inside a quote, a
+        Notion page with block colours or code captions, and a OneNote page
+        with superscript or subscript now open read-only and say why.
+        Underlining or bolding part of a word saves. A table or picture
+        pasted into a notebook that cannot store it goes in as plain text.</p>
+        <p>OneNote and Notion saves no longer repeat a paragraph or a page
+        when the service is slow to answer, and a Notion save no longer
+        overwrites changes made in Notion since the page was opened. A
+        conflict review stays open when the window is hidden. Sign-out says
+        when it could not remove a credential. Notes saved with Windows line
+        endings keep their title, and OneNote sections created recently can
+        be reordered again.</p>
+      </description>
+    </release>
     <release version="1.0.38" date="2026-10-08">
       <description>
         <p>Page ordering and blank-line removal work in personal OneNote
