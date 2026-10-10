@@ -27,7 +27,11 @@ Creating notes in a known *order* means creating them in distinct seconds,
 and a birth time cannot be set the way `os.utime` sets an mtime, so this
 sleeps about a second per note it has to order.
 
-The last test belongs to services/markdown/qthtml/imagesize.py rather than to
+The note format (notefile.py) is covered through every script that reads
+it — the listing, the search, the load and the save — for the line endings
+and byte-order mark a note written by another editor may carry.
+
+The image test belongs to services/markdown/qthtml/imagesize.py rather than to
 this directory. It is here because it is the same shape of property — a
 listing that cannot be steered out of the notebook, and an image reference
 that cannot be steered out of the note's folder — and because that module has
@@ -37,6 +41,7 @@ no cheaper place to assert it from.
 """
 import argparse
 import ctypes
+import json
 import os
 import re
 import subprocess
@@ -415,6 +420,79 @@ def test_listing_end_record(directory, verbose):
     return failures
 
 
+def operation(root, **payload):
+    """operations.py's answer, run as the child process Provider.qml runs."""
+    payload["root"] = root
+    done = subprocess.run([sys.executable, os.path.join(HERE, "operations.py")],
+                          input=json.dumps(payload).encode(), stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE, timeout=60)
+    return json.loads(done.stdout.decode())
+
+
+def found(root, query):
+    """The note names search.py answers for `query`, sorted."""
+    done = subprocess.run([sys.executable, os.path.join(HERE, "search.py"), root, query, "1000000"],
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+    return sorted(os.path.basename(line) for line in done.stdout.decode().split("\n") if line)
+
+
+def test_line_endings(directory, verbose):
+    """A note written elsewhere — CRLF line endings, lone CRs, a UTF-8
+    byte-order mark — has the same front matter as one with plain LF. The
+    format read a fence only as `---` before a `\\n`, so such a note was all
+    body: the sidebar previewed "title: Shopping", and the first save wrote
+    a second block above the first, which then stayed in the body for good
+    while outside tools lost the `tags:` they had written."""
+    root = os.path.join(directory, "endings")
+    book = os.path.join(root, "Work")
+    os.makedirs(book)
+    # name: the bytes on disk, the title, the line the app does not own, the
+    # body as loaded (kept exactly), its preview, and the body the editor
+    # hands back on save — its own Markdown, which has LF.
+    notes = {
+        "crlf.md": (b"---\r\ntitle: Shopping\r\ntags: [home]\r\n---\r\nMilk\r\nEggs\r\n",
+                    "Shopping", "tags: [home]", "Milk\r\nEggs\r\n", "Milk", "Milk\nEggs\n"),
+        "cr.md": (b"---\rtitle: Market\rtags: [town]\r---\rFish\rChips\r",
+                  "Market", "tags: [town]", "Fish\rChips\r", "Fish", "Fish\nChips\n"),
+        "bom.md": (b"\xef\xbb\xbf---\ntitle: Bakery\ntags: [bread]\n---\nRye\n",
+                   "Bakery", "tags: [bread]", "Rye\n", "Rye", "Rye\n"),
+    }
+    for name, (raw, _, _, _, _, _) in notes.items():
+        with open(os.path.join(book, name), "wb") as handle:
+            handle.write(raw)
+    failures = 0
+
+    records = [line.split("\t") for line in stream(root, 1000000) if line.startswith("N\t")]
+    heads = {os.path.basename(r[2]): (r[3], r[4]) for r in records}
+    for name, (_, title, _, _, preview, _) in notes.items():
+        failures += check("%s lists its title and its first body line" % name,
+                          heads.get(name) == (title, preview), repr(heads.get(name)))
+
+    failures += check("the search does not read a front matter as body",
+                      found(root, "title") == [] and found(root, "tags") == [],
+                      repr((found(root, "title"), found(root, "tags"))))
+    failures += check("the search still reads the body after one",
+                      found(root, "eggs") == ["crlf.md"] and found(root, "chips") == ["cr.md"])
+
+    for name, (_, title, kept, body, _, edited) in notes.items():
+        path = os.path.join(book, name)
+        loaded = operation(root, action="read", file=path)
+        failures += check("%s loads its title and its body as written" % name,
+                          (loaded.get("title"), loaded.get("body")) == (title, body), repr(loaded))
+        saved = operation(root, action="save", file=path, title=title, body=edited)
+        failures += check("%s saves" % name, saved.get("ok") is True, repr(saved))
+        with open(path, "rb") as handle:
+            written = handle.read().decode("utf-8")
+        failures += check("%s saves one front matter, its own line kept" % name,
+                          written == "---\ntitle: %s\n%s\n---\n%s" % (title, kept, edited), repr(written))
+        again = operation(root, action="read", file=path)
+        failures += check("%s reloads as it was saved" % name,
+                          (again.get("title"), again.get("body")) == (title, edited), repr(again))
+    print("line endings and a byte-order mark")
+    print("  %d checks failed" % failures if failures else "  all green")
+    return failures
+
+
 def test_image_escape(directory, verbose):
     """An `<img src>` that climbs out of the note's folder measures nothing."""
     failures = 0
@@ -459,6 +537,7 @@ def main():
         total += test_image_escape(directory, args.verbose)
         total += test_listing_end_record(directory, args.verbose)
         total += test_exact_names(directory, args.verbose)
+        total += test_line_endings(directory, args.verbose)
 
     if FAILURES:
         print("\n%d failure(s):" % len(FAILURES))

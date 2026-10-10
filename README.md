@@ -86,15 +86,17 @@ Building also requires CMake 3.21+, a C++17 compiler and Qt
 Test when tests are enabled. No Omarchy or Quickshell installation is needed.
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$HOME/.local"
 cmake --build build --parallel
-./build/note-note
+./build/note-note --data-dir .
 ```
 
-Install the binary, desktop entry, icon and resources for your user:
+A build-tree run is given the source tree with `--data-dir .`; an installed
+one finds its resources itself. Install the binary, desktop entry, icon and
+resources for your user, under the prefix configured above:
 
 ```bash
-cmake --install build --prefix "$HOME/.local"
+cmake --install build
 ```
 
 The app then appears as **Note Note** in your launcher. A second launch
@@ -198,6 +200,8 @@ milk, eggs
 ```
 
 A note with no title shows the first words of its body in the list instead.
+Notes written by other editors with Windows (CRLF) line endings or a
+byte-order mark open the same way; saving writes Unix (LF) line endings.
 
 Each source and notebook gets its own tab across the top; click one, or
 `Ctrl+Tab` through them. Use `Alt+1` through `Alt+9` to open the corresponding

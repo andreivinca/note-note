@@ -56,7 +56,9 @@ Window {
   // the caret line's bottom — negative while the table is drawn over it.
   function rowGap() {
     var t = e.getText(0, e.length), i = 0
-    while (i < t.length && t.charCodeAt(i) !== 0xFDD0) i++
+    while (i < t.length && t.charCodeAt(i) !== 0xFDD0) {
+      i++
+    }
     var cur = e.positionToRectangle(e.cursorPosition)
     return e.positionToRectangle(i + 1).y - (cur.y + cur.height)
   }

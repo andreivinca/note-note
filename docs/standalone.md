@@ -69,7 +69,7 @@ plugin; standalone colors come from the system theme independently of
 these default dimensions.
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$HOME/.local"
 cmake --build build --parallel
 ./build/note-note --data-dir .
 ctest --test-dir build --output-on-failure
@@ -84,20 +84,22 @@ continues to build the optional QML module used by the Omarchy plugin.
 ## Install and package
 
 ```bash
-cmake --install build --prefix "$HOME/.local"
+cmake --install build
 ```
 
 CMake installs `bin/note-note`, application resources in
-`share/note-note/`, a freedesktop desktop entry and an SVG icon. Keep the
-resources with the executable: Python helpers and external QML providers
-need real files. Installed executables find their resources relative to
-their binary directory, including when the prefix contains spaces, and by
-the configured prefix when the executable was copied elsewhere; nothing
-about the machine it was built on is compiled in. A build-tree executable
-is given the source tree with `--data-dir .`. The product binary carries no
-test entry: `note-note-harness`, built beside it with `BUILD_TESTING` and
-never installed, runs a QML harness (`--qml`) over the same application
-library without the single-instance activation.
+`share/note-note/`, a freedesktop desktop entry and an SVG icon under the
+prefix configured above. Keep the resources with the executable: Python
+helpers and external QML providers need real files. Installed executables
+find their resources relative to their binary directory, including when the
+prefix contains spaces, and by the configured prefix when the executable was
+copied elsewhere; nothing about the machine it was built on is compiled in.
+That fallback is why the prefix is chosen when configuring rather than with
+`cmake --install --prefix`, which moves the files but not the fallback.
+A build-tree executable is given the source tree with `--data-dir .`. The
+product binary carries no test entry: `note-note-harness`, built beside it
+with `BUILD_TESTING` and never installed, runs a QML harness (`--qml`) over
+the same application library without the single-instance activation.
 
 Distribution packagers can configure `CMAKE_INSTALL_PREFIX=/usr` and stage
 the installation with `DESTDIR`. Package the runtime modules and image

@@ -53,7 +53,12 @@ conditional revision.
 
 The QML fixture sends actual pointer drags through the shared sidebar,
 including future tree/subtree groups, scope boundaries, pending writes,
-Escape cancellation and edge scrolling. The transition suite checks
+Escape cancellation and edge scrolling. It then lists a notes tree it builds
+through the local provider, with notebooks named `constructor`, `toString`
+and `__proto__`: their saved orders are read, rewritten and read back, and an
+unreadable one is reported by name — such names once found the properties
+every JavaScript object has, and a `.order` in one left the sidebar empty.
+The transition suite checks
 optimistic projection, refreshes, callbacks, rollback, legacy compatibility
 and OneNote's permission/hierarchy declarations. The Python suite checks
 native Graph metadata, public identity joins, revision ancestry, conditional
@@ -367,7 +372,7 @@ These suites need no shell, a display, an account or the
 network — every request is answered by a stub:
 
 ```bash
-python3 plugins/org.note-note.local/selftest.py       # the listing's order, statx(2), and its last line
+python3 plugins/org.note-note.local/selftest.py       # the listing's order, statx(2), its last line, line endings
 python3 plugins/org.note-note.notion/selftest.py      # a page is never emptied to save it
 python3 plugins/org.note-note.sticky/selftest.py      # a cut note opens read-only, never as a partial note
 python3 plugins/org.note-note.onenote/selftest.py     # which writes may be run again
@@ -392,6 +397,12 @@ Each pins a bug that shipped, and was found by a review of the Python:
   writes no `.order` from anything else: a cut listing used to look exactly
   like a whole one, and the order file was rewritten without every note it
   had not reached.
+- **`plugins/org.note-note.local/selftest.py`, line endings** — a note with
+  CRLF or lone-CR line endings, or a UTF-8 byte-order mark, lists, searches,
+  loads and saves like one with LF. The format matched a fence only before a
+  line feed, so such a note previewed as `title: …` and its first save wrote
+  a second front matter above the first, dropping the `tags:` an outside
+  editor had written.
 - **`plugins/org.note-note.sticky/selftest.py`** — a note longer than the provider's
   256 KiB ceiling is cut to it and says so (`truncatedAt`), and the
   provider opens such a note read-only with the reason. It used to open

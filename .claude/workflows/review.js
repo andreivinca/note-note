@@ -155,7 +155,9 @@ async function verifyAndFix(findings, tag) {
       return Object.assign({}, f, { votes, survives, verifiedSeverity: sev.includes('high') ? 'high' : sev.includes('medium') ? 'medium' : sev.includes('low') ? 'low' : 'none' })
     }),
     (v, item, i) => {
-      if (!v || !v.survives) { return v }
+      if (!v || !v.survives) {
+        return v
+      }
       return agent(`${CTX}\n\nThis finding was confirmed by adversarial review. Design the PROPER fix per CLAUDE.md (no patch-over; touch more code if that is what the clean shape needs, but stay proportionate and consistent with the repo's own idioms — read the surrounding code and mirror its style, including brace-less single-line ifs since that is the file's convention). Read every line you will change. Do NOT edit any file; return the design only.\n\nFINDING\n${JSON.stringify(Object.assign({}, v, { votes: undefined }), null, 2)}\n\nVERIFIER NOTES\n${JSON.stringify(v.votes.map(x => ({ refuted: x.refuted, reasoning: x.reasoning, corrected_claim: x.corrected_claim })), null, 2)}`, { label: `fix:${tag}${i + 1}`, phase: 'Fix', schema: FIX }).then(fx => Object.assign({}, v, { fixDesign: fx }))
     }
   )

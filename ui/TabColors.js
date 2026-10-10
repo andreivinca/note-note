@@ -64,7 +64,12 @@ function pastelize(hex) {
 
 // Qt.color throws on a malformed name rather than answering invalid.
 function parseColor(hex) {
-  try { var c = Qt.color(String(hex || "")); return c.valid ? c : null } catch (e) { return null }
+  try {
+    var c = Qt.color(String(hex || ""))
+    return c.valid ? c : null
+  } catch (e) {
+    return null
+  }
 }
 
 function baseFor(color, name) { return pastelize(color || fromName(name)) }

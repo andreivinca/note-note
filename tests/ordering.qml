@@ -1,6 +1,8 @@
 import QtQuick
 import QtTest
 import "app/ui" as Ui
+import "app/hosts/standalone" as Native
+import "app/plugins/org.note-note.local" as Local
 import "app/services/notes/ordering.js" as Ordering
 import "app/services/notes/sidebar.js" as Sidebar
 
@@ -25,6 +27,14 @@ Window {
       window.lastIds = ids
       list.model = Ordering.apply(list.model, group, ids)
     }
+  }
+
+  // The local provider runs its scripts and reads NOTE_NOTE_DIR — the notes
+  // tree ordering_selftest.py builds — through the native host's backend.
+  Native.Backend { id: backend }
+  Component {
+    id: localProvider
+    Local.Provider {}
   }
 
   TestCase {
@@ -74,6 +84,101 @@ Window {
       wait(40)
       mouseRelease(window.contentItem, end.x, end.y, Qt.LeftButton)
       wait(160)
+    }
+
+    function settle(condition, message) {
+      for (var waited = 0; waited < 10000 && !condition(); waited += 50) {
+        wait(50)
+      }
+      check(condition(), message)
+    }
+
+    function listed(provider) {
+      provider.refresh()
+      settle(function() {
+        return !provider.listing
+      }, "the local notes are listed")
+    }
+
+    function notesIn(provider, key) {
+      return provider.notes.filter(function(note) {
+        return note.key === key
+      })
+    }
+
+    function namesIn(provider, key) {
+      return notesIn(provider, key).map(function(note) {
+        return provider.baseName(note.file)
+      }).join(",")
+    }
+
+    // A local notebook's name is the user's own: one called `constructor`,
+    // `toString` or `__proto__` is a name like any other, not a property
+    // every object already has. Looked up in plain objects, such a notebook
+    // was refused its order, ranked as if the saved order named it, or —
+    // given a .order file — threw and left the whole sidebar empty.
+    function localNames() {
+      backend.install()
+      var provider = localProvider.createObject(window)
+      var said = []
+      provider.statusRequested.connect(function(text) {
+        said.push(text)
+      })
+      var names = ["constructor", "toString", "__proto__"]
+      check(names.every(function(name) {
+        return provider.orderWritable(name)
+      }), "before any listing, no notebook name is taken for an unreadable one")
+
+      listed(provider)
+      check(provider.notebooks.map(function(book) {
+        return book.key
+      }).join(",") === "toString,Work,Alpha,__proto__,constructor",
+            "the saved notebook order ranks exactly the notebooks it names")
+      check(namesIn(provider, "constructor") === "second.md,first.md"
+            && namesIn(provider, "__proto__") === "second.md,first.md",
+            "a notebook's saved note order is read whatever the notebook is called")
+      check(names.every(function(name) {
+        return provider.orderWritable(name)
+      }), "a whole listing lets every notebook's order be written")
+      check(provider.sections.every(function(section) {
+        return section.rows.every(function(row) {
+          return row.kind !== "note" || row.reorder !== null
+        })
+      }), "every listed note can be dragged")
+
+      var answer = null
+      var paths = notesIn(provider, "constructor").map(function(note) {
+        return note.path
+      }).reverse()
+      provider.reorder("constructor", paths, function(result) {
+        answer = result
+      })
+      settle(function() {
+        return answer !== null
+      }, "a reorder answers")
+      check(!answer.error && namesIn(provider, "constructor") === "first.md,second.md",
+            "a notebook named constructor saves a new order: " + JSON.stringify(answer))
+      provider.persistOrder("toString")
+      settle(function() {
+        return !provider.writeBusy
+      }, "the order writes finish")
+      check(said.length === 0, "no order write is refused or fails: " + said.join("|"))
+      var reread = localProvider.createObject(window)
+      listed(reread)
+      check(namesIn(reread, "constructor") === "first.md,second.md", "the new order is read back from disk")
+      reread.destroy()
+
+      // An unreadable notebook keeps its order and says why, by its name.
+      provider.loadList(["D\tconstructor", "X\tconstructor\tPermission denied",
+                         "D\t__proto__", "X\t__proto__\tPermission denied",
+                         "D\ttoString", "N\ttoString\t/notes/toString/only.md\tonly\t\t1\t1",
+                         "E\tcomplete"].join("\n") + "\n")
+      check(!provider.orderWritable("constructor") && !provider.orderWritable("__proto__")
+            && provider.orderWritable("toString"),
+            "only the notebooks the listing could not read keep their order")
+      check(said.join("|") === "Note Note: constructor — Permission denied|Note Note: __proto__ — Permission denied",
+            "each unreadable notebook is reported by its name: " + said.join("|"))
+      provider.destroy()
     }
 
     function flat() {
@@ -189,6 +294,8 @@ Window {
       list.filtering = true
       wait(100)
       check(list.visualRows().length === 0, "filtered results cannot be reordered")
+
+      localNames()
       console.log("<<<ORDERING_DONE>>>")
       Qt.exit(0)
     }

@@ -637,3 +637,6 @@ or an explicit error — never a partial note. The local provider's
 `operations.py read` splits that text the one way its format is split
 (`plugins/org.note-note.local/notefile.py`, which the listing, the search and the save
 share): a front-matter line the app does not own is kept and written back.
+A note with CRLF or lone-CR line endings, or a leading UTF-8 byte-order
+mark, reads exactly like one with LF; a save writes the app's own format,
+LF without a mark.

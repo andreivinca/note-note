@@ -261,7 +261,7 @@ Item {
 
   // Saved order first, then anything unlisted in the given (birth-time) order.
   function applyOrder(entries, keyOf, savedNames) {
-    var rank = {}
+    var rank = Object.create(null)
     for (var i = 0; i < savedNames.length; i++) {
       if (savedNames[i]) {
         rank[savedNames[i]] = i
@@ -291,7 +291,11 @@ Item {
   // would drop every note the list did not reach. A notebook the lister
   // could not read is unknown, not empty, and its order is kept too.
   property bool listingComplete: true
-  property var unreadableNotebooks: ({})
+  // Keyed by notebook name, like the maps loadList and applyOrder build, so
+  // none of them has a prototype: the names are the user's, and a notebook
+  // called `constructor`, `toString` or `__proto__` must not find a property
+  // every object already has.
+  property var unreadableNotebooks: Object.create(null)
 
   function orderWritable(key) {
     return root.listingComplete && !root.unreadableNotebooks[key]
@@ -317,8 +321,8 @@ Item {
 
   // Parses the listing script's output.
   function loadList(raw) {
-    var lines = raw.split("\n"), dirs = [], orders = {}, bookOrder = [], entries = []
-    var end = null, unreadable = {}
+    var lines = raw.split("\n"), dirs = [], orders = Object.create(null), bookOrder = [], entries = []
+    var end = null, unreadable = Object.create(null)
     for (var i = 0; i < lines.length; i++) {
       var p = lines[i].split("\t").map(root.unescaped)
       if (p[0] === "D") {
