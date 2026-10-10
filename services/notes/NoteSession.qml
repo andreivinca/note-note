@@ -34,6 +34,13 @@ Item {
   property var editingView: null
   property int noteLoadSeq: 0
   property var saveEpoch: ({})
+  // What each note's provider is known to hold, in the editor's own form
+  // (snapshotDocument): path -> { title, body }. A save of exactly that
+  // changes nothing and is not sent — a space typed and taken back costs no
+  // request, and OneNote's are rationed. Known from a note shown as loaded
+  // and from a save landing; forgotten as a save starts, since nobody knows
+  // what the provider holds until it lands, nor after it fails.
+  property var stored: ({})
   property var savesPending: ({})
   // Replaced wholesale, never mutated (setDraft), like savesPending:
   // unsavedTitles follows them.
@@ -67,9 +74,12 @@ Item {
   // Callbacks accepted under the old identity still settle the same draft.
   function replacePath(previous, next, view) {
     session.pathAliases[previous] = next
-    if (previous in session.saveEpoch) {
-      session.saveEpoch[next] = session.saveEpoch[previous]
-      delete session.saveEpoch[previous]
+    var maps = [session.saveEpoch, session.stored]
+    for (var i = 0; i < maps.length; i++) {
+      if (previous in maps[i]) {
+        maps[i][next] = maps[i][previous]
+        delete maps[i][previous]
+      }
     }
     var drafts = Object.assign({}, session.drafts)
     if (previous in drafts) {
@@ -238,6 +248,7 @@ Item {
       session.noteUnavailable("The notebook is not available")
       return
     }
+    delete session.stored[path]
     var handle = provider.load(path, function(result) {
       if (!session.ownsLoad(path, generation)) {
         return
@@ -279,8 +290,11 @@ Item {
               }
             })
           }
-        } else if (reload) {
-          session.report(provider.name + ": reloaded, changed elsewhere")
+        } else {
+          session.stored[session.resolvedPath(path)] = editor.snapshotDocument()
+          if (reload) {
+            session.report(provider.name + ": reloaded, changed elsewhere")
+          }
         }
       })
     })
@@ -343,6 +357,13 @@ Item {
 
   function saveInFlight(path) {
     return (session.savesPending[session.resolvedPath(path)] || 0) > 0
+  }
+
+  // Whether `document` (snapshotDocument) is what the provider of `path`
+  // already holds.
+  function isStored(path, document) {
+    var known = session.stored[path]
+    return !!known && known.title === document.title && known.body === document.body
   }
 
   // `draft` is { document, view, epoch, error, conflict }; null drops it.
@@ -455,9 +476,15 @@ Item {
     if (!provider) {
       return
     }
+    var document = editor.snapshotDocument()
+    if (session.isStored(path, document)) {
+      session.dirty = false
+      return
+    }
+    delete session.stored[path]
     var epoch = (session.saveEpoch[path] || 0) + 1
     session.saveEpoch[path] = epoch
-    var draft = { document: editor.snapshotDocument(), view: session.editingView, epoch: epoch, error: "" }
+    var draft = { document: document, view: session.editingView, epoch: epoch, error: "" }
     session.setDraft(path, draft)
     session.dirty = false
     session.loadedVersion = ""
@@ -493,6 +520,10 @@ Item {
         }
       } else {
         session.setDraft(path, null)
+        // A merge leaves the provider holding more than this draft.
+        if (!result.merged) {
+          session.stored[path] = draft.document
+        }
         if (path === session.currentPath && !session.dirty && result.version) {
           session.loadedVersion = result.version
         }

@@ -297,6 +297,68 @@ Window {
     require(!mergeSession.dirty && !mergeSession.busy, "the draft was not saved after the review")
   }
 
+  QtObject {
+    id: quietProvider
+    property var saves: []
+    function load(path, callback) {
+      callback({ title: "Groceries", body: "Milk and **bread**\n\n- [ ] eggs\n" })
+    }
+    function save(path, title, body, callback, options) {
+      saves.push(callback)
+    }
+    function noteEdited(path) {}
+  }
+  Notes.NoteSession {
+    id: quietSession
+    editor: editor
+    providerFor: function(path) { return quietProvider }
+    versionFor: function(path) { return "1" }
+    report: function(message) {}
+  }
+
+  // Asks the session to save what the keys left, as the host does after an
+  // edit, and lands the save if one starts; answers whether one did.
+  function quietSave() {
+    quietSession.onEdited()
+    quietSession.flushSave()
+    if (!quietSession.busy) {
+      return false
+    }
+    keys.tryVerify(function() { return quietProvider.saves.length > 0 }, 3000)
+    require(quietProvider.saves.length > 0, "a save started and never reached the provider")
+    quietProvider.saves.shift()({})
+    return true
+  }
+
+  // Typing and taking it back sends nothing (NoteSession.stored): the
+  // editor's document is exactly the one its provider holds — as loaded, or
+  // as the last save left it. OneNote's requests are rationed.
+  function unchangedNoteUnsent() {
+    quietProvider.saves = []
+    quietSession.selectPath("test:quiet")
+    keys.tryVerify(function() { return !quietSession.loadingNote }, 3000)
+    editor.focusEditor()
+    ;[4, 11].forEach(function(caret) {
+      editor.setCursorPosition(caret)
+      keys.keyClick(Qt.Key_Space)
+      keys.keyClick(Qt.Key_Backspace)
+    })
+    editor.focusTitle()
+    keys.keyClick(Qt.Key_S)
+    keys.keyClick(Qt.Key_Backspace)
+    require(!quietSave() && !quietSession.dirty && !quietSession.busy,
+            "a note typed into and taken back to its loaded text was saved")
+    editor.focusEditor()
+    keys.keyClick(Qt.Key_Space)
+    require(quietSave(), "a real edit was not saved")
+    keys.keyClick(Qt.Key_X)
+    keys.keyClick(Qt.Key_Backspace)
+    require(!quietSave() && !quietSession.dirty, "a note taken back to its last save was saved again")
+    keys.keyClick(Qt.Key_Backspace)
+    require(quietSave(), "taking back a saved edit was not saved")
+    quietSession.selectPath("")
+  }
+
   function require(ok, message) {
     if (!ok) {
       throw new Error(message)
@@ -3265,7 +3327,8 @@ Window {
       { name: "typing on a rule creates one undo step", run: typeAfterRule }
     ], each(deletions, deleteParagraph), each(listEdits, editNestedList), [
       { name: "conflict passages and all actions work through the real editor", run: conflictPanel },
-      { name: "a conflict review outlasts the notices cleared over it and reopens with its note", run: conflictReviewStays }
+      { name: "a conflict review outlasts the notices cleared over it and reopens with its note", run: conflictReviewStays },
+      { name: "typing taken back to what the provider holds sends no save", run: unchangedNoteUnsent }
     ])
   }
 

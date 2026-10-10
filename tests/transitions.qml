@@ -130,6 +130,7 @@ ShellRoot {
     app.providers = [source]
     app.open("{}")
     app.selectPath("conflicted:a")
+    descendant(app, "noteEditor").restoreDocument({ title: "", body: "conflicted:a, edited", base: "" })
     app.onEdited()
     app.flushSave()
     saves.shift()({ error: "conflict", conflict: { id: "workspace", parts: [] } })
@@ -248,6 +249,20 @@ ShellRoot {
   }
   function check(name, ok, detail) {
     test.results.push({ name: name, ok: !!ok, detail: detail || "" })
+  }
+  // The item under `item` whose objectName is `name`, or null.
+  function descendant(item, name) {
+    for (var i = 0; i < item.children.length; i++) {
+      var child = item.children[i]
+      if (child.objectName === name) {
+        return child
+      }
+      var found = descendant(child, name)
+      if (found) {
+        return found
+      }
+    }
+    return null
   }
   ProcessRunner { id: runner }
   // Only in the native harness, where an open workspace shows nothing: the
@@ -638,6 +653,7 @@ ShellRoot {
     check("presentation change updates the existing provider", result && result.ok && configured.notebookTabs && host.retired === 0)
     check("presentation change keeps the current note", session.currentPath === "test:B" && document.body === "settings draft")
 
+    document.body = "settings draft, edited"
     session.onEdited()
     var conversions = document.conversions.length
     var appearanceConfig = { providers: host.config.providers, appearance: { theme: "example.colors/dark" } }
@@ -647,7 +663,7 @@ ShellRoot {
     configFiles.callback({ ok: true })
     check("appearance settings preserve dirty document state", result.ok && session.dirty && host.retired === 0)
     session.flushSave()
-    document.conversions.shift()("settings draft", true)
+    document.conversions.shift()("settings draft, edited", true)
     provider.saves.shift().callback({})
 
     lifecycle.apply(JSON.stringify({ providers: { test: { enabled: false } } }), function(r) { result = r }, configFiles.revision)
@@ -728,9 +744,10 @@ ShellRoot {
     var conflict = { id: "held", parts: [] }
     session.selectPath("test:F")
     provider.loads.shift()({ body: "F" })
+    document.body = "F edited"
     session.onEdited()
     session.flushSave()
-    document.conversions.shift()("F", true)
+    document.conversions.shift()("F edited", true)
     removeOther()
     provider.saves.shift().callback({ error: "conflict", conflict: conflict })
     provider.deletions.shift()({})
@@ -739,7 +756,7 @@ ShellRoot {
     document.conflictReview.continueEditing()
     check("answering the review gives the note back", !document.conflictReview && !document.readOnly && session.dirty)
     session.flushSave()
-    document.conversions.shift()("F", true)
+    document.conversions.shift()("F edited", true)
     provider.saves.shift().callback({})
 
     host.config = { providers: { test: { enabled: true, notebookTabs: false } } }
@@ -750,16 +767,17 @@ ShellRoot {
     provider.loads.shift()({ body: "G" })
     check("a provider-settings change refused during a load leaves the loaded note editable",
           !!settled.error && !session.locked && !document.readOnly)
+    document.body = "G edited"
     session.onEdited()
     lifecycle.apply(tabs, function(result) { settled = result }, configFiles.revision)
-    document.conversions.shift()("G", true)
+    document.conversions.shift()("G edited", true)
     provider.saves.shift().callback({ error: "conflict", conflict: conflict })
     lifecycle.tryCommit()
     check("a conflict that lands while settings drain keeps its review and its read-only note",
           !!settled.error && !session.locked && document.conflictReview && document.readOnly)
     document.conflictReview.continueEditing()
     session.flushSave()
-    document.conversions.shift()("G", true)
+    document.conversions.shift()("G edited", true)
     provider.saves.shift().callback({})
     session.selectPath("")
   }
