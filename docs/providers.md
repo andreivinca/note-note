@@ -526,7 +526,11 @@ to `RESTART`; creates, uploads, and partial-write handlers explicitly use
 `NEVER`. A 503 records the account cooldown under every policy. A 429 is an
 explicit rejection and can be retried under any policy. Do not turn an
 uncertain mutation into a `throttled` or `transient` job result unless a new
-run can reconcile its outcome before writing again.
+run can reconcile its outcome before writing again. A job of several writes
+records each accepted one before sending the next: OneNote commits the body
+to its merge journal (`accepted_fields=("body",)`) before the title request,
+so a title throttled into a rerun finishes the title, and the rerun merges
+against the body it wrote rather than sending it again.
 
 ### Rate keys
 

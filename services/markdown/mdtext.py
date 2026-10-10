@@ -33,7 +33,13 @@ TABLE_DELIMITER = re.compile(r"^(\s*:?)(-)(?=-*:?\s*(?:\|\s*:?-+:?\s*)+\|?\s*$)"
 LINK_DEFINITION = re.compile(r"^(\s*)(\[)(?=[^\]\n]*\]:)")
 STRICT = re.compile(r"([\\*_`~=\[\]<>|])")
 UNESCAPED_PIPE = re.compile(r"(?<!\\)((?:\\\\)*)\|")
-LINK_DESTINATION_MARKERS = re.compile(r"([\\()])")
+LINK_DESTINATION_MARKERS = re.compile(r"([\\()]|^<)")
+# What ends a bare destination or breaks its line: ASCII whitespace and
+# control characters.
+LINK_DESTINATION_BREAKS = re.compile(r"[\x00-\x20\x7f]")
+# An entity reference the parser would decode in a destination (`&copy;`),
+# exactly as its own pattern (mistune.util._charref_re) finds one.
+LINK_DESTINATION_ENTITY = re.compile(r"&(?=#[0-9]{1,7};|#[xX][0-9a-fA-F]+;|[^\t\n\f <&#;]{1,32};)")
 LEADING_WHITESPACE = re.compile(r"^[ \t]+")
 
 
@@ -121,8 +127,15 @@ def escape_link_destination(url):
     Escaping only a closing parenthesis leaves an unmatched opening one,
     so Markdown reads the entire link as text. Backslashes must be escaped
     too, or they can consume the escape intended for a following delimiter.
+    A leading `<` would open the bracketed form, and an entity reference
+    would be decoded. A space or a control character would end the
+    destination, so it is written percent-encoded, which is what the parser
+    turns it into anyway: the bracketed form (`<a b>`) is no alternative,
+    since the parser refuses a backslash or bracket inside one.
     """
-    return LINK_DESTINATION_MARKERS.sub(r"\\\1", url)
+    url = LINK_DESTINATION_ENTITY.sub("&amp;", url)
+    url = LINK_DESTINATION_MARKERS.sub(r"\\\1", url)
+    return LINK_DESTINATION_BREAKS.sub(lambda match: "%%%02X" % ord(match.group(0)), url)
 
 
 def code_span(text):

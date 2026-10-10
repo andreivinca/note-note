@@ -2,7 +2,8 @@
 writes (GitHub-style task lists, tables, `*italic*`, `_underline_`).
 
 Reading, only what round-trips is converted; anything else marks the page
-as not editable (see convert()["editable"]) so the UI opens it read-only.
+as not editable (html_to_markdown()["editable"], with a "reason" where one
+is given) so the UI opens it read-only.
 Writing, four Markdown constructs are rendered as looks the reader has no
 reading for — a quote, a code block, inline code, a rule (UNKEPT_KINDS) —
 so the provider does not offer their tools, and a save holding one is
@@ -35,6 +36,7 @@ TAG_PREFIX = {
 PREFIX_TAG = {v.strip(): k for k, v in TAG_PREFIX.items()}
 BLOCK_TAGS = {"p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "table", "tr", "td", "th", "br", "cite", "body", "html", "head", "title"}
 LOSSY_TAGS = {"object", "iframe", "video", "audio", "math", "svg"}
+SHIFTED_REASON = "This page has superscript or subscript text, which cannot be edited here, so it is read-only."
 # OneNote's own paragraphs are written with zero margins; without a style it
 # applies 5.5pt above and below, which reads as extra spacing on every line.
 P_STYLE = ' style="margin-top:0pt;margin-bottom:0pt"'
@@ -87,6 +89,8 @@ class Converter:
         # per visual line and Markdown would otherwise flow them together.
         self.last = None
         self.editable = True
+        # Why the page is not editable, in the user's words, when it says.
+        self.reason = ""
         self.table_depth = 0
         # [{"src", "alt", "width", "local"}] — what the page's images are and
         # where each one was cached, so a save can hand the same resource back.
@@ -96,6 +100,11 @@ class Converter:
         self.audio_path_for = audio_path_for or (lambda src, title: None)
         self.audio_identity_for = audio_identity_for
         self.recordings = []
+
+    def read_only(self, reason=""):
+        """The page holds something a save could not write back."""
+        self.editable = False
+        self.reason = self.reason or reason
 
     def recording(self, node):
         """Phone recordings are often 3GP objects with a video MIME type."""
@@ -119,7 +128,7 @@ class Converter:
             local, identifier = self.audio_identity_for(source or "", local, title, identifier)
         self.recordings.append({"src": source or "", "title": title, "local": local, "mime": mime, "id": identifier})
         if not local:
-            self.editable = False
+            self.read_only()
         return audio.markup(local, title, identifier)
 
     # -- inline --------------------------------------------------------
@@ -128,6 +137,11 @@ class Converter:
         for c in node.children:
             if c.tag is None:
                 out.append(escape_text(re.sub(r"\s+", " ", c.text)))
+            elif _shifted(c):
+                # The editor has no superscript or subscript to write back:
+                # the text is shown, and the page is left as it is.
+                self.read_only(SHIFTED_REASON)
+                out.append(self.inline(c))
             elif c.tag in ("b", "strong"):
                 inner = self.inline(c).strip()
                 out.append("**%s**" % inner if inner else "")
@@ -138,9 +152,10 @@ class Converter:
                 inner = self.inline(c).strip()
                 out.append("_%s_" % inner if inner else "")
             elif c.tag == "a":
-                inner = self.inline(c).strip() or c.attrs.get("href", "")
+                # A link without text of its own shows its destination.
                 href = c.attrs.get("href", "")
-                out.append("[%s](%s)" % (inner, href) if href else inner)
+                label = self.inline(c).strip() or escape_text(re.sub(r"\s+", " ", href))
+                out.append("[%s](%s)" % (label, escape_link_destination(href)) if href else label)
             elif c.tag == "br":
                 out.append("\n")
             elif c.tag == "img":
@@ -165,16 +180,16 @@ class Converter:
                     out.append("![%s](%s)%s" % (escape_image_alt(alt), escape_link_destination(local), size))
                 else:
                     # Not shown means not held: editing could only lose it.
-                    self.editable = False
+                    self.read_only()
                     out.append("[image: %s]" % (alt or "not shown"))
             elif c.tag in LOSSY_TAGS:
                 recording = self.recording(c) if c.tag in ("object", "audio") else None
                 if recording is not None:
                     out.append(recording)
                 else:
-                    self.editable = False
+                    self.read_only()
                     out.append("[unsupported: %s]" % c.tag)
-            elif c.tag in ("span", "code", "font", "sup", "sub", "s", "strike", "del", "cite"):
+            elif c.tag in ("span", "code", "font", "s", "strike", "del", "cite"):
                 tag = c.attrs.get("data-tag", "")
                 inner = self.inline(c)
                 # OneNote writes formatting as styled spans, not <b>/<i>/<u>.
@@ -212,7 +227,7 @@ class Converter:
         if tag in TAG_PREFIX:
             return TAG_PREFIX[tag]
         if tag:
-            self.editable = False
+            self.read_only()
         return ""
 
     def block(self, node, depth=0):
@@ -315,7 +330,7 @@ class Converter:
         if t in LOSSY_TAGS:
             recording = self.recording(node) if t in ("object", "audio") else None
             if recording is None:
-                self.editable = False
+                self.read_only()
             if self.lines and self.lines[-1] != "":
                 self.lines.append("")
             self.lines.append(recording if recording is not None else "[unsupported: %s]" % t)
@@ -381,7 +396,8 @@ class Converter:
                     converter.lines.append("")
                 converter.last = None
             converter.block(child)
-        self.editable = self.editable and converter.editable
+        if not converter.editable:
+            self.read_only(converter.reason)
         self.images.extend(converter.images)
         self.recordings.extend(converter.recordings)
         return converter.result()
@@ -396,6 +412,12 @@ class Converter:
         while out and out[-1] in ("", BLANK_PARAGRAPH):
             out.pop()
         return "\n".join(out)
+
+
+def _shifted(node):
+    """Superscript or subscript, as a tag or as the CSS pasted text carries."""
+    style = node.attrs.get("style", "").replace(" ", "").lower()
+    return node.tag in ("sup", "sub") or re.search(r"vertical-align:(super|sub)\b", style) is not None
 
 
 def _wrap(node):
@@ -425,7 +447,7 @@ def html_to_markdown(html, image_path_for=None, audio_path_for=None, audio_ident
     conv = Converter(image_path_for, audio_path_for, audio_identity_for)
     for body in (_find_all(tb.root, "body") or [tb.root]):
         conv.block(body)
-    return {"title": title, "body": conv.result(), "editable": conv.editable,
+    return {"title": title, "body": conv.result(), "editable": conv.editable, "reason": conv.reason,
             "images": conv.images, "recordings": conv.recordings}
 
 

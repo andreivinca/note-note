@@ -17,14 +17,21 @@ for variable, subdir in (("XDG_STATE_HOME", "state"), ("XDG_CACHE_HOME", "cache"
                          ("XDG_CONFIG_HOME", "config"), ("NOTE_NOTE_RATE_DIR", "rate")):
     os.environ[variable] = str(Path(WORK.name) / subdir)
 os.environ["NOTE_NOTE_MS_TOKEN"] = str(Path(WORK.name) / "token.json")
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "services" / "clipboard"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import clipboard  # noqa: E402
 import onenote  # noqa: E402
 from notemerge import MergeStore, StaleRemote  # noqa: E402
+from parse import parse  # noqa: E402
 from qthtml import to_html, to_markdown  # noqa: E402
 
 
 def note(body, title="Title"):
     return {"title": title, "body": body}
+
+
+def text_of(tokens):
+    return "".join(token.get("raw", "") for token in tokens)
 
 
 def page_html(value):
@@ -78,6 +85,94 @@ class ImageConversionTests(unittest.TestCase):
                         })
                         saved = to_markdown(rendered)
                         self.assertEqual(to_markdown(to_html(saved)), saved)
+
+    def test_cached_image_paths_with_spaces_and_parentheses_stay_images(self):
+        # A home directory with a space puts one in every cached image path.
+        for local in ("file:///home/Jane Doe/.cache/img/photo", "file:///tmp/scan (1).png"):
+            with self.subTest(local=local):
+                loaded = onenote.onenote_md.html_to_markdown(
+                    '<body><img src="resource" alt="Photo"/></body>', lambda src, width: local)
+                self.assertTrue(loaded["editable"])
+                image = parse(loaded["body"])[0]["children"][0]
+                self.assertEqual(image["type"], "image", loaded["body"])
+                self.assertEqual(onenote.file_path_of(image["attrs"]["url"]), onenote.file_path_of(local))
+
+
+# (href in the page, the link's destination once its Markdown is read back).
+# A character a URL cannot hold as it is comes back percent-encoded, the way
+# the Markdown parser writes every destination, and nothing else changes.
+LINK_DESTINATIONS = (
+    ("https://example.test/a)", "https://example.test/a)"),
+    ("https://en.wikipedia.org/wiki/Mercury_(planet)", "https://en.wikipedia.org/wiki/Mercury_(planet)"),
+    ("https://example.test/a b", "https://example.test/a%20b"),
+    ("file://\\\\server\\share\\x.docx", "file://%5C%5Cserver%5Cshare%5Cx.docx"),
+    ("https://example.test/?q=1&copy;", "https://example.test/?q=1&copy;"),
+    ("<https://example.test/>", "%3Chttps://example.test/%3E"),
+)
+
+
+class LinkConversionTests(unittest.TestCase):
+    def test_link_destinations_and_fallback_labels_survive_markdown(self):
+        for href, destination in LINK_DESTINATIONS:
+            for label in ("label", ""):
+                with self.subTest(href=href, label=label):
+                    source = '<body><p>See <a href="%s">%s</a> now</p></body>' % (html.escape(href), label)
+                    loaded = onenote.onenote_md.html_to_markdown(source)
+                    self.assertTrue(loaded["editable"])
+                    children = parse(loaded["body"])[0]["children"]
+                    links = [child for child in children if child["type"] == "link"]
+                    self.assertEqual(len(links), 1, loaded["body"])
+                    self.assertEqual(text_of(child for child in children if child["type"] == "text"), "See  now")
+                    self.assertEqual(links[0]["attrs"]["url"], destination)
+                    self.assertEqual(text_of(links[0]["children"]), label or href)
+
+
+class ScriptConversionTests(unittest.TestCase):
+    FORMS = ("H<sub>2</sub>O", "x<sup>2</sup>", 'x<span style="vertical-align:super">2</span>',
+             'H<span style="font-size:9pt; vertical-align: sub">2</span>O', "<b>x<sup>2</sup></b>")
+    CONTAINERS = ("<p>%s</p>", "<ul><li>%s</li></ul>", "<ol><li>One</li><li>%s</li></ol>",
+                  "<table><tr><td>%s</td><td>Other</td></tr></table>",
+                  "<table><tr><td><p>Cell</p><p>%s</p></td></tr></table>")
+
+    def test_superscript_and_subscript_open_read_only_with_a_reason(self):
+        for form in self.FORMS:
+            for container in self.CONTAINERS:
+                with self.subTest(form=form, container=container):
+                    loaded = onenote.onenote_md.html_to_markdown("<body>" + container % form + "</body>")
+                    self.assertFalse(loaded["editable"], loaded["body"])
+                    self.assertEqual(loaded["reason"], onenote.onenote_md.SHIFTED_REASON)
+
+    def test_other_vertical_alignment_and_plain_spans_stay_editable(self):
+        for body in ('<p><span style="vertical-align:baseline">x2</span></p>',
+                     '<p><span style="color:#ff0000">x2</span></p>',
+                     '<table><tr><td style="vertical-align:top"><p>x2</p></td></tr></table>'):
+            with self.subTest(body=body):
+                loaded = onenote.onenote_md.html_to_markdown("<body>" + body + "</body>")
+                self.assertTrue(loaded["editable"], loaded["body"])
+                self.assertEqual(loaded["reason"], "")
+
+
+class PastedImageTests(unittest.TestCase):
+    def test_a_scaled_paste_uploads_as_the_png_it_became(self):
+        work = Path(tempfile.mkdtemp(dir=WORK.name))
+        magick = work / "magick"
+        # A stand-in for ImageMagick, writing a small PNG where it is told to.
+        magick.write_text("#!%s\nimport sys\nopen(sys.argv[-1].removeprefix('png:'), 'wb')"
+                          ".write(b'\\x89PNG\\r\\n\\x1a\\n' + b'scaled')\n" % sys.executable)
+        magick.chmod(0o700)
+        path = str(work) + os.pathsep + os.environ.get("PATH", "")
+        for mime, signature in (("image/bmp", b"BM"), ("image/tiff", b"II*\0"), ("image/jpeg", b"\xff\xd8\xff")):
+            with self.subTest(mime=mime), patch.dict(os.environ, {"PATH": path}):
+                staged = clipboard.stage_image(str(work / "paste"), mime, signature + bytes(clipboard.MAX_STORED))
+                uploads = onenote.Uploads(upload_known=True)
+                uploads.ref(Path(staged["path"]).as_uri(), "")
+                self.assertEqual(uploads.error, "")
+                [(name, part_mime, data)] = uploads.parts
+                self.assertEqual((staged["mime"], part_mime), ("image/png", "image/png"))
+                self.assertTrue(data.startswith(b"\x89PNG\r\n\x1a\n"))
+                _, body = onenote.multipart([], uploads.parts)
+                header = 'Content-Disposition: form-data; name="%s"\r\nContent-Type: image/png\r\n\r\n' % name
+                self.assertIn(header.encode() + data, body)
 
 
 class SaveTests(unittest.TestCase):
@@ -743,6 +838,7 @@ class SaveTests(unittest.TestCase):
         patch.object(onenote, "graph", side_effect=AssertionError("unexpected network request")).start()
         patch.object(onenote, "ONENOTE_AUDIO_DIR", str(Path(self.temp.name) / "audio")).start()
         patch.object(onenote, "AUDIO_INDEX", str(Path(self.temp.name) / "audio/index.json")).start()
+        patch.object(onenote, "PENDING_UPLOADS_DIR", str(Path(self.temp.name) / "uploads")).start()
         patch.object(onenote, "cached_audio", side_effect=lambda src, title: self.audio_paths.get(src)).start()
 
     def store(self, page_id="page"):
@@ -1368,6 +1464,158 @@ class SaveTests(unittest.TestCase):
         self.assertEqual(result["body"], "second")
         self.assertEqual(result["title"], "New title")
 
+    def queued_save(self, value, view):
+        """A save run as the host's request queue runs it: through the entry
+        point, and again for as long as it answers throttled or transient."""
+        path = Path(self.temp.name) / "payload.json"
+        path.write_text(json.dumps(dict(value, view=view)))
+        answers = []
+        while len(answers) < 4:
+            answers.append(self.invoke(onenote.run, ["onenote.py", "update", "page", str(path)]))
+            if answers[-1].get("kind") not in ("throttled", "transient"):
+                break
+        return answers
+
+    def reads_from_before(self, html):
+        """A read of the page as it was before the save: what OneNote serves
+        for a while after a write."""
+        self.calls.append(("GET", "stale", None))
+        response = io.BytesIO(html.encode())
+        response.status = 200
+        return response
+
+    def throttle_title_once(self, stale_reads=0, then=None):
+        """An endpoint that answers the first title write 429 without a
+        Retry-After, after OneNote accepted the body: a cooldown too long to
+        sleep, so the job ends throttled and the queue runs it again. Then
+        `then()` runs, and the next `stale_reads` reads predate the save."""
+        before = self.remote
+        state = {"throttled": False, "stale": 0}
+
+        def endpoint(request, **options):
+            if request.get_method() == "PATCH" and b'"title"' in request.data and not state["throttled"]:
+                state["throttled"] = True
+                state["stale"] = stale_reads
+                self.calls.append(("PATCH", request.full_url, request.data))
+                if then:
+                    then()
+                raise urllib.error.HTTPError(request.full_url, 429, "throttled", {}, io.BytesIO(b"{}"))
+            if request.get_method() == "GET" and state["stale"]:
+                state["stale"] -= 1
+                return self.reads_from_before(before)
+            return self.response(request)
+
+        return endpoint
+
+    def page_title(self):
+        return ET.fromstring(self.remote).find("./head/title").text
+
+    def test_stale_rerun_after_a_throttled_title_does_not_insert_the_body_again(self):
+        loaded = self.load()
+        local = note("one\n\nadded\n\nmiddle\n\nthree", "New title")
+        with self.http_transport(self.throttle_title_once(stale_reads=1)):
+            answers = self.queued_save(local, loaded["view"])
+        self.assertEqual([answer.get("kind") for answer in answers], ["throttled", "transient", None])
+        self.assertTrue(answers[-1].get("ok"), answers)
+        # The stale read was refused before anything was planned or written.
+        self.assertEqual([method for method, *_ in self.calls],
+                         ["GET", "GET", "PATCH", "PATCH", "GET", "GET", "PATCH"])
+        self.assertEqual(self.remote.count(">added<"), 1)
+        self.assertEqual(self.page_title(), "New title")
+        with self.store() as journal:
+            self.assertIsNone(journal.recover())
+
+    def test_fresh_rerun_after_a_throttled_title_builds_on_the_accepted_body(self):
+        # The phone edits the paragraph this save inserted before the rerun
+        # reads the page: an edit of accepted text, not a conflict with it.
+        loaded = self.load()
+        local = note("one\n\nadded\n\nmiddle\n\nthree", "New title")
+
+        def phone_edits_the_insertion():
+            self.remote = self.remote.replace(">added<", ">added on the phone<")
+
+        with self.http_transport(self.throttle_title_once(then=phone_edits_the_insertion)):
+            answers = self.queued_save(local, loaded["view"])
+        self.assertEqual([answer.get("kind") for answer in answers], ["throttled", None])
+        self.assertTrue(answers[-1].get("ok"), answers)
+        self.assertEqual(answers[-1]["body"], onenote.normalize_note(
+            note("one\n\nadded on the phone\n\nmiddle\n\nthree"))["body"])
+        self.assertNotIn(">added<", self.remote)
+        self.assertEqual(self.remote.count(">added on the phone<"), 1)
+        self.assertEqual(self.page_title(), "New title")
+
+    def test_restart_after_a_throttled_title_recovers_and_finishes_only_the_title(self):
+        loaded = self.load()
+        local = note("one\n\nadded\n\nmiddle\n\nthree", "New title")
+        with self.http_transport(self.throttle_title_once(stale_reads=1)):
+            path = Path(self.temp.name) / "payload.json"
+            path.write_text(json.dumps(dict(local, view=loaded["view"])))
+            answer = self.invoke(onenote.run, ["onenote.py", "update", "page", str(path)])
+            self.assertEqual(answer.get("kind"), "throttled")
+            # The app restarts: the note opens from its recovered draft, which
+            # the host saves again with the draft's own view.
+            recovered = self.load()
+            self.assertTrue(recovered.get("recovered"), recovered)
+            self.assertEqual((recovered["title"], recovered["body"]),
+                             ("New title", onenote.normalize_note(local)["body"]))
+            answers = self.queued_save(recovered, recovered["view"])
+        self.assertEqual([answer.get("kind") for answer in answers], ["transient", None])
+        self.assertTrue(answers[-1].get("ok"), answers)
+        self.assertEqual(self.remote.count(">added<"), 1)
+        self.assertEqual(self.page_title(), "New title")
+        with self.store() as journal:
+            self.assertIsNone(journal.recover())
+
+    def test_a_failed_read_after_an_upload_neither_conflicts_nor_uploads_again(self):
+        def cached_image(src, width=0):
+            path = Path(onenote.image_cache_path(src))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"synthetic image")
+            return path.as_uri()
+
+        patch.object(onenote, "cached_image", side_effect=cached_image).start()
+        failures = ((429, {}), (503, {"Retry-After": "999"}), (500, {}), (502, {}))
+        for status, headers in failures:
+            with self.subTest(status=status):
+                with self.store() as journal:
+                    journal.discard()
+                self.remote = page_html(note("one\n\nmiddle\n\nthree"))
+                loaded = self.load()
+                paste = Path(self.temp.name) / ("paste-%d.png" % status)
+                paste.write_bytes(b"pasted image %d" % status)
+                pasted = note("one\n\n![](%s)\n\nmiddle\n\nthree" % paste.as_uri())
+                uploaded = []
+                failing = {"next read": False}
+
+                def upload(url, commands, parts):
+                    """OneNote accepts the upload and names its resource."""
+                    expanded = json.dumps(commands)
+                    for name, _, _ in parts:
+                        uploaded.append(name)
+                        resource = "https://graph.microsoft.com/v1.0/me/onenote/resources/up%d-%d/$value"
+                        expanded = expanded.replace("name:" + name, resource % (status, len(uploaded)))
+                    failing["next read"] = True
+                    return self.graph("PATCH", url, expanded)
+
+                def endpoint(request, **options):
+                    if request.get_method() == "GET" and failing["next read"]:
+                        failing["next read"] = False
+                        self.calls.append(("GET", request.full_url, None))
+                        raise urllib.error.HTTPError(request.full_url, status, "failed", headers, io.BytesIO(b"{}"))
+                    return self.response(request)
+
+                # The editor shows the pasted file until the page reloads,
+                # and keeps editing beside it.
+                edited = note(pasted["body"].replace("middle", "middle edited"))
+                with patch.object(onenote, "patch_page", side_effect=upload), self.http_transport(endpoint):
+                    first = self.queued_save(pasted, loaded["view"])
+                    second = self.queued_save(edited, loaded["view"])
+                for answers in (first, second):
+                    self.assertTrue(answers[-1].get("ok"), answers)
+                self.assertEqual(len(uploaded), 1)
+                self.assertEqual(self.remote.count("<img"), 1)
+                self.assertIn("middle edited", self.remote)
+
     def test_missing_base_and_unrepresentable_remote_do_not_write(self):
         with self.assertRaises(ValueError):
             self.save(note("app"), "missing")
@@ -1484,6 +1732,47 @@ class SaveTests(unittest.TestCase):
         result = self.save(note("app"), loaded["view"])
         self.assertIn("cannot be saved safely", result["error"])
         self.assertFalse(any(call[0] == "PATCH" for call in self.calls))
+
+    def test_page_with_superscript_or_subscript_is_never_written(self):
+        for shifted in ("H<sub>2</sub>O", 'x<span style="vertical-align:super">2</span>'):
+            for container in ScriptConversionTests.CONTAINERS:
+                with self.subTest(shifted=shifted, container=container):
+                    with self.store() as journal:
+                        journal.discard()
+                    self.calls.clear()
+                    self.remote = ('<html><head><title>Title</title></head><body><div id="div:page">'
+                                   '<p id="p:label">Chemistry</p>' + container % ("Water is " + shifted)
+                                   + '</div></body></html>')
+                    loaded = self.load()
+                    self.assertFalse(loaded["editable"])
+                    self.assertEqual(loaded["reason"], onenote.onenote_md.SHIFTED_REASON)
+                    for edited in (loaded["body"].replace("Chemistry", "Chem"),
+                                   loaded["body"].replace("Water is", "Water, is")):
+                        result = self.save(note(edited), loaded["view"])
+                        self.assertEqual(result.get("error"), onenote.onenote_md.SHIFTED_REASON)
+                        with self.store() as journal:
+                            self.assertEqual(journal.recover()["body"], edited)
+                    self.assertFalse(any(method == "PATCH" for method, *_ in self.calls))
+
+    def test_same_paragraph_edits_keep_link_destinations(self):
+        for href, destination in LINK_DESTINATIONS:
+            for label in ("label", ""):
+                with self.subTest(href=href, label=label):
+                    with self.store() as journal:
+                        journal.discard()
+                    self.remote = ('<html><head><title>Title</title></head><body><div id="div:links">'
+                                   '<p id="p:link">See <a href="%s">%s</a> now</p></div></body></html>'
+                                   % (html.escape(href), label))
+                    loaded = self.load()
+                    # What the editor writes back after showing the note.
+                    displayed = to_markdown(to_html(loaded["body"]))
+                    result = self.save(note(displayed.replace("See", "Edited, see")), loaded["view"])
+                    self.assertTrue(result.get("ok"), result)
+                    links = list(ET.fromstring(self.remote).iter("a"))
+                    self.assertEqual([link.get("href") for link in links], [destination])
+                    self.assertEqual("".join(links[0].itertext()), label or href)
+                    self.assertEqual(links[0].tail, " now")
+                    self.assertEqual(self.load()["body"], result["body"])
 
     def test_markdown_structure_is_preserved_when_sections_change_independently(self):
         original = note("# Shopping\n\n- [ ] Milk\n\n## Notes\n\n**Remember**")

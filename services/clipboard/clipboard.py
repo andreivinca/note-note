@@ -2,6 +2,7 @@
 
     python3 clipboard.py stage <dir>  <- {"mime": …, "data": <base64>} on stdin
                                       -> {"path": …, "mime": …, "bytes": n}
+                                         (a scaled picture: a .png, image/png)
 
 The bytes come from the host's own clipboard reader (QClipboard in the
 native host, wl-paste in the Omarchy host — hosts/omarchy/clipboard.py);
@@ -14,6 +15,7 @@ import json
 import base64
 import binascii
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -22,6 +24,7 @@ import tempfile
 # What a backend will accept from us, and what a paste may cost on the way in.
 MIME_SUFFIX = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif",
                "image/bmp": ".bmp", "image/tiff": ".tiff"}
+SCALED_MIME = "image/png"            # what a picture scaled down becomes
 MAX_CLIPBOARD = 40 * 1024 * 1024     # what we will read at all
 MAX_IMAGE_ANSWER = 56 * 1024 * 1024  # MAX_CLIPBOARD as base64 (x4/3) in its JSON envelope: a reader's largest answer
 MAX_TEXT = 4 * 1024 * 1024           # a paste of text past this is not a note
@@ -36,26 +39,47 @@ def out(obj):
     sys.stdout.write(json.dumps(obj))
 
 
-def scaled(path, magick):
-    """Bring a pasted screenshot down to something a note can carry."""
+def scaled(path, mime, magick):
+    """Bring a pasted screenshot down to something a note can carry.
+
+    Returns the staged picture as (path, mime). A scaled one is a PNG, in a
+    file of its own named for it, staged like the paste itself; the original
+    goes. A name never says one format while the bytes are another: a
+    backend that reads the type from the name (OneNote) uploads it as what
+    it is.
+    """
     if os.path.getsize(path) <= MAX_STORED or not magick:
-        return
-    scaled_path = path + ".out"
+        return path, mime
+    fd, scaled_path = tempfile.mkstemp(prefix="paste-", suffix=MIME_SUFFIX[SCALED_MIME], dir=os.path.dirname(path))
+    os.close(fd)
+    if converted(magick, path, scaled_path):
+        discard(path)
+        return scaled_path, SCALED_MIME
+    discard(scaled_path)
+    return path, mime
+
+
+def converted(magick, source, target):
+    """Have ImageMagick write the source's first frame, scaled, into target
+    as a PNG; True when that came out smaller than the source."""
     try:
         subprocess.run([magick, "-limit", "memory", "128MiB", "-limit", "map", "256MiB",
                         "-limit", "area", "50MP", "-limit", "time", str(MAGICK_TIMEOUT),
-                        path + "[0]", "-resize", "%dx>" % MAX_WIDTH, "png:" + scaled_path],
+                        source + "[0]", "-resize", "%dx>" % MAX_WIDTH, "png:" + target],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=MAGICK_TIMEOUT + 5)
-        if os.path.exists(scaled_path) and 0 < os.path.getsize(scaled_path) < os.path.getsize(path):
-            os.chmod(scaled_path, 0o600)
-            os.replace(scaled_path, path)
+        if not 0 < os.path.getsize(target) < os.path.getsize(source):
+            return False
+        os.chmod(target, 0o600)
+        return True
     except (subprocess.TimeoutExpired, OSError):
+        return False
+
+
+def discard(path):
+    try:
+        os.remove(path)
+    except OSError:
         pass
-    finally:
-        try:
-            os.remove(scaled_path)
-        except OSError:
-            pass
 
 
 def prune(directory):
@@ -76,10 +100,7 @@ def prune(directory):
     files.sort(reverse=True)
     for index, (mtime, path) in enumerate(files):
         if index >= MAX_STAGED or now - mtime > MAX_STAGED_AGE:
-            try:
-                os.remove(path)
-            except OSError:
-                pass
+            discard(path)
 
 
 def stage_image(directory, mime, data):
@@ -95,8 +116,7 @@ def stage_image(directory, mime, data):
     fd, path = tempfile.mkstemp(prefix="paste-", suffix=MIME_SUFFIX[mime], dir=directory)
     with os.fdopen(fd, "wb") as handle:
         handle.write(data)
-    import shutil
-    scaled(path, shutil.which("magick") or shutil.which("convert"))
+    path, mime = scaled(path, mime, shutil.which("magick") or shutil.which("convert"))
     prune(directory)
     return {"path": path, "mime": mime, "bytes": os.path.getsize(path)}
 

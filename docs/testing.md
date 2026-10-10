@@ -487,6 +487,15 @@ Changed images carry upload bytes and unique resource-correlation markers.
 The retry regressions run through the real HTTP retry loop with scripted
 503 responses: uncertain inserts/uploads are sent once, replacement retries
 fetch and merge again, and cooldown recording never grants replay permission.
+Saves run through the entry point the way the request queue runs them: a
+title throttled after an accepted body reruns to one insertion and the new
+title, with a fresh read, a stale read or a restart in between, and a read
+that fails after an upload leaves neither a conflict nor a second upload.
+Superscript and subscript, as tags or CSS, in paragraphs, lists and tables,
+open read-only with a reason and are never written. Link destinations keep
+unbalanced parentheses, spaces, backslashes and entity-like text through a
+same-paragraph edit in the editor, labelled or not. A scaled paste is staged
+and uploaded as the PNG it became (`tests/test_regressions.py` for staging).
 Checkbox tests preserve native inline styling in both bulleted and numbered
 lists. The shared journal tests reject a second view's attempt to replace an
 unresolved draft, including after a partial write or process restart.

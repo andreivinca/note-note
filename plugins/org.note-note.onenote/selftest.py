@@ -244,8 +244,7 @@ def test_title_failure_does_not_repeat_the_body(verbose):
         sign_in()
         endpoint = Endpoint(graph=[(status, b"title refused", headers(Retry_After="0"))])
         with scripted(endpoint), patch.object(msgraph.settings, "rate_key", None):
-            warning = onenote.write_page("page", {"title": "Edited", "body": ""},
-                                         {"title": "Original", "body": ""}, "")
+            warning = onenote.write_title("page", "Edited")
         failures += check("%d title failure is returned" % status, warning.startswith("title not saved"), warning)
         failures += check("%d title is sent once" % status, len(endpoint.calls) == 1)
     print("a failed title is returned without repeating the save")

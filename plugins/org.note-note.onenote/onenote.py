@@ -38,7 +38,7 @@ from provider_io import (fail, fail_throttled, out, load_json, save_private, rea
 import onenote_md  # noqa: E402
 import onenote_patch  # noqa: E402
 from onenote_audio import RecordingIdentity  # noqa: E402
-from notemerge import MergeStore, StaleRemote, snapshot  # noqa: E402
+from notemerge import MergeStore, StaleRemote, fingerprint, snapshot  # noqa: E402
 import search_index  # noqa: E402
 import notebook_inventory  # noqa: E402
 import revision_objects  # noqa: E402
@@ -1033,7 +1033,8 @@ def acknowledged_uploads(staged, html):
 
 
 def remember_staged(staged, html):
-    """Match upload aliases by the data-id written with each upload.
+    """Match upload aliases by the data-id written with each upload, and
+    return the uploads that matched.
 
     Patch order and document order can differ. Only an exact, unique marker
     can associate a local paste with its acknowledged OneNote resource.
@@ -1045,6 +1046,51 @@ def remember_staged(staged, html):
         remember_uploaded_images(images)
     if recordings:
         remember_uploaded_recordings(recordings)
+    return [upload for upload, _ in acknowledged]
+
+
+# A save's uploads, recorded under their page before the request that
+# carries them. Nothing but its data-id ties an upload to the resource
+# OneNote made of it, so the next read of the page that shows a data-id
+# resolves that upload (resolve_pending_uploads) — the read that starts
+# every save and every load. No read in between can lose an upload that
+# went up, whatever happens to the request after it. Written and read only
+# under the page's merge journal lock.
+PENDING_UPLOADS_DIR = os.path.join(STATE_DIR, "note-note-onenote-uploads")
+MAX_PENDING_UPLOADS = 32
+
+
+def pending_uploads_path(page_id):
+    return os.path.join(PENDING_UPLOADS_DIR, fingerprint(page_id) + ".json")
+
+
+def remember_pending_uploads(page_id, staged):
+    """Record a save's uploads, by data-id, before they are sent."""
+    path = pending_uploads_path(page_id)
+    pending = load_json(path, {})
+    for upload in staged.values():
+        pending[upload["dataId"]] = upload
+    save_private(path, dict(list(pending.items())[-MAX_PENDING_UPLOADS:]))
+
+
+def resolve_pending_uploads(page_id, html):
+    """Record the resource of every pending upload this read of the page
+    shows. One it does not show yet stays pending (a read can trail the
+    save that wrote it) while its local file is there to be named by."""
+    path = pending_uploads_path(page_id)
+    pending = load_json(path, {})
+    if not pending:
+        return
+    resolved = {upload["dataId"] for upload in remember_staged(pending, html)}
+    remaining = {data_id: upload for data_id, upload in pending.items()
+                 if data_id not in resolved and os.path.isfile(upload["path"])}
+    if remaining:
+        save_private(path, remaining)
+        return
+    try:
+        os.remove(path)
+    except OSError:
+        pass
 
 
 def remember_uploaded_images(uploads):
@@ -1307,6 +1353,7 @@ def read_page(page_id):
             fail(graph_err(json.loads(html), status))
         except ValueError:
             fail("Graph error %s" % status)
+    resolve_pending_uploads(page_id, html)
     # Graph's resources are the truth here: no upload alias applies.
     identity = RecordingIdentity()
     result = onenote_md.html_to_markdown(html, cached_image, recording_resource,
@@ -1566,8 +1613,9 @@ def remove_blank_lines(page_id, runs):
         fail("Could not remove the blank lines: %s — your draft was kept" % error)
 
 
-def write_page(page_id, note, remote, current):
-    """Write a merge planned against the exact HTML fetched by this save."""
+def write_body(page_id, note, remote, current):
+    """Write the body of a merge planned against the exact HTML fetched by
+    this save. Returning means OneNote has accepted it."""
     url = page_content_url(page_id)
     saved_html = current
     if note["body"] != normalize_note(remote)["body"]:
@@ -1607,31 +1655,29 @@ def write_page(page_id, note, remote, current):
             # targets survive this, and the next save plans without them.
             remove_blank_lines(page_id, planned.blank_lines)
         if commands:
+            if uploads.staged:
+                remember_pending_uploads(page_id, uploads.staged)
             status, res = patch_page(url, commands, uploads.parts)
             if status not in (200, 204):
                 try:
                     fail(graph_err(json.loads(res), status))
                 except ValueError:
                     fail("Graph error %s" % status)
-            if uploads.staged:
-                status, content = graph_raw("GET", url + "?includeIDs=true")
-                if status == 200:
-                    remember_staged(uploads.staged, content)
-
-    # Some older pages reject title writes. Record the successful body and
-    # retain the title's draft if that happens, so a retry has the right base.
-    warning = ""
-    if note["title"] != remote["title"]:
-        ops = [{"target": "title", "action": "replace", "content": _html.escape(note["title"])}]
-        status, res = graph_raw("PATCH", url, json.dumps(ops).encode(), "application/json",
-                                retry_policy=msgraph.RetryPolicy.NEVER)
-        if status not in (200, 204):
-            try:
-                warning = "title not saved: " + graph_err(json.loads(res), status)
-            except ValueError:
-                warning = "title not saved (Graph error %s)" % status
     remember_search(page_id, saved_html, saved=True)
-    return warning
+
+
+def write_title(page_id, title):
+    """Replace the page's title: "" once saved, else what went wrong. Some
+    older pages reject title writes."""
+    ops = [{"target": "title", "action": "replace", "content": _html.escape(title)}]
+    status, res = graph_raw("PATCH", page_content_url(page_id), json.dumps(ops).encode(), "application/json",
+                            retry_policy=msgraph.RetryPolicy.NEVER)
+    if status in (200, 204):
+        return ""
+    try:
+        return "title not saved: " + graph_err(json.loads(res), status)
+    except ValueError:
+        return "title not saved (Graph error %s)" % status
 
 
 def refuse_unkept_formatting(payload):
@@ -1663,11 +1709,18 @@ def cmd_onenote_update(page_id, path):
         note = merged["note"]
         if normalize_note(note) != note:
             fail("the merged formatting needs review before saving — your draft was kept")
-        warning = write_page(page_id, note, remote, current)
-        if warning:
+        write_body(page_id, note, remote, current)
+        if note["title"] != remote["title"]:
+            # The body is on the page. Record that before the title request,
+            # which can fail or be throttled into a rerun of this job: the
+            # title's intent stays staged, and the rerun merges against the
+            # body this save wrote instead of inserting it again, behind the
+            # journal's guard against a read that predates this write.
             journal.commit(dict(note, title=remote["title"]), accepted_fields=("body",))
-            out({"error": warning})
-            return
+            warning = write_title(page_id, note["title"])
+            if warning:
+                out({"error": warning})
+                return
         saved = journal.commit(note)
         out(dict(saved, ok=True, merged=normalize_note(payload) != snapshot(saved)))
 

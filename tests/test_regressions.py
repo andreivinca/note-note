@@ -53,6 +53,31 @@ class Files(unittest.TestCase):
             self.assertIn("error", json.loads(result.stdout))
         self.assertEqual(list(staging.iterdir()), [pasted])
 
+    def test_a_scaled_clipboard_image_is_staged_as_the_png_it_became(self):
+        sys.path.insert(0, str(ROOT / "services/clipboard"))
+        import clipboard
+        magick = self.root / "bin/magick"
+        magick.parent.mkdir()
+        # A stand-in for ImageMagick, writing a small PNG where it is told to.
+        magick.write_text("#!%s\nimport sys\nopen(sys.argv[-1].removeprefix('png:'), 'wb')"
+                          ".write(b'\\x89PNG\\r\\n\\x1a\\n' + b'scaled')\n" % sys.executable)
+        magick.chmod(0o700)
+        env = dict(os.environ, PATH=str(magick.parent) + os.pathsep + os.environ.get("PATH", ""))
+        for mime, signature in (("image/bmp", b"BM"), ("image/tiff", b"II*\0"), ("image/jpeg", b"\xff\xd8\xff")):
+            with self.subTest(mime=mime):
+                staging = self.root / mime.replace("/", "-")
+                data = signature + bytes(clipboard.MAX_STORED)
+                command = [sys.executable, str(ROOT / "services/clipboard/clipboard.py"), "stage", str(staging)]
+                result = subprocess.run(command, input=json.dumps({"mime": mime, "data": base64.b64encode(data).decode()}),
+                                        capture_output=True, text=True, timeout=30, check=True, env=env)
+                payload = json.loads(result.stdout)
+                pasted = Path(payload["path"])
+                self.assertEqual((pasted.suffix, payload["mime"]), (".png", "image/png"))
+                self.assertTrue(pasted.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"))
+                self.assertEqual(payload["bytes"], pasted.stat().st_size)
+                self.assertEqual(pasted.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(list(staging.iterdir()), [pasted])
+
     def operation(self, action, **payload):
         return operations.execute(dict(root=str(self.root), file=str(self.note), action=action, **payload))
 

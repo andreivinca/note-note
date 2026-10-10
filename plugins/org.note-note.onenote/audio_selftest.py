@@ -118,7 +118,7 @@ class PageTests(unittest.TestCase):
         with no_requests():
             result = read_page("<body>" + PHONE_OBJECT + "</body>")
         self.assertTrue(result["editable"])
-        self.assertNotIn("reason", result)
+        self.assertEqual(result["reason"], "")
         expected = onenote_md.audio.markup(RESOURCE, "Audio Recording.3gp",
                                            "nn-audio-legacy-%s-1" % hashlib.sha256(RESOURCE.encode()).hexdigest())
         self.assertEqual(result["body"], expected)

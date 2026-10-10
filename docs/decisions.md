@@ -206,12 +206,18 @@ our own cache, and one the cache has not materialised would be lost.
 
 The costs, accepted deliberately: one extra read per save of a page with
 images (a replace can only target a generated id, and OneNote renews those on
-every write; a second read after an upload, so the next autosave knows the
-paste is already up); the cache keeps images exactly as Graph served them (no
+every write); the cache keeps images exactly as Graph served them (no
 local rescaling — the editor caps its *display* width instead); and a page
 whose images cannot all be fetched or carried refuses to save, read-only with
 the reason, because a half-held page can only be saved by destroying what is
 not held. Pages without images save exactly as before, in one request.
+
+Only the data-id an upload is sent with ties it to the resource OneNote makes
+of it. A save records its uploads under the page before the request that
+carries them, and the read every later save and load of the page begins with
+resolves each one it shows. A separate read right after the upload used to
+do that, and when it failed (a throttle, a 5xx) the record was gone: the next
+save set the paste against its own uploaded copy as a conflict.
 
 An image the editor leaves *inside* a list item, quote, heading or table cell
 is lifted out to a paragraph of its own before the page is rendered
