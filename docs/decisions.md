@@ -173,6 +173,35 @@ keeps whatever formatting was already inside it. The highlight carries its own
 dark ink: the editor's foreground follows the theme, and on a dark theme that
 would be light text on a light marker.
 
+### A style no delimiter can mark is written as its HTML tag
+
+A delimiter only works where Markdown lets it open and close. Underlining
+the `b` of `abc` gave `a_b_c`, which is text; bolding `.com` in
+`example.com` gave `example**.com**`, whose `**` cannot open between a
+letter and punctuation. Both saves were refused, because the asterisks and
+underscores would have become text. Underlining `a_b` gave `_a_b_`, which
+the dialect's underline rule does not match, so it reopened as italic — the
+same text, so nothing noticed.
+
+*Considered:* escaping the underscores inside an underline (`_a\_b_`,
+which does read back as underline). *Rejected:* it mends one case. Inside a
+word an underline has no delimiter at all, nor has bold beside punctuation,
+and outside this app `_x_` is italic anyway.
+*Chosen:* the reader writes the delimiter wherever it reads back as the
+style around exactly that text — CommonMark's flanking rules for `*` and
+`**`, the dialect's underline pattern for `_`, mistune's own rules for `==`
+and `~~`, judged by the characters on either side (`reader._delimits`) —
+and elsewhere the HTML tag that says the same: `<u>`, `<strong>`, `<em>`,
+`<s>`, `<mark>`. The note's text color already uses a `<span>` this way.
+The shared parser reads those bare tags as the very tokens the delimiters
+make (parse.py; the tag names a structured table cell accepts), so no
+provider renderer sees HTML, and other Markdown tools draw the tags as the
+formatting they are. Notes that already had delimiters keep them. Text is
+escaped only once the characters beside it are known (`escape_inline`'s
+`before` and `after`): an `*` or `_` at the edge of a styled stretch used to
+be judged as if a space stood beside it, and could join the stretch's own
+delimiter.
+
 ### Block styles still travel through the Markdown
 
 QML exposes no block formatting on `TextEdit`, in either format, so a heading
@@ -665,6 +694,31 @@ OneNote is the mirror case: its reader refuses nothing it can read, and its
 writer refuses a save holding the four constructs it cannot write
 (engine-notes, "A quote, a code block, inline code and a rule do not
 round-trip").
+
+A local note is any Markdown another tool wrote, and the editor holds only
+the dialect: raw HTML (a `<div>`, an `<img>` tag, a comment, a lone
+`<br>`), and a quote holding anything but paragraphs — a heading, a list,
+code, a table, a rule, another quote — have no form in it, nor does a
+callout that goes on past its `> [!NOTE]` line, or a list item opening
+with a heading, a quote, a rule or a table. The writer used to drop the HTML and
+draw the rest unquoted or out of its list, and the next autosave wrote that
+over the file. Now it names each such construct as it renders
+(`qthtml.writer.unkept`, the renderer's own account, so the display and the
+report cannot drift), shows it — raw HTML as its source, in a code block —
+and the local provider's load answers `editable: false` with the names in
+its `reason`. *Considered:* refusing to display such a note through the
+converter-failure path. *Rejected:* that hides the content the rule exists
+to protect; read-only shows it and changes nothing. A table in a quote or
+a list item is read as GitHub reads it (mistune's `table_in_quote` and
+`table_in_list`), or a quoted table would collapse into one line of pipes
+without ever being reported.
+
+What the writer knowingly does not report yet, because it is an attribute
+rather than a construct: a fenced code block's language, a table's column
+alignment, a link or image title, and a reference-style link's definition
+line (the link itself is written inline). Each is lost on the first save.
+Nor does it report a quote of several paragraphs: it is written back as one
+quote per paragraph, which the editor draws as one quote all the same.
 
 ### The four block-style buttons fold into one text-style menu
 

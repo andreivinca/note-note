@@ -394,7 +394,10 @@ Item {
         cb(result)
         return
       }
-      cb({ title: result.title, body: result.body, editable: true, version: result.version,
+      // Read-only, with operations.py's reason, when the note holds what
+      // the editor would not write back as it is.
+      cb({ title: result.title, body: result.body, editable: result.editable !== false,
+           reason: result.reason || "", version: result.version,
            base: file.substring(0, file.lastIndexOf("/")) })
     })
   }

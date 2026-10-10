@@ -442,8 +442,13 @@ parse; write `"\u2029"`.
 ## Markdown
 
 The single parser is `services/markdown/parse.py` (vendored mistune 3.3.4,
-BSD-3) with two extras: `task_lists`, `strikethrough`, `table`, `mark`
-(`==highlight==`) and a **custom underline rule** for Qt's `_x_`.
+BSD-3) with two extras: `task_lists`, `strikethrough`, `table` (also inside
+quotes and list items, as GitHub reads them), `mark`
+(`==highlight==`) and a **custom underline rule** for Qt's `_x_`. Bare
+`<u>`, `<strong>`, `<em>`, `<s>` and `<mark>` pairs (and `<b>`, `<i>`,
+`<del>`) are read as the same tokens as their delimiters: the editor writes
+them where no delimiter can open and close (decisions.md, "A style no
+delimiter can mark is written as its HTML tag").
 
 Providers own only the **renderers** (AST → OneNote HTML, AST → Notion
 blocks) and the **writers** (backend → Markdown); the editor's own pair lives

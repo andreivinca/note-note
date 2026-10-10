@@ -6,6 +6,7 @@ is parsed into the same AST as Markdown, never passed through to the editor.
 """
 import html
 
+import audio
 import htmltree
 import textcolor
 from mistune import HTMLRenderer
@@ -88,6 +89,11 @@ def _inline(nodes):
                 attrs["width"] = int(node.attrs["width"])
             out.append({"type": "image", "attrs": attrs,
                         "children": [{"type": "text", "raw": node.attrs.get("alt", "")}]})
+        elif tag == "audio":
+            attrs = audio.from_attributes(node.attrs)
+            if attrs is None:
+                raise ValueError("Unsupported audio in an HTML table")
+            out.append({"type": "audio", "attrs": attrs})
         elif tag == "span":
             children = _inline(node.children)
             color = textcolor.from_style(node.attrs.get("style", ""))
@@ -191,6 +197,11 @@ class _Renderer(HTMLRenderer):
     def image(self, text, url, title=None, width=0):
         result = super().image(text, url, title)
         return result.replace(" />", ' width="%d" />' % width) if width else result
+
+    # mistune names the renderer's arguments after the token's attrs, and an
+    # audio token's identity is its `id`.
+    def audio(self, url, title, id=""):  # noqa: A002
+        return audio.markup(url, title, id)
 
     def softbreak(self):
         return " "

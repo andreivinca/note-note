@@ -14,10 +14,11 @@ note's text would have changed meaning, the whole document is rendered again
 with strict escaping. Under-escaping is the one failure that silently edits
 someone's note, so it is the one failure that is checked for.
 """
+import re
 from itertools import groupby
 
 from . import dialect
-from .siblings import parse, walk_text, htmltree, htmltables, textcolor
+from .siblings import parse, walk_text, htmltree, htmltables, textcolor, UNDERLINE_PATTERN
 from .imagesize import local_path, width_of
 from .mdtext import escape_inline, escape_line_start, escape_table_cell, code_span, code_fence
 from .mdtext import escape_image_alt, escape_link_destination
@@ -31,15 +32,18 @@ INDENT_TEXT = "\u00a0" * 4
 # weight is not bold, and only the heavier weight the writer uses is.
 IN_HEADING = frozenset({"heading"})
 
-# Inline markers, applied outermost first. `code` is not here: a code span
-# takes no formatting inside it.
+# Inline markers, applied outermost first: the style, its Markdown delimiter,
+# and the HTML tag that says the same where the delimiter cannot — inside a
+# word, or beside punctuation that keeps it from opening or closing (parse.py
+# reads both). `code` is not here: a code span takes no formatting inside it.
 INLINE_MARKERS = (
-    ("highlight", "=="),
-    ("bold", "**"),
-    ("italic", "*"),
-    ("underline", "_"),
-    ("strike", "~~"),
+    ("highlight", "==", "mark"),
+    ("bold", "**", "strong"),
+    ("italic", "*", "em"),
+    ("underline", "_", "u"),
+    ("strike", "~~", "s"),
 )
+UNDERLINE = re.compile(UNDERLINE_PATTERN)
 
 
 NO_BLOCK = -1
@@ -447,13 +451,76 @@ class _Reader:
         return "".join(out)
 
     def inline(self, nodes, active=frozenset()):
-        return _emit(self.runs(nodes, active), active)
+        return self.emit(self.runs(nodes, active), active)
+
+    def emit(self, runs, active=frozenset(), before="\n", after="\n"):
+        """Runs -> Markdown, wrapping each marker around as much as it covers.
+
+        `before` and `after` are the characters either side of what this
+        writes: a line's edge, a link's bracket, or the style around it.
+        That style is taken to be written as a tag; where it is a delimiter
+        instead, its character is punctuation just as `>` and `<` are, and
+        a `*` inside `**` joins one run of three, which reads back as both
+        styles."""
+        return self.write(self.pieces(runs, active), before, after)
+
+    def pieces(self, runs, active):
+        """Each run with no style beyond `active` as it is, and each longest
+        stretch sharing one more style as that style's pieces."""
+        pieces = []
+        index = 0
+        while index < len(runs):
+            extra = runs[index].styles - active
+            if not extra:
+                pieces.append(runs[index])
+                index += 1
+                continue
+            colors = sorted(s for s in extra if s.startswith("color:"))
+            name = colors[0] if colors else next(n for n, _, _ in INLINE_MARKERS if n in extra)
+            end = index
+            while end < len(runs) and name in (runs[end].styles - active):
+                end += 1
+            pieces.extend(self.styled(runs[index:end], active, name))
+            index = end
+        return pieces
+
+    def write(self, pieces, before, after):
+        """The pieces as Markdown, each written once the characters on both
+        sides of it are known: text is escaped by them, and a marker is a
+        delimiter or a tag by them."""
+        followers = []
+        following = after
+        for piece in reversed(pieces):
+            followers.append(following)
+            following = _opening(piece) or following
+        out = ""
+        for piece, right in zip(pieces, reversed(followers)):
+            left = out[-1:] or before
+            if isinstance(piece, _Text):
+                out += escape_inline(piece.plain, self.strict, left, right)
+            elif isinstance(piece, _Marked):
+                out += piece.write(left, right)
+            else:
+                out += piece.text
+        return out
+
+    def styled(self, runs, active, name):
+        """The pieces of a stretch carrying style `name`. A colour is a
+        span; a marker goes inside the whitespace at either end, because
+        `** bold **` is not bold."""
+        if name.startswith("color:"):
+            return [_Run(textcolor.span(name[6:], self.emit(runs, active | {name}, ">", "<")), active)]
+        lead, runs, tail = _trim(runs)
+        if not runs:
+            return lead + tail
+        marker, tag = next((m, t) for n, m, t in INLINE_MARKERS if n == name)
+        return lead + [_Marked(marker, tag, self.emit(runs, active | {name}, ">", "<"))] + tail
 
     def runs(self, nodes, active=frozenset()):
         out = []
         for node in nodes or []:
             if node.tag is None:
-                out.append(_Run(self.text_run(node.text or ""), active))
+                out.append(_Text(node.text or "", active))
             elif node.tag == "br":
                 out.append(_Run("  \n", frozenset()))     # markers never span a break
             elif node.tag == "a":
@@ -488,7 +555,7 @@ class _Reader:
         inner = self.runs(node.children, active | {"link"})
         shared = frozenset.intersection(*[run.styles for run in inner]) if inner else frozenset()
         shared -= {"link"}
-        text = _emit(inner, active | shared | {"link"}).strip()
+        text = self.emit(inner, active | shared | {"link"}, "[", "]").strip()
         return _Run("[%s](%s)" % (text or href, escape_link_destination(href)), active | shared)
 
     def image_width(self, node):
@@ -523,9 +590,6 @@ class _Reader:
             found.add("strike")
         return frozenset(found) - active
 
-    def text_run(self, text):
-        return escape_inline(text, self.strict)
-
     def text_line(self, text):
         return escape_line_start(escape_inline(text, self.strict))
 
@@ -549,7 +613,8 @@ def _has_regular_text(nodes, bold=False):
 
 
 class _Run:
-    """A stretch of text and the styles active over it."""
+    """A stretch of Markdown already written — a code span, a link, an
+    image, a break — and the styles active over it."""
     __slots__ = ("text", "styles")
 
     def __init__(self, text, styles):
@@ -557,35 +622,98 @@ class _Run:
         self.styles = frozenset(styles)
 
 
-def _emit(runs, active=frozenset()):
-    """Runs -> Markdown, wrapping each marker around as much as it covers."""
-    out = []
-    index = 0
-    while index < len(runs):
-        extra = runs[index].styles - active
-        if not extra:
-            out.append(runs[index].text)
-            index += 1
-            continue
-        colors = sorted(s for s in extra if s.startswith("color:"))
-        name, marker = (colors[0], None) if colors else next((n, m) for n, m in INLINE_MARKERS if n in extra)
-        end = index
-        while end < len(runs) and name in (runs[end].styles - active):
-            end += 1
-        body = _emit(runs[index:end], active | {name})
-        out.append(textcolor.span(name[6:], body) if marker is None else _wrap(marker, body))
-        index = end
-    return "".join(out)
+class _Text:
+    """A stretch of plain text and the styles active over it, escaped only
+    when it is written: whether a `*` or an `_` at its edge opens or closes
+    something depends on the characters written beside it."""
+    __slots__ = ("plain", "styles")
+
+    def __init__(self, plain, styles):
+        self.plain = plain
+        self.styles = frozenset(styles)
 
 
-def _wrap(marker, body):
-    """`** bold **` is not bold: whitespace has to sit outside the markers."""
-    stripped = body.strip()
-    if not stripped:
-        return body
-    lead = body[:len(body) - len(body.lstrip())]
-    tail = body[len(body.rstrip()):]
-    return lead + marker + stripped + marker + tail
+class _Marked:
+    """A stretch carrying one inline style, its body already written: the
+    delimiter or the tag around it waits until both neighbours are known."""
+    __slots__ = ("marker", "tag", "body")
+
+    def __init__(self, marker, tag, body):
+        self.marker = marker
+        self.tag = tag
+        self.body = body
+
+    def write(self, before, after):
+        """The delimiter where it reads back as this style around exactly
+        this body; elsewhere the tag that says the same."""
+        if _delimits(self.marker, before, self.body, after):
+            return self.marker + self.body + self.marker
+        return "<%s>%s</%s>" % (self.tag, self.body, self.tag)
+
+
+def _trim(runs):
+    """(lead, runs, tail): the whitespace at either end of a stretch of
+    runs, split off the text it belongs to."""
+    runs = list(runs)
+    lead, tail = [], []
+    while runs and isinstance(runs[0], _Text) and not runs[0].plain[:1].strip():
+        first = runs.pop(0)
+        rest = first.plain.lstrip()
+        lead.append(_Text(first.plain[:len(first.plain) - len(rest)], first.styles))
+        if rest:
+            runs.insert(0, _Text(rest, first.styles))
+    while runs and isinstance(runs[-1], _Text) and not runs[-1].plain[-1:].strip():
+        last = runs.pop()
+        rest = last.plain.rstrip()
+        tail.insert(0, _Text(last.plain[len(rest):], last.styles))
+        if rest:
+            runs.append(_Text(rest, last.styles))
+    return lead, runs, tail
+
+
+def _opening(piece):
+    """The first character a piece writes, as the parser sees it: plain
+    text unescaped, a marked stretch by its delimiter. Empty if it writes
+    nothing."""
+    if isinstance(piece, _Text):
+        return piece.plain[:1]
+    if isinstance(piece, _Marked):
+        return piece.marker[:1]
+    return piece.text[:1]
+
+
+def _delimits(marker, before, body, after):
+    """Would `marker + body + marker`, between these two characters, read
+    back as the style around exactly this body? The rules are the parser's
+    own: CommonMark's flanking for `*` and `**`, parse.UNDERLINE_PATTERN for
+    `_`, and mistune's formatting plugins for `==` and `~~`, which open and
+    close anywhere except next to their own character. Beside a neighbour's
+    `*`, a `*` delimiter would join that neighbour's run, which then opens
+    or closes by characters this stretch cannot see."""
+    if marker == "_":
+        probe = before + marker + body + marker + after
+        match = UNDERLINE.match(probe, len(before))
+        return match is not None and match.end() == len(probe) - len(after)
+    if marker[0] == "*":
+        return ("*" not in (before, after) and _left_flanking(before, body[0])
+                and _right_flanking(body[-1], after))
+    return marker[0] not in (before, body[0], body[-1], after) and marker not in body
+
+
+def _left_flanking(before, first):
+    return not first.isspace() and not (
+        _punctuation(first) and not before.isspace() and not _punctuation(before))
+
+
+def _right_flanking(last, after):
+    return not last.isspace() and not (
+        _punctuation(last) and not after.isspace() and not _punctuation(after))
+
+
+def _punctuation(char):
+    """Punctuation as the parser's emphasis rules count it: anything that
+    is neither a space nor a letter or digit."""
+    return not char.isspace() and not char.isalnum()
 
 
 def _code_line(line):

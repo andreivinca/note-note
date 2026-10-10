@@ -43,8 +43,11 @@ LINK_DESTINATION_ENTITY = re.compile(r"&(?=#[0-9]{1,7};|#[xX][0-9a-fA-F]+;|[^\t\
 LEADING_WHITESPACE = re.compile(r"^[ \t]+")
 
 
-def escape_inline(text, strict=False):
-    """Escape what would otherwise be read as inline Markdown."""
+def escape_inline(text, strict=False, before=" ", after=" "):
+    """Escape what would otherwise be read as inline Markdown. `before` and
+    `after` are the characters the text is written between: whether a
+    marker at its edge opens or closes something depends on them, as it
+    does inside the text. A space, by default, as at a line's edges."""
     if not text:
         return ""
     if strict:
@@ -52,15 +55,15 @@ def escape_inline(text, strict=False):
     link_ahead = "](" in text
     out = []
     for index, char in enumerate(text):
-        before = text[index - 1] if index else " "
-        after = text[index + 1] if index + 1 < len(text) else " "
+        previous = text[index - 1] if index else before
+        following = text[index + 1] if index + 1 < len(text) else after
         escape = (char in ALWAYS
-                  or (char in ADJACENT and not (before.isspace() and after.isspace()))
-                  or (char == "_" and _emphasises(before, after))
+                  or (char in ADJACENT and not (previous.isspace() and following.isspace()))
+                  or (char == "_" and _emphasises(previous, following))
                   # `==` opens or closes a highlight; a lone `=` is arithmetic.
-                  or (char == "=" and (before == "=" or after == "="))
+                  or (char == "=" and (previous == "=" or following == "="))
                   # A tag, a closing tag, a comment or a processing instruction.
-                  or (char == "<" and (after.isalpha() or after in "/!?"))
+                  or (char == "<" and (following.isalpha() or following in "/!?"))
                   or (char in "[]" and link_ahead))
         out.append("\\" + char if escape else char)
     return "".join(out)

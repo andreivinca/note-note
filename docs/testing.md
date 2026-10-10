@@ -341,6 +341,14 @@ disk. It is three lines of work and it is why the awkward cases (a rule alone
 in a note, an empty checkbox, a table after a quote, `2 * 3`,
 `user_name_field`) stay fixed.
 
+A note the editor cannot write back as it is goes in `UNKEPT` instead, with
+what `unkept` must name and what the editor must still show: raw HTML,
+anything but paragraphs inside a quote, a callout. Every `CASES` note must
+name nothing. The inline sweep styles every selection of a few awkward
+texts (`example.com`, `a_b`, `x*y_z`) in each style and in two overlapping
+ones, saves it and parses it again: no save may be refused and no
+character may come back with other formatting.
+
 ## Testing the request queue and the pacer
 
 Both run without the shell, a display or an account, and both are fast.
@@ -408,6 +416,11 @@ Each pins a bug that shipped, and was found by a review of the Python:
   line feed, so such a note previewed as `title: …` and its first save wrote
   a second front matter above the first, dropping the `tags:` an outside
   editor had written.
+- **`plugins/org.note-note.local/selftest.py`, read-only notes** — a note
+  holding what the editor cannot write back (raw HTML, a heading inside a
+  quote) loads `editable: false` with a reason naming it, and a plain note
+  loads editable. The first autosave used to write the editor's shorter
+  version over the file.
 - **`plugins/org.note-note.sticky/selftest.py`** — a note longer than the provider's
   256 KiB ceiling is cut to it and says so (`truncatedAt`), and the
   provider opens such a note read-only with the reason. It used to open

@@ -38,7 +38,12 @@ def from_markup(value):
     nodes = parse(value).children
     if len(nodes) != 1 or nodes[0].tag != "audio":
         return None
-    attrs = nodes[0].attrs
+    return from_attributes(nodes[0].attrs)
+
+
+def from_attributes(attrs):
+    """An `<audio>` element's attributes -> the audio token's attrs, or
+    None when they are not the ones `markup` writes."""
     if not isinstance(attrs.get("src"), str) or set(attrs) - {"src", "title", "controls", "data-id"}:
         return None
     result = {"url": attrs["src"], "title": attrs.get("title") or "Audio recording"}

@@ -227,6 +227,12 @@ you type, even when they are plain text in Markdown. Drag across a link to
 select it. The display styling leaves saved Markdown and cursor spacing
 unchanged. Type a space to continue with ordinary text after a URL. A new
 list item starts with ordinary text.
+Formatting part of a word, or text beside punctuation, saves as the HTML tag
+other Markdown tools also read (`a<u>b</u>c`, `example<strong>.com</strong>`)
+where `_` or `**` would not work. A local note written elsewhere that holds
+what the editor cannot write back as it is — raw HTML, a heading, list or code
+block inside a quote, a quote inside a quote, a callout — opens read-only and
+says what it holds, so the file is never saved shorter.
 Existing OneNote audio attachments, including phone recordings in 3GP format,
 show an inline player: a round Play/Stop button beside the recording's title,
 with a seek bar and the time beneath it. Opening a page downloads none of its

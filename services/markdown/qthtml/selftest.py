@@ -12,6 +12,8 @@ requires `qml6`; a missing runtime fails the suite.
     python3 services/markdown/qthtml/selftest.py [--verbose]
 """
 import argparse
+import html as _html
+import itertools
 import json
 import os
 import struct
@@ -21,7 +23,8 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from qthtml import convert, dialect, to_html, to_markdown  # noqa: E402
+from qthtml import convert, dialect, to_html, to_markdown, unkept  # noqa: E402
+from parse import parse  # noqa: E402
 
 # Each case is a note as it would sit on disk. The awkward ones are here
 # because Qt's *Markdown* writer used to corrupt them (docs/engine-notes.md);
@@ -35,6 +38,15 @@ CASES = {
     "text around audio": 'Before\n\n<audio src="file:///tmp/recording.3gp" title="Audio recording"></audio>\n\nAfter\n',
     "two recordings": '<audio src="file:///tmp/one.wav" title="One"></audio>\n\n<audio src="file:///tmp/two.wav" title="Two"></audio>\n',
     "audio in table": '| Recording |\n|---|\n| <audio src="file:///tmp/recording.3gp" title="Audio recording"></audio> |\n',
+    # A list beside a recording makes the table structured HTML, which had
+    # no audio: saving raised, and such a note could not be displayed.
+    "audio beside a list in a table": (
+        '<table><tr><td><p><audio src="file:///tmp/recording.3gp" title="Audio recording" data-id="nn-audio-cell">'
+        '</audio></p></td><td><ul><li>one</li><li>two</li></ul></td></tr></table>\n'),
+    "audio in a nested table": (
+        '<table><tr><td><p>Outer</p></td></tr><tr><td><table><tr><td><p>'
+        '<audio src="file:///tmp/recording.3gp" title="Inner recording"></audio></p></td></tr>'
+        '<tr><td><p>after</p></td></tr></table></td></tr></table>\n'),
     "text color": '<span style="color:#0070c0;">Mushrooms</span>\n',
     "color in checklist": '- [x] <span style="color:#0070c0;">Mushrooms</span>\n- [ ] Milk\n',
     "color with formatting": '<span style="color:#ff0000;">**bold** and *italic* and ==mark==</span>\n',
@@ -54,6 +66,21 @@ CASES = {
     "sixth heading opens the note": "###### Six\n\nbody\n",
     "sixth heading with bold": "###### Six with **bold** inside\n",
     "inline": "para **b** *i* _u_ ~~s~~ ==hi== `c` [l](http://x)\n",
+    # Where no delimiter can open and close, the tag that says the same.
+    "underline inside a word": "a<u>b</u>c\n",
+    "underline opening a word": "<u>un</u>do\n",
+    "underline over an underscore": "x <u>a_b</u> y\n",
+    "bold underscore inside a word": "a<strong>\\_</strong>b\n",
+    "bold punctuation after a word": "example<strong>.com</strong>\n",
+    "italic punctuation inside a word": "a<em>.</em>b\n",
+    "highlight after an equals sign": "x\\=<mark>y</mark>\n",
+    "strikethrough after a tilde": "a\\~<s>b</s>\n",
+    "underline after a backslash": "\\\\<u>\\_</u>x\n",
+    "italic beside bold": "<em>a</em>**b**\n",
+    "bold link inside a word": "a<strong>[link](https://example.com)</strong>b\n",
+    "underline inside a word in a heading": "## a<u>b</u>c\n",
+    "underline inside a word in a checklist": "- [ ] a<u>b</u>c\n",
+    "underline inside a word in a cell": "| a<u>b</u>c | x |\n|---|---|\n| 1 | 2 |\n",
     "heading with formatting": "## Head with ==mark== and *italic*\n",
     "heading with bold": "## Head with **bold** inside\n",
     "heading with a link": "### See [the docs](https://example.com)\n",
@@ -93,10 +120,12 @@ CASES = {
     "code opening item": "- ```\n  echo hello\n  ```\n",
     "nested code at end": "- parent\n  - child\n\n    ```\n    echo child\n    ```\n",
     "quote and heading in item": "- Title\n\n  > quote\n\n  ## Heading\n- end\n",
+    "table in item": "- Title\n\n  | a | b |\n  |---|---|\n  | 1 | 2 |\n- end\n",
     "checkboxes": "- [ ] todo\n- [x] done\n",
     "empty checkbox": "- [ ] \n- [x] done\n",
     "quote": "> quoted line\n",
     "empty quote": "> \u00a0\n",
+    "callout of one line": "> [!NOTE] Remember this\n",
     "empty quote after text": "before\n\n> \u00a0\n",
     "empty line inside quote": "> first\n\n> \u00a0\n\n> last\n",
     "empty quote before table": "> \u00a0\n\n| a | b |\n|---|---|\n| 1 | 2 |\n",
@@ -195,6 +224,43 @@ CASES = {
         "```\ntotal = 12\n```\n\nSee [the list](https://example.com/list).\n"),
 }
 
+# Notes the editor cannot write back as they are. The writer used to drop
+# raw HTML, and to draw a quoted heading, list or code block as if it were
+# not quoted, so the first save wrote the shorter, flatter note over the
+# file. Now `unkept` names each (the reason the local provider opens such a
+# note read-only with), and the editor still shows all of it.
+#   (name, markdown, what `unkept` names, what the editor's HTML still shows)
+UNKEPT = [
+    ("HTML block", "<div>Keep me</div>\n", ["HTML"], "Keep me"),
+    ("HTML between paragraphs", "Before\n\n<div>Keep me</div>\n\nAfter\n", ["HTML"], "Keep me"),
+    ("HTML comment", "Before\n\n<!-- TODO: keep this -->\n\nAfter\n", ["HTML"], "TODO: keep this"),
+    ("image tag", '<img src="pic.png" width="200">\n\nText\n', ["HTML"], "pic.png"),
+    ("centred image", '<p align="center"><img src="logo.png"></p>\n\nText\n', ["HTML"], "logo.png"),
+    ("line break alone", "Line\n\n<br>\n\nMore\n", ["HTML"], "&lt;br&gt;"),
+    ("centre tag", "<center>Title</center>\n\nText\n", ["HTML"], "Title"),
+    ("details", "Intro\n\n<details>\n<summary>More</summary>\n\nHidden body\n</details>\n\nOutro\n",
+     ["HTML"], "&lt;summary&gt;More"),
+    ("HTML in a list item", "- item\n\n  <div>inside</div>\n- next\n", ["HTML"], "inside"),
+    ("inline HTML", "Press <kbd>Ctrl</kbd> now\n", ["HTML"], "&lt;kbd&gt;Ctrl"),
+    ("unclosed formatting tag", "<u>open\n", ["HTML"], "&lt;u&gt;open"),
+    ("quoted heading", "> # Heading\n> text\n", ["a quoted heading"], "Heading"),
+    ("quoted code", "> ```\n> code\n> ```\n", ["a quoted code block"], "code"),
+    ("quoted list", "> - one\n> - two\n", ["a quoted list"], "two"),
+    ("quoted table", "> | a | b |\n> |---|---|\n> | 1 | 2 |\n", ["a quoted table"], "<table"),
+    ("quoted rule", "> ---\n", ["a quoted rule"], "<hr"),
+    ("nested quote", "> outer\n>\n> > inner\n", ["a nested quote"], "inner"),
+    ("callout", "> [!NOTE]\n> Remember this\n", ["a callout"], "Remember this"),
+    ("callout with a title", "> [!tip] Title\n>\n> Body\n", ["a callout"], "Body"),
+    ("quoted list in an item", "- Title\n\n  > - a\n- end\n", ["a quoted list"], "Title"),
+    ("item opening with a heading", "- # Head\n- next\n", ["a list item opening with a heading"], "Head"),
+    ("item opening with a quote", "- > quoted\n- next\n", ["a list item opening with a quote"], "quoted"),
+    ("item opening with a rule", "1. ---\n2. next\n", ["a list item opening with a rule"], "<hr"),
+    ("item opening with a table", "- | x | y |\n  |---|---|\n  | 1 | 2 |\n",
+     ["a list item opening with a table"], "<table"),
+    ("several at once", "<!-- a -->\n\n> # H\n\n> outer\n>\n> > inner\n\n<!-- b -->\n",
+     ["HTML", "a quoted heading", "a nested quote"], "inner"),
+]
+
 # Two paths run here, because the app has two:
 #   saved  — our HTML into the document, straight back out. Every save.
 #   reread — the document handed its own HTML again, as a toolbar action does.
@@ -220,9 +286,13 @@ Window {
       // How Qt itself counts blocks: a paragraph separator starts one, and so
       // does each table cell (docs/engine-notes.md).
       e.text = strip(saved)
-      var plain = e.getText(0, e.length), blocks = 1
-      for (var i = 0; i < plain.length; i++)
-        if (plain.charCodeAt(i) === 0x2029 || plain.charCodeAt(i) === 0xFDD0) blocks++
+      var plain = e.getText(0, e.length)
+      var blocks = 1
+      for (var i = 0; i < plain.length; i++) {
+        if (plain.charCodeAt(i) === 0x2029 || plain.charCodeAt(i) === 0xFDD0) {
+          blocks++
+        }
+      }
       out[key] = { saved: saved, reread: reread, blocks: blocks,
                    stable: strip(reread) === strip(e.getFormattedText(0, e.length)) }
     }
@@ -440,6 +510,99 @@ def check_pasted_prose_indentation(verbose):
     return failures
 
 
+def check_unkept(verbose):
+    """Every note in UNKEPT names what it holds and shows all of it; no note
+    in CASES — each one the editor writes back as it is — names anything."""
+    failures = 0
+    for name, markdown, named, shown in UNKEPT:
+        if unkept(markdown) != named:
+            failures += 1
+            report(name, "unkept", named, unkept(markdown), verbose)
+        elif shown not in to_html(markdown):
+            failures += 1
+            report(name, "still shown", shown, to_html(markdown), verbose)
+    for name, markdown in CASES.items():
+        if unkept(markdown):
+            failures += 1
+            report(name, "kept", [], unkept(markdown), verbose)
+    total = len(UNKEPT) + len(CASES)
+    print("unkept (what the editor cannot write back, and only that)")
+    print("  %d/%d cases" % (total - failures, total))
+    return failures
+
+
+# A selection styled the way Qt holds it: one flat span per run of styles.
+STYLE_CSS = {
+    "bold": "font-weight:700;",
+    "italic": "font-style:italic;",
+    "underline": "text-decoration: underline;",
+    "strike": "text-decoration: line-through;",
+    "highlight": "background-color:%s;" % dialect.DEFAULT_HIGHLIGHT,
+}
+TOKEN_STYLE = {"strong": "bold", "emphasis": "italic", "underline": "underline",
+               "strikethrough": "strike", "mark": "highlight"}
+
+
+def styled_paragraph(text, spans):
+    """`text` with each (start, end, style) applied, as Qt's flat spans."""
+    styles = [frozenset(s for start, end, s in spans if start <= i < end) for i in range(len(text))]
+    out = []
+    for style, group in itertools.groupby(zip(text, styles), key=lambda pair: pair[1]):
+        chunk = _html.escape("".join(c for c, _ in group), quote=False)
+        decorations = " ".join(d for s, d in (("underline", "underline"), ("strike", "line-through")) if s in style)
+        css = "".join(STYLE_CSS[s] for s in sorted(style) if s not in ("underline", "strike"))
+        css += "text-decoration: %s;" % decorations if decorations else ""
+        out.append('<span style="%s">%s</span>' % (css, chunk) if css else chunk)
+    return "<p>%s</p>" % "".join(out), [(c, s) for c, s in zip(text, styles) if not c.isspace()]
+
+
+def styled_characters(tokens, styles=frozenset()):
+    """(character, styles) for each visible character the tokens draw."""
+    out = []
+    for token in tokens:
+        if token["type"] == "text":
+            out.extend((c, styles) for c in token["raw"] if not c.isspace())
+        elif token["type"] in TOKEN_STYLE:
+            out.extend(styled_characters(token.get("children") or [], styles | {TOKEN_STYLE[token["type"]]}))
+        else:
+            out.extend(styled_characters(token.get("children") or [], styles))
+    return out
+
+
+def check_inline_boundaries(verbose):
+    """A style on any selection reads back as that style on exactly that
+    text. Markers used to be written whatever stood beside them, so an
+    underline inside a word, or bold between a letter and punctuation,
+    stayed literal and the save was refused, and an underline over `a_b`
+    came back italic. Each text below goes through the reader with every
+    selection in every style, and the shorter ones with two overlapping
+    styles, and the Markdown is parsed again."""
+    singles = [(style,) for style in STYLE_CSS]
+    pairs = [("bold", "italic"), ("underline", "bold"), ("highlight", "strike"), ("underline", "italic")]
+    sweeps = [(text, singles) for text in ("abc", "undo", "a_b c", "example.com", "x*y_z", "a=b~c", "\\_[x]")]
+    sweeps += [(text, pairs) for text in ("a_b", "x*y", "a.b", "a\\b")]
+    failures = total = 0
+    for text, style_sets in sweeps:
+        selections = [(i, j) for i in range(len(text)) for j in range(i + 1, len(text) + 1)]
+        for styles in style_sets:
+            for picks in itertools.product(selections, repeat=len(styles)):
+                spans = [(i, j, s) for (i, j), s in zip(picks, styles)]
+                document, expected = styled_paragraph(text, spans)
+                total += 1
+                try:
+                    markdown = to_markdown(document)
+                except ValueError as error:
+                    failures += 1
+                    report("%r %r" % (text, spans), "inline save", expected, str(error), verbose)
+                    continue
+                if styled_characters(parse(markdown)) != expected:
+                    failures += 1
+                    report("%r %r" % (text, spans), "inline reread", expected, markdown, verbose)
+    print("inline boundaries (every selection, styled, saved and parsed again)")
+    print("  %d/%d cases" % (total - failures, total))
+    return failures
+
+
 def report(name, stage, expected, actual, verbose):
     print("  FAIL  %-18s (%s)" % (name, stage))
     if verbose:
@@ -470,6 +633,8 @@ def main():
     failures += check_as_text(args.verbose)
     failures += check_command_line(args.verbose)
     failures += check_pasted_prose_indentation(args.verbose)
+    failures += check_unkept(args.verbose)
+    failures += check_inline_boundaries(args.verbose)
 
     # The chip rides through Qt too: the span must keep both halves — the
     # family that means code and the colour that shows it — and still read

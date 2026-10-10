@@ -3,7 +3,9 @@
 The Markdown is parsed once by the vendored mistune (`services/markdown/parse.py`);
 this module is only the renderer. It emits the *minimal* form of the dialect —
 Qt normalises it into the verbose form on the way in, and `reader` recognises
-that form on the way out.
+that form on the way out. What the dialect has no form for — raw HTML, a
+heading inside a quote — it still shows, and names (`unkept`), because the
+editor would not write it back as it is.
 """
 import html as _html
 import re
@@ -42,6 +44,31 @@ INLINE_SPAN = {
     "strikethrough": "text-decoration: line-through;",
 }
 
+# The editor's quote is a paragraph's margins (dialect.is_quote), one level
+# deep. A quote of paragraphs is kept; any other block inside one would come
+# back unquoted, and a quote inside a quote one level deep. Named as the
+# reason for a read-only note names them (see `unkept`).
+QUOTED_BLOCK = {
+    "heading": "a quoted heading",
+    "block_code": "a quoted code block",
+    "list": "a quoted list",
+    "table": "a quoted table",
+    "thematic_break": "a quoted rule",
+    "block_quote": "a nested quote",
+}
+# An item's first block goes on its marker's line. These are drawn below an
+# empty marker instead, and read back so they end the list: an item opening
+# with code is the one the reader joins back (`- ```), and one opening with
+# a list is the same item either way.
+ITEM_OPENING = {
+    "heading": "a list item opening with a heading",
+    "block_quote": "a list item opening with a quote",
+    "thematic_break": "a list item opening with a rule",
+    "table": "a list item opening with a table",
+}
+# A GitHub alert or an Obsidian callout: a quote opening with `[!NOTE]`.
+CALLOUT = re.compile(r"\[![A-Za-z]+\]")
+
 
 def to_html(markdown, highlight=dialect.DEFAULT_HIGHLIGHT,
             code_background=dialect.DEFAULT_CODE_BACKGROUND,
@@ -54,6 +81,19 @@ def to_html(markdown, highlight=dialect.DEFAULT_HIGHLIGHT,
     return _Renderer(highlight, code_background, code_chip, base).document(parse(markdown or ""))
 
 
+def unkept(markdown):
+    """What in this Markdown the editor cannot write back as it is, named
+    for the reason a read-only note gives — in document order, without
+    repeats, and empty when the note can be edited without losing any of
+    it. It is the renderer's own account, taken as it renders, so what the
+    editor shows and what this reports cannot drift apart. A note holding
+    any of it opens read-only (the local provider's load), because the
+    first save would write the editor's version over it."""
+    renderer = _Renderer(dialect.DEFAULT_HIGHLIGHT)
+    renderer.document(parse(markdown or ""))
+    return renderer.unkept
+
+
 def first_block_kind(tokens):
     """The kind of the first block the document draws: blank lines draw
     nothing, and a quote draws whatever it opens with."""
@@ -64,6 +104,20 @@ def first_block_kind(tokens):
             return first_block_kind(token.get("children"))
         return token["type"]
     return ""
+
+
+def _is_callout(tokens):
+    """Does this quote open with a callout's `[!TYPE]` marker and go on past
+    its line? The editor's quote paragraph would join that line to the
+    next, and a quote's second paragraph would become a quote of its own.
+    A callout of one line is written back as it is."""
+    blocks = [token for token in tokens if token["type"] != "blank_line"]
+    if not blocks or blocks[0]["type"] != "paragraph":
+        return False
+    words = blocks[0].get("children") or []
+    if not words or words[0]["type"] != "text" or not CALLOUT.match(words[0]["raw"]):
+        return False
+    return len(blocks) > 1 or any(word["type"] in ("softbreak", "linebreak") for word in words)
 
 
 def contains_media(tokens):
@@ -87,6 +141,12 @@ class _Renderer:
         self.code_background = code_background
         self.code_chip = code_chip
         self.base = base
+        self.unkept = []
+
+    def cannot_keep(self, name):
+        """Note a construct the editor would not write back as it is."""
+        if name not in self.unkept:
+            self.unkept.append(name)
 
     # ---- documents and blocks ------------------------------------------
 
@@ -117,8 +177,7 @@ class _Renderer:
         if kind == "audio":
             return [self.paragraph({"children": [token]}, indent, quote)]
         if kind == "block_quote":
-            blocks = self.blocks(token.get("children"), indent, quote=True)
-            return blocks or [self.paragraph({}, indent, True)]
+            return self.quote(token, indent)
         if kind == "block_code":
             return self.code(token, indent)
         if kind == "thematic_break":
@@ -127,7 +186,24 @@ class _Renderer:
             return [self.list(token, indent, quote)]
         if kind == "table":
             return [self.table(token)]
-        return self.blocks(token.get("children"), indent, quote)
+        if kind == "block_html":
+            # The editor cannot hold raw HTML. It is shown as the source it
+            # is, so a note held read-only for it still shows all of itself.
+            self.cannot_keep("HTML")
+            return self.code(token, indent)
+        raise ValueError("the editor has no form for a %s block" % kind)
+
+    def quote(self, token, indent):
+        """Each paragraph of a quote is a quote paragraph. Whatever else a
+        quote holds is drawn without the quote, and reported."""
+        children = token.get("children") or []
+        for child in children:
+            if child["type"] in QUOTED_BLOCK:
+                self.cannot_keep(QUOTED_BLOCK[child["type"]])
+        if _is_callout(children):
+            self.cannot_keep("a callout")
+        blocks = self.blocks(children, indent, quote=True)
+        return blocks or [self.paragraph({}, indent, True)]
 
     def heading(self, token):
         level = min(max(token.get("attrs", {}).get("level", 1), 1), 6)
@@ -225,6 +301,8 @@ class _Renderer:
         if children and children[0]["type"] in ("block_text", "paragraph"):
             body_children = children.pop(0).get("children") or []
             body = self.inline(body_children).strip()
+        elif children and children[0]["type"] in ITEM_OPENING:
+            self.cannot_keep(ITEM_OPENING[children[0]["type"]])
         if not body:
             body = dialect.EMPTY_ITEM        # Qt drops an item with no content
         if OPENS_WITH_IMAGE.match(body):
@@ -322,11 +400,11 @@ class _Renderer:
             elif kind == "softbreak":
                 out.append(" ")
             elif kind == "inline_html":
+                # Shown as the source it is, like raw HTML on a block of its own.
+                self.cannot_keep("HTML")
                 out.append(_html.escape(token.get("raw", ""), quote=False))
-            elif token.get("children"):
-                out.append(self.inline(token.get("children"), heavy, foreground))
-            elif token.get("raw"):
-                out.append(_html.escape(token["raw"], quote=False))
+            else:
+                raise ValueError("the editor has no form for %s" % kind)
         return "".join(out)
 
     def image_width(self, url, width):

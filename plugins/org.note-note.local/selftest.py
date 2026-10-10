@@ -521,6 +521,39 @@ def test_image_escape(directory, verbose):
     return failures
 
 
+def test_unkept_opens_read_only(directory, verbose):
+    """A note holding what the editor would not write back as it is — raw
+    HTML, a heading inside a quote — opens read-only and says why. Its
+    first save used to write the editor's version over it: the HTML gone,
+    the heading out of its quote. Run as the child process Provider.qml
+    runs, so the answer checked is the one the provider reads."""
+    failures = 0
+    root = os.path.join(directory, "unkept")
+    os.makedirs(root)
+    cases = [
+        ("plain.md", "# Shopping\n\n- [ ] milk\n\n> a quote\n", True, ""),
+        ("html.md", "Before\n\n<div>Keep me</div>\n\nAfter\n", False, "HTML"),
+        ("quoted.md", "> # Heading\n> text\n", False, "a quoted heading"),
+    ]
+    for name, body, editable, named in cases:
+        path = os.path.join(root, name)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("---\ntitle: %s\n---\n%s" % (name, body))
+        request = json.dumps({"action": "read", "root": root, "file": path})
+        done = subprocess.run([sys.executable, os.path.join(HERE, "operations.py")], input=request,
+                              capture_output=True, text=True, timeout=60)
+        answer = json.loads(done.stdout or "{}")
+        failures += check("%s reads back as written" % name, answer.get("body") == body, repr(answer))
+        failures += check("%s opens %s" % (name, "editable" if editable else "read-only"),
+                          answer.get("editable") is editable, repr(answer))
+        failures += check("%s gives %s" % (name, "a reason naming " + named if named else "no reason"),
+                          (named in answer.get("reason", "")) if named else answer.get("reason") == "",
+                          repr(answer.get("reason")))
+    print("a note the editor cannot write back opens read-only")
+    print("  %d checks failed" % failures if failures else "  all green")
+    return failures
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -538,6 +571,7 @@ def main():
         total += test_listing_end_record(directory, args.verbose)
         total += test_exact_names(directory, args.verbose)
         total += test_line_endings(directory, args.verbose)
+        total += test_unkept_opens_read_only(directory, args.verbose)
 
     if FAILURES:
         print("\n%d failure(s):" % len(FAILURES))

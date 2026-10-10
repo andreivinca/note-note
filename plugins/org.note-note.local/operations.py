@@ -6,12 +6,29 @@ import sys
 import uuid
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "lib"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "services", "markdown"))
 from fileio import MAX_PAYLOAD, write_atomic
 from images import stage
 import notefile
 from readfile import read_document
 
 MAX_NOTE_BYTES = 2 * 1024 * 1024
+
+
+def unkept(body):
+    """What in this note the editor would not write back as it is
+    (qthtml.writer.unkept). Imported here rather than above: every save
+    runs this script, and only a read needs the Markdown renderer."""
+    from qthtml import unkept as editor_unkept
+    return editor_unkept(body)
+
+
+def unkept_reason(lost):
+    """The load answer's reason for a note that opens read-only."""
+    if not lost:
+        return ""
+    named = lost[0] if len(lost) == 1 else ", ".join(lost[:-1]) + " and " + lost[-1]
+    return "This note holds %s, which Note Note cannot write back, so it opened read-only" % named
 
 
 def inside(root, path):
@@ -45,8 +62,9 @@ def execute(payload):
         if not document.get("ok"):
             return document
         title, body, _ = notefile.split(document["text"])
+        lost = unkept(body)
         return {"ok": True, "title": title, "body": body, "version": document["version"],
-                "bytes": document["bytes"]}
+                "bytes": document["bytes"], "editable": not lost, "reason": unkept_reason(lost)}
     if action == "remove":
         if not stat.S_ISREG(os.lstat(path).st_mode):
             raise ValueError("note is not a regular file")

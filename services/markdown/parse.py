@@ -1,8 +1,12 @@
 """Markdown -> AST for the providers, on top of the vendored mistune.
 
-Parses the dialect Qt's TextEdit writes: GitHub task lists, tables,
+Parses the dialect Qt's TextEdit writes: GitHub task lists, tables (inside
+quotes and list items too, where GitHub reads them),
 ~~strikethrough~~, ==highlight== (mark), and `_underline_` (Qt stores
-underline as _x_, italic as *x*). Backslash escapes come out resolved, soft wraps appear as `softbreak`
+underline as _x_, italic as *x*). Where no delimiter can mark a selection —
+inside a word, around an underscore — the editor writes the HTML tag that
+says the same (`<u>`, `<strong>`, `<em>`, `<s>`, `<mark>`), read here as the
+token the delimiter would have made. Backslash escapes come out resolved, soft wraps appear as `softbreak`
 and "two spaces + newline" as `linebreak`. Renderers live with the providers.
 """
 import os
@@ -11,11 +15,19 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mistune  # noqa: E402
+from mistune.helpers import PREVENT_BACKSLASH  # noqa: E402
+from mistune.plugins.table import table_in_list, table_in_quote  # noqa: E402
 import htmltables  # noqa: E402
 import textcolor  # noqa: E402
 import audio  # noqa: E402
 
-UNDERLINE_PATTERN = r"(?<![\w_])_(?!\s)(?:\\_|[^_\n])+?(?<!\s)_(?![\w_])"
+# A backslash takes the character after it, so `\_` is an underscore in the
+# text and `\\_` a backslash before the closing marker.
+UNDERLINE_PATTERN = r"(?<![\w_])_(?!\s)(?:\\[^\n]|[^\\_\n])+?(?<!\s)_(?![\w_])"
+
+# A bare formatting tag, by the names a structured table cell accepts
+# (htmltables.INLINE_TAGS). An attribute makes it some other HTML.
+FORMAT_TAG_PATTERN = r"<(?i:%s)>" % "|".join(htmltables.INLINE_TAGS)
 
 
 def _parse_underline(inline, m, state):
@@ -34,7 +46,32 @@ def _underline_plugin(md):
     md.inline.register("underline", UNDERLINE_PATTERN, _parse_underline, before="emphasis")
 
 
-_md = mistune.create_markdown(renderer=None, plugins=["task_lists", "strikethrough", "table", "mark", _underline_plugin, textcolor.plugin, audio.plugin])
+def _parse_format_tag(inline, m, state):
+    # Up to the tag that closes this one, counting nested tags of the same
+    # name; an escaped `\<` is text, not a tag. Unclosed, it is the HTML
+    # it would have been without this rule.
+    name = m.group(0)[1:-1].lower()
+    tags = re.compile(PREVENT_BACKSLASH + r"(<(/?)%s>)" % name, re.I)
+    depth = 1
+    for tag in tags.finditer(state.src, m.end()):
+        depth += -1 if tag.group(2) else 1
+        if depth:
+            continue
+        child = state.copy()
+        child.src = state.src[m.end():tag.start(1)]
+        state.append_token({"type": htmltables.INLINE_TAGS[name], "children": inline.render(child)})
+        return tag.end()
+    state.append_token({"type": "inline_html", "raw": m.group(0)})
+    return m.end()
+
+
+def _format_tag_plugin(md):
+    md.inline.register("format_tag", FORMAT_TAG_PATTERN, _parse_format_tag, before="inline_html")
+
+
+_md = mistune.create_markdown(renderer=None, plugins=[
+    "task_lists", "strikethrough", "table", table_in_quote, table_in_list, "mark",
+    _underline_plugin, _format_tag_plugin, textcolor.plugin, audio.plugin])
 
 # A display width the author chose, written right after an image the way
 # pandoc writes attributes: `![alt](pic.png){width=320}`. mistune leaves it

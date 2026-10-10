@@ -10,6 +10,9 @@ is the boundary between the two, and the only place that knows Qt's dialect.
     convert(html)      -> {"markdown": str, "blocks": [int]} — the same
                           Markdown, plus the document block each line came
                           from, which is how the toolbar finds the caret's line
+    unkept(markdown)   -> [str] — what in the Markdown the editor would not
+                          write back as it is; a note holding any of it
+                          opens read-only
 
 Both directions are pure functions of their input; `dialect` holds the
 vocabulary they share. See `python3 -m qthtml --help` for the command line the
@@ -17,6 +20,6 @@ QML side uses, and `selftest.py` for the round-trip property that matters:
 markdown -> html -> (Qt) -> html -> markdown must reach a fixpoint.
 """
 from .reader import convert, to_markdown
-from .writer import to_html
+from .writer import to_html, unkept
 
-__all__ = ["convert", "to_html", "to_markdown"]
+__all__ = ["convert", "to_html", "to_markdown", "unkept"]
