@@ -8,6 +8,8 @@ import base64
 import re
 import urllib.parse
 
+import msgraph
+
 
 ROOT_PATH = re.compile(r"^/v1\.0/(?:me|users/[^/]+|users\('[^']+'\)|groups/[^/]+|sites/[^/]+)/onenote/")
 # HIGH-RISK WORKAROUND: observed personal-ID shape, not a documented mapping.
@@ -63,18 +65,10 @@ class DiscoveryError(Exception):
 
 
 def graph_url(url):
-    """Accept only Graph OneNote relationship URLs before sending a token."""
-    if not isinstance(url, str):
-        return ""
-    try:
-        parsed = urllib.parse.urlsplit(url)
-    except ValueError:
-        return ""
-    if (parsed.scheme != "https" or parsed.netloc != "graph.microsoft.com"
-            or parsed.fragment or not ROOT_PATH.match(parsed.path)):
-        return ""
-    decoded = urllib.parse.unquote(parsed.path)
-    if any(part in (".", "..") for part in decoded.split("/")):
+    """Accept only Graph OneNote relationship URLs before sending a token:
+    msgraph.graph_url's check, narrowed to OneNote's resources."""
+    url = msgraph.graph_url(url)
+    if not url or not ROOT_PATH.match(urllib.parse.urlsplit(url).path):
         return ""
     return url
 
