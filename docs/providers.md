@@ -86,9 +86,57 @@ do — a folder is not a brand.
 time and which one is open is the user's, kept between runs. Passing it is
 harmless.
 
-A row is `{ kind, path, title, preview, icon, level, expanded, reorder, version, modified }` with
+A row is `{ kind, path, title, preview, icon, level, expanded, count, menu, reorder, version, modified }` with
 `kind` one of `note`, `new` (path = create target), `action` (path = action
 id), `tree` (path = tree id, `expanded`).
+Tree rows can supply `count`, a nonnegative note count displayed in a badge after the
+title, including when collapsed. Count all notes in the group, including subpages,
+and omit notes hidden by pending deletion. Omit `count` when unavailable.
+
+### Row menus
+
+A right-click on a row opens the menu its provider lists in the row's
+`menu`: `[{ id, title, icon?, command?, rename?, prompt?, confirm? }]`, in the
+order given. A row without one has no menu; search results have none. Which
+rows offer what is the provider's alone — the host adds no item of its own.
+
+- `command: "deleteNote"` on a note row is the app's own delete: its
+  confirmation, then `remove()` and everything that flow does. A note is
+  deleted from the list no other way, so a provider that can delete gives
+  its notes this item.
+- Any other item calls `rowAction(path, id, value, cb)`. With `rename: true`
+  the host first edits the row's title in place, and `value` is the new
+  title — Enter submits a nonempty, changed title; Escape or leaving the field
+  keeps the old one. With `prompt`, the host first asks for a name in a
+  small dialog — "<item title> in “<row title>”", the `prompt` as the field's
+  placeholder — and `value` is the name. `value` is `""` otherwise. With
+  `confirm`, the host asks that question first, the item's `title` on the
+  button that goes ahead.
+- Before `rowAction` runs, the host writes the open note and holds it still
+  until `cb({ error?, removed? })`: queue the action behind your accepted
+  writes. Report each note it moves with `notePathChanged` before you answer,
+  and the paths of the notes it deletes in `removed`: the host drops their
+  unsaved edits and puts the open note away when it is one of them. The host
+  reports an `error` on the status line.
+
+```js
+{ kind: "tree", path: "book:Work", title: "Work", menu: [
+  { id: "newSection", title: "New section", icon: "󰉗", prompt: "Section name" },
+  { id: "rename", title: "Rename", icon: "󰑕", rename: true },
+  { id: "delete", title: "Delete", icon: "󰆴", confirm: "Delete the notebook “Work” and its 3 notes?" }
+] }
+```
+
+Local notebooks are the folders under its root, and their sections the
+folders inside them, to any depth: each folder lists its sections first,
+shut until opened, then its own notes. A notebook row (with `notebookTabs`
+off) and a section row make a section inside, or rename or delete their
+folder; a folder holding anything but notes is not deleted. OneNote's
+notebook rows, in its one-tab shape, make a section; its section rows rename
+and delete one in personal notebooks the account can edit. Graph's OneNote API can do neither, but such a section is a
+`.one` file in its owner's OneDrive, named after the section: renaming the
+file renames the section in every OneNote app, and deleting it sends the
+section to the OneDrive recycle bin.
 
 ### Provider-defined ordering
 
@@ -131,7 +179,7 @@ Action and tree ids are plain strings and several providers use the same ones
 tab first, so a shared name never reaches another provider's row.
 
 `footerActions` supplies **every** button pinned to the bottom of the sidebar,
-in display order. Each descriptor is `{ path, title, icon?, inputPlaceholder?, shortcut? }`.
+in display order. Each descriptor is `{ path, title, icon?, inputPlaceholder?, prompt?, shortcut? }`.
 The app renders all of them with one shared, full-width row component, stacked
 vertically with identical height, padding, hover fill, radius and icon styling.
 It does not add creation buttons based on provider identity or capabilities.
@@ -141,8 +189,10 @@ counts, or become search matches. They remain available during search.
 A click calls the owning provider's `action(path, value, sectionKey)`, where
 `value` is normally `""` and `sectionKey` is the provider's own section key.
 When `inputPlaceholder` is supplied, the same row collects text first: Enter
-submits a nonempty trimmed value, and Escape cancels. No special notebook
-input exists in the host. Action ids need only be unique within the section;
+submits a nonempty trimmed value, and Escape cancels. With `prompt` instead,
+a small dialog asks for the name — "<title> in “<tab name>”", the `prompt` as
+the field's placeholder — as a row menu item's `prompt` does. No special
+notebook input exists in the host. Action ids need only be unique within the section;
 the host carries ownership explicitly, so another provider's identical id
 cannot receive the click. Existing `action(path)` handlers can ignore the
 additional arguments.
@@ -162,9 +212,10 @@ footerActions: [
 ]
 ```
 
-Local supplies New Note and New notebook. OneNote supplies New section and
-account actions; its New Note rows appear only inside sections. In a combined
-OneNote tab, each notebook's New section action names its destination.
+Local supplies New Note and New notebook, and New section in a notebook's
+own tab. OneNote supplies account actions, and New section in a notebook's
+own tab; its New Note rows appear only inside sections. In the combined
+OneNote tab, New section is on each notebook row's menu instead.
 Sticky Notes supplies New Note and account actions. An external provider uses
 the same contract.
 
@@ -320,6 +371,9 @@ to the running instance and `rebuild()` is called.
   you call back, or the tab it opens will be empty.
 - `action(id, value, sectionKey)` — footer actions include input and section
   context; inline actions supply only the id. Extra arguments can be ignored.
+- `rowAction(path, id, value, cb)` (optional) → `cb({ error?, removed? })` —
+  an item of a row's `menu` (see "Row menus"); needed only by a provider
+  whose menus hold more than `command` items.
 - `toggleTree(id)`
 - `recording(source, title, cb)` (optional) — fetch one recording for
   playback, when someone presses Play on it; never fetch recordings with a

@@ -5,11 +5,11 @@ import "../../services/requests"
 import "../../services/notes/ordering.js" as Ordering
 
 // Local notebooks: folders under ~/Notes (or $NOTE_NOTE_DIR) holding Markdown
-// files with a tiny title front-matter. Notes directly in the root show up as
-// a "Notes" notebook. Each folder keeps its order in .order; the notebook
-// order lives in .notebooks. A binder tab per folder, or one "Notes" tab of
-// fold-out trees — the host's notebookTabs setting decides (true here by
-// default).
+// files with a tiny title front-matter, and the folders inside them their
+// sections, to any depth. Notes directly in the root show up as a "Notes"
+// notebook. Each folder keeps its order in .order; the notebook order lives
+// in .notebooks. A binder tab per notebook, or one "Notes" tab of fold-out
+// trees — the host's notebookTabs setting decides (true here by default).
 Item {
   id: root
 
@@ -83,9 +83,15 @@ Item {
   signal viewRequested(string title, var component, var props)
   signal viewCleared()
   signal persistRequested()
+  // A note's path is its file's, so renaming its notebook moves it.
+  signal notePathChanged(string previous, string next, var view)
 
-  // notebooks: [{ key, name, dir }]; notes: [{ path, key, file, title, preview }]
+  // notebooks: [{ key, name, dir }]; sectionFolders: [{ key, name }], every
+  // folder inside a notebook, keyed by its path from the root ("Work/Plans"),
+  // depth first; notes: [{ path, key, file, title, preview }], `key` the
+  // notebook's or section's they are in.
   property var notebooks: []
+  property var sectionFolders: []
   property var notes: []
   property var sections: []
   // Available before the first notebook exists as well as on every tab.
@@ -94,8 +100,32 @@ Item {
       inputPlaceholder: "Notebook name", shortcut: "newNotebook" }
   ]
 
-  function notebookActions() {
-    return [{ path: "newNote", title: "New Note", icon: "󰐕", shortcut: "newNote" }].concat(root.footerActions)
+  // A notebook's footer: in its own tab, New section makes a section in it;
+  // in the one tab of trees, each notebook row's menu does (folderMenu). The
+  // root's loose notes have no sections, their subfolders being notebooks.
+  function notebookActions(key) {
+    var actions = [{ path: "newNote", title: "New Note", icon: "󰐕", shortcut: "newNote" }]
+    if (key) {
+      actions.push({ path: "newSection", title: "New section", icon: "󰉗", prompt: "Section name" })
+    }
+    return actions.concat(root.footerActions)
+  }
+
+  // Right-click menus (PROVIDERS.md, `menu`): a note's is the app's own
+  // delete. A notebook's, in the folded shape, and a section's make a
+  // section inside it, or rename or delete its folder (rowAction) — only
+  // once the listing read it to its end, so the count the delete asks about
+  // is all of them. The loose notes in the root are no folder of their own
+  // and have none.
+  readonly property var noteMenu: [{ id: "delete", title: "Delete", icon: "󰆴", command: "deleteNote" }]
+  function folderMenu(folder, count, kind) {
+    if (!folder.key || !root.orderWritable(folder.key)) {
+      return []
+    }
+    return [{ id: "newSection", title: "New section", icon: "󰉗", prompt: "Section name" },
+            { id: "rename", title: "Rename", icon: "󰑕", rename: true },
+            { id: "delete", title: "Delete", icon: "󰆴",
+              confirm: "Delete the " + kind + " “" + folder.name + "” and its " + count + (count === 1 ? " note?" : " notes?") }]
   }
 
   function dirOf(key) { return key ? root.notesRoot + "/" + key : root.notesRoot }
@@ -110,72 +140,122 @@ Item {
     }
     return null
   }
+  // A notebook's name, or a section's path through its notebook.
   function nameOf(key) {
     for (var i = 0; i < root.notebooks.length; i++) {
       if (root.notebooks[i].key === key) {
         return root.notebooks[i].name
       }
     }
-    return key || "Notes"
+    return key ? key.split("/").join(" › ") : "Notes"
+  }
+
+  // ── folders ─────────────────────────────────────────────────────────
+  // A notebook or a section is its folder, named by its path from the root;
+  // the root's own key is "" and holds the loose notes.
+  function parentOf(key) { return key.substring(0, Math.max(0, key.lastIndexOf("/"))) }
+  // `key` is folder `top` or a section somewhere inside it.
+  function within(key, top) { return key === top || (top !== "" && key.indexOf(top + "/") === 0) }
+  function notesUnder(key) { return root.notes.filter(function(note) { return root.within(note.key, key) }) }
+  function childSections(key) {
+    return root.sectionFolders.filter(function(folder) { return root.parentOf(folder.key) === key })
+  }
+  function folderAt(key) {
+    var all = root.notebooks.concat(root.sectionFolders)
+    for (var i = 0; i < all.length; i++) {
+      if (all[i].key && all[i].key === key) {
+        return all[i]
+      }
+    }
+    return null
+  }
+  // Depth first, each level by name: the listing's own order (notewalk.py).
+  function byFolderPath(a, b) {
+    var left = a.key.split("/"), right = b.key.split("/")
+    for (var i = 0; i < Math.min(left.length, right.length); i++) {
+      if (left[i] !== right[i]) {
+        return left[i] < right[i] ? -1 : 1
+      }
+    }
+    return left.length - right.length
   }
 
   // The file format — the front matter, the title, the preview — is
   // notefile.py's alone; the listing, the search and the operations all
   // read it there, and nothing here parses a note.
 
-  // ── sections ────────────────────────────────────────────────────────
+  // ── the tree ────────────────────────────────────────────────────────
   // Notebooks the user folded shut (single-tab shape only), by key — kept in
   // the host's state file. The folded set rather than the open one, so the
   // first flip of the setting shows every notebook open instead of every
-  // notebook gone.
+  // notebook gone. Sections are the other way round: shut until opened, as
+  // OneNote's are, and `opened` keeps the ones that are.
   property var folded: []
+  property var opened: []
 
-  function notebookRows(nb, level) {
+  // Everything under a folder's own row: its sections first, each followed
+  // by what it holds when open, then its notes — and, inside a tree, a New
+  // note row for them. A folder's notes are their own reorder group, so a
+  // drag never moves a note into another folder.
+  function folderRows(key, level) {
     var rows = []
-    for (var i = 0; i < root.notes.length; i++) {
-      var n = root.notes[i]
-      if (n.key !== nb.key) {
-        continue
+    root.childSections(key).forEach(function(section) {
+      var open = root.opened.indexOf(section.key) >= 0
+      var count = root.notesUnder(section.key).length
+      rows.push({ kind: "tree", path: "dir:" + section.key, title: section.name, level: level,
+                  expanded: open, count: count, menu: root.folderMenu(section, count, "section") })
+      if (open) {
+        rows = rows.concat(root.folderRows(section.key, level + 1))
       }
-      rows.push({ kind: "note", path: n.path, title: n.title, preview: n.preview, level: level,
-                  reorder: root.orderWritable(nb.key) ? { scope: nb.key, id: n.path } : null,
-                  version: n.version || "", modified: Math.floor(Number(n.version || 0) / 1000000) })
-    }
+    })
+    root.notes.forEach(function(n) {
+      if (n.key === key) {
+        rows.push({ kind: "note", path: n.path, title: n.title, preview: n.preview, level: level, menu: root.noteMenu,
+                    reorder: root.orderWritable(key) ? { scope: key, id: n.path } : null,
+                    version: n.version || "", modified: Math.floor(Number(n.version || 0) / 1000000) })
+      }
+    })
     if (level > 0) {
-      rows.push({ kind: "new", path: "section:" + nb.key, level: level })
+      rows.push({ kind: "new", path: "section:" + key, level: level })
     }
     return rows
   }
+
+  // Folded trees hide note rows, so a tab's count and its searchable list
+  // are given whole (`count` and `notes` in PROVIDERS.md).
+  function searchable(notes) {
+    return notes.map(function(n) {
+      return { path: n.path, title: n.title, preview: n.preview, modified: Math.floor(Number(n.version || 0) / 1000000) }
+    })
+  }
+
   // Two shapes, one setting (notebookTabs): a binder tab per notebook
-  // folder, or one "Notes" tab holding the folders as fold-out trees. Either
-  // way each notebook's notes are their own reorder group, so a drag never
-  // moves a note into another notebook.
+  // folder, or one "Notes" tab holding the notebooks as fold-out trees.
   function rebuild() {
     if (root.notebookTabs) {
       var out = []
       for (var b = 0; b < root.notebooks.length; b++) {
-        var nb = root.notebooks[b]
+        var nb = root.notebooks[b], held = root.notesUnder(nb.key)
         // No colour: a notebook takes its own from its name, so Work and
         // Personal never look alike.
-        out.push({ key: nb.key, name: nb.name, rows: notebookRows(nb, 0),
-                   footerActions: notebookActions() })
+        out.push({ key: nb.key, name: nb.name, count: held.length, notes: root.searchable(held),
+                   rows: root.folderRows(nb.key, 0), footerActions: root.notebookActions(nb.key) })
       }
       root.sections = out
     } else {
       var rows = []
       for (var t = 0; t < root.notebooks.length; t++) {
         var book = root.notebooks[t], open = root.folded.indexOf(book.key) < 0
-        rows.push({ kind: "tree", path: "book:" + book.key, title: book.name, level: 0, expanded: open })
+        var count = root.notesUnder(book.key).length
+        rows.push({ kind: "tree", path: "book:" + book.key, title: book.name, level: 0,
+                    expanded: open, count: count, menu: root.folderMenu(book, count, "notebook") })
         if (open) {
-          rows = rows.concat(notebookRows(book, 1))
+          rows = rows.concat(root.folderRows(book.key, 1))
         }
       }
-      // Folded trees hide note rows, so the tab's count and the searchable
-      // list are given whole (`count` and `notes` in PROVIDERS.md).
-      root.sections = [{ key: "notes", name: "Notes", count: root.notes.length,
-                         notes: root.notes.map(function(n) { return { path: n.path, title: n.title, preview: n.preview, modified: Math.floor(Number(n.version || 0) / 1000000) } }),
+      root.sections = [{ key: "notes", name: "Notes", count: root.notes.length, notes: root.searchable(root.notes),
                          rows: rows,
-                         footerActions: root.notebooks.length ? notebookActions() : root.footerActions }]
+                         footerActions: root.notebooks.length ? root.notebookActions("") : root.footerActions }]
     }
     root.updated()
   }
@@ -187,40 +267,66 @@ Item {
     if (obj && Array.isArray(obj.folded)) {
       root.folded = obj.folded
     }
+    if (obj && Array.isArray(obj.opened)) {
+      root.opened = obj.opened
+    }
   }
-  function saveState() { return { folded: root.folded } }
+  function saveState() { return { folded: root.folded, opened: root.opened } }
   function action(id, value, sectionKey) {
     if (id === "newNote") {
       var target = root.notebookTabs ? "section:" + sectionKey : createTargetFor(root.host.currentPath)
       root.host.newNote(root.id, target)
     } else if (id === "newNotebook") {
       root.host.newNotebook(value, root.id)
+    } else if (id === "newSection") {
+      root.createFolder(sectionKey, value, function(result) {
+        if (result.error) {
+          root.statusRequested(root.name + ": " + result.error)
+        }
+      })
     }
   }
   function toggleTree(id) {
-    if (id.indexOf("book:") !== 0) {
+    if (id.indexOf("book:") === 0) {
+      root.folded = root.toggled(root.folded, id.substring(5))
+    } else if (id.indexOf("dir:") === 0) {
+      root.opened = root.toggled(root.opened, id.substring(4))
+    } else {
       return
     }
-    var key = id.substring(5), at = root.folded.indexOf(key), next = root.folded.slice()
-    if (at >= 0) {
-      next.splice(at, 1)
-    } else {
-      next.push(key)
-    }
-    root.folded = next
     rebuild()
     root.persistRequested()
   }
-  // A note inside a folded notebook has no row; unfold it so the host can
-  // scroll to the row — asked for when a search ends on such a note.
+  function toggled(keys, key) {
+    return keys.indexOf(key) >= 0 ? keys.filter(function(other) { return other !== key }) : keys.concat([key])
+  }
+  // Opens the way to folder `key`: its notebook, and every section down to
+  // it and including it.
+  function openTo(key) {
+    var parts = key.split("/"), opened = root.opened.slice()
+    for (var i = 2; i <= parts.length; i++) {
+      var section = parts.slice(0, i).join("/")
+      if (opened.indexOf(section) < 0) {
+        opened.push(section)
+      }
+    }
+    root.opened = opened
+    root.folded = root.folded.filter(function(folded) { return folded !== parts[0] })
+  }
+  // A note inside a folded notebook or a shut section has no row; open the
+  // way to it so the host can scroll to the row — asked for when a search
+  // ends on such a note.
   function revealPath(path) {
     var n = noteAt(path)
-    if (!n || root.folded.indexOf(n.key) < 0) {
+    if (!n) {
       return
     }
-    root.folded = root.folded.filter(function(k) { return k !== n.key })
-    rebuild()
-    root.persistRequested()
+    var before = JSON.stringify([root.folded, root.opened])
+    root.openTo(n.key)
+    if (JSON.stringify([root.folded, root.opened]) !== before) {
+      rebuild()
+      root.persistRequested()
+    }
   }
 
   property bool listing: false
@@ -355,16 +461,20 @@ Item {
         return
       }
     }
-    var books = dirs.filter(function(k) { return k !== "" || entries.some(function(e) { return e.key === "" }) })
-      .map(function(k) { return { key: k, name: k || "Notes", dir: dirOf(k) } })
+    // A folder right under the root is a notebook; one deeper, a section.
+    var books = dirs.filter(function(k) {
+      return k.indexOf("/") < 0 && (k !== "" || entries.some(function(e) { return e.key === "" }))
+    }).map(function(k) { return { key: k, name: k || "Notes", dir: dirOf(k) } })
     books = applyOrder(books, function(b) { return b.key }, bookOrder)
     root.notebooks = books.filter(function(b) { return b.key === "" }).concat(books.filter(function(b) { return b.key !== "" }))
+    root.sectionFolders = dirs.filter(function(k) { return k.indexOf("/") >= 0 }).map(function(k) {
+      return { key: k, name: k.substring(k.lastIndexOf("/") + 1) }
+    })
     var ordered = []
-    for (var b = 0; b < root.notebooks.length; b++) {
-      var key = root.notebooks[b].key
-      ordered = ordered.concat(applyOrder(entries.filter(function(e) { return e.key === key }),
-                                          function(e) { return baseName(e.file) }, orders[key] || []))
-    }
+    root.notebooks.concat(root.sectionFolders).forEach(function(folder) {
+      ordered = ordered.concat(applyOrder(entries.filter(function(e) { return e.key === folder.key }),
+                                          function(e) { return baseName(e.file) }, orders[folder.key] || []))
+    })
     root.notes = ordered
     rebuild()
   }
@@ -445,7 +555,7 @@ Item {
   function create(target, cb) {
     var key = target.indexOf("section:") === 0 ? target.substring(8) : ""
     mutate("create:" + key, { action: "create", key: key }, function(result) {
-      root.folded = root.folded.filter(function(k) { return k !== key })
+      root.openTo(key)
       root.persistRequested()
       var entry = { key: key, file: result.file, path: pathOf(result.file),
                     title: "", preview: "", size: result.bytes, version: result.version }
@@ -483,9 +593,17 @@ Item {
     })
   }
 
-  function createSection(name, cb) {
+  // The folder a notebook called `name` lives in, or "" for a name that
+  // cannot be one: a separator would make it a path, a leading dot a hidden
+  // folder the listing skips.
+  function notebookKey(name) {
     var key = name.replace(/[/\\]/g, "-").trim()
-    if (!key || key[0] === ".") {
+    return key && key[0] !== "." ? key : ""
+  }
+
+  function createSection(name, cb) {
+    var key = root.notebookKey(name)
+    if (!key) {
       cb({ error: "invalid name" })
       return
     }
@@ -497,6 +615,110 @@ Item {
       result.key = root.notebookTabs ? key : "notes"
       result.target = "section:" + key
       rebuild()
+    }, cb)
+  }
+
+  // A notebook's or a section's menu (folderMenu). The host has written the
+  // open note and holds it still until this answers; earlier writes run
+  // first, the queue being one at a time.
+  function rowAction(path, id, value, cb) {
+    var key = path.indexOf("book:") === 0 ? path.substring(5) : (path.indexOf("dir:") === 0 ? path.substring(4) : "")
+    if (!root.folderAt(key)) {
+      cb({ error: "unknown notebook or section" })
+    } else if (id === "newSection") {
+      root.createFolder(key, value, cb)
+    } else if (id === "rename") {
+      root.renameFolder(key, value, cb)
+    } else if (id === "delete") {
+      root.removeFolder(key, cb)
+    } else {
+      cb({ error: "unknown action" })
+    }
+  }
+
+  // A section inside notebook or section `parent`, shown open in an open
+  // place: there is nothing in it to hide yet.
+  function createFolder(parent, name, cb) {
+    var leaf = root.notebookKey(name), key = parent + "/" + leaf
+    if (!leaf) {
+      cb({ error: "invalid name" })
+      return
+    }
+    if (root.folderAt(key)) {
+      cb({ error: "a section with that name already exists" })
+      return
+    }
+    mutate("section:" + key, { action: "section", key: key }, function(result) {
+      root.sectionFolders = root.sectionFolders.concat([{ key: key, name: leaf }]).sort(root.byFolderPath)
+      root.openTo(key)
+      rebuild()
+      root.persistRequested()
+    }, cb)
+  }
+
+  // Everything inside moves with the folder, each note reported at its new
+  // path; a folder keeps its parent, so only its own name changes.
+  function renameFolder(key, name, cb) {
+    var leaf = root.notebookKey(name), parent = root.parentOf(key)
+    var target = parent ? parent + "/" + leaf : leaf
+    if (!leaf) {
+      cb({ error: "invalid name" })
+      return
+    }
+    if (root.folderAt(target)) {
+      cb({ error: "a notebook or section with that name already exists" })
+      return
+    }
+    mutate("section:" + key, { action: "renameSection", key: key, name: leaf }, function(result) {
+      var moved = []
+      var rekey = function(other) {
+        return root.within(other, key) ? target + other.substring(key.length) : other
+      }
+      root.notes = root.notes.map(function(note) {
+        if (!root.within(note.key, key)) {
+          return note
+        }
+        var file = root.dirOf(target) + note.file.substring(root.dirOf(key).length)
+        moved.push({ previous: note.path, next: root.pathOf(file) })
+        return Object.assign({}, note, { key: rekey(note.key), file: file, path: root.pathOf(file) })
+      })
+      root.notebooks = root.notebooks.map(function(book) {
+        return book.key === key ? { key: target, name: leaf, dir: root.dirOf(target) } : book
+      })
+      root.sectionFolders = root.sectionFolders.map(function(folder) {
+        return root.within(folder.key, key) ? { key: rekey(folder.key), name: folder.key === key ? leaf : folder.name } : folder
+      }).sort(root.byFolderPath)
+      root.folded = root.folded.map(rekey)
+      root.opened = root.opened.map(rekey)
+      rebuild()
+      if (!parent) {
+        persistNotebookOrder()
+      }
+      root.persistRequested()
+      moved.forEach(function(move) {
+        root.notePathChanged(move.previous, move.next, null)
+      })
+    }, cb)
+  }
+
+  // Its sections go with it. operations.py keeps a folder holding anything
+  // that is not a note.
+  function removeFolder(key, cb) {
+    mutate("section:" + key, { action: "removeSection", key: key }, function(result) {
+      result.removed = root.notesUnder(key).map(function(note) {
+        return note.path
+      })
+      var gone = function(other) { return root.within(other, key) }
+      root.notes = root.notes.filter(function(note) { return !gone(note.key) })
+      root.notebooks = root.notebooks.filter(function(book) { return book.key !== key })
+      root.sectionFolders = root.sectionFolders.filter(function(folder) { return !gone(folder.key) })
+      root.folded = root.folded.filter(function(folded) { return !gone(folded) })
+      root.opened = root.opened.filter(function(opened) { return !gone(opened) })
+      rebuild()
+      if (!root.parentOf(key)) {
+        persistNotebookOrder()
+      }
+      root.persistRequested()
     }, cb)
   }
 

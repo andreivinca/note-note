@@ -88,8 +88,8 @@ The service is read back, then native Graph order is confirmed before the
 canonical cache and provider rows are published. Graph trails the service by
 seconds, so it is listed at most three times, after 1, 2 and 4 seconds.
 
-The UI keeps a pending drag visible across refreshes and displays
-**Saving order…**. Another drag in that group waits for completion. Failures
+The UI keeps a pending drag visible across refreshes while saving the order
+in the background. Another drag in that group waits for completion. Failures
 restore canonical rows and trigger a section refresh, including when the
 server might have committed but its response was lost. No timeout or 5xx can
 replay the revision automatically. Explicit rejected key challenges may retry.

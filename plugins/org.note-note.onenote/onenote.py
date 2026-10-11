@@ -171,8 +171,9 @@ def require_writable(collection, resource_id):
 
 
 def require_revision_access(section_id, not_writable, not_granted):
-    """Fail unless OneNote's web revision service (web_session.py) can write
-    into this section under the current sign-in."""
+    """Fail unless this section can be written under the current sign-in —
+    through OneNote's web revision service (web_session.py) or as its file:
+    both need a personal notebook this account may edit, and Files.ReadWrite."""
     if not web_session.writable_notebook(notebook_record("sections", section_id)):
         fail(not_writable)
     if not web_session.write_granted():
@@ -1820,6 +1821,104 @@ def cmd_onenote_create_section(notebook_id, path):
     out({"ok": True, "section": section, "pageListSerial": (c or {}).get("pageListSerial", 0)})
 
 
+# A section of a personal notebook is a .one file in its owner's OneDrive,
+# and OneNote names the section after its file. Graph's OneNote API can
+# neither rename nor delete a section, so these do it to the file, as
+# OneDrive does: the section is renamed in every OneNote app, or goes to the
+# recycle bin. Offered on the terms page ordering is (Provider.qml).
+SECTION_FILE_UNAVAILABLE = "Sections can be renamed and deleted only in personal notebooks you can edit"
+SECTION_FILE_NOT_GRANTED = "Sign in to OneNote again to let Note Note rename and delete sections"
+# What OneNote refuses in a section name.
+SECTION_NAME_REFUSED = '\\/*?"|<>:%#'
+
+
+def forget_section(section_id):
+    """Takes a section that is gone off the cached listing, with its pages,
+    their search entries and their merge journals. Returns the page IDs and
+    the listing's new serial."""
+    with listing_lock():
+        c = load_listing({"sections": [], "pages": []})
+        pages = [p["id"] for p in c.get("pages", []) if p.get("sectionId") == section_id]
+        c["sections"] = [sct for sct in c.get("sections", []) if sct.get("id") != section_id]
+        c["pages"] = [p for p in c.get("pages", []) if p.get("sectionId") != section_id]
+        c.get("sectionPages", {}).pop(section_id, None)
+        invalidate_page_lists(c, section_id)
+        save_listing(c)
+    for page_id in pages:
+        try:
+            content_index().remove(page_id)
+        except (OSError, ValueError):
+            pass
+        with merge_store(page_id) as journal:
+            journal.discard()
+    return pages, c["pageListSerial"]
+
+
+def answer_section_gone(section_id):
+    """A section deleted elsewhere since the list on screen was made — gone
+    from the listing, or its file from OneDrive: the list learns it now."""
+    pages, serial = forget_section(section_id)
+    out({"error": "This section is no longer in OneDrive, so it was taken off the list",
+         "gone": True, "pages": pages, "pageListSerial": serial})
+
+
+def cmd_onenote_rename_section(section_id, path):
+    name = ((read_payload(path) or {}).get("name") or "").strip()[:50].strip()
+    if not name:
+        fail("a section needs a name")
+    if any(character in SECTION_NAME_REFUSED for character in name):
+        fail("A section name cannot contain any of %s" % " ".join(SECTION_NAME_REFUSED))
+    section = cached_resource("sections", section_id)
+    if not section:
+        answer_section_gone(section_id)
+        return
+    require_revision_access(section_id, SECTION_FILE_UNAVAILABLE, SECTION_FILE_NOT_GRANTED)
+    try:
+        item = web_session.section_item(section, graph)
+    except web_session.SectionGone:
+        answer_section_gone(section_id)
+        return
+    except web_session.WebError as error:
+        fail(str(error))
+    status, res = graph("PATCH", item, {"name": name + ".one"}, retry_policy=msgraph.RetryPolicy.NEVER)
+    if status == 409:
+        fail("This notebook already has a section called “%s”" % name)
+    if status != 200:
+        fail(graph_err(res, status))
+    with listing_lock():
+        c = load_listing()
+        if c:
+            for sct in c.get("sections", []):
+                if sct.get("id") == section_id:
+                    sct["name"] = name
+            invalidate_page_lists(c)
+            save_listing(c)
+    out({"ok": True, "name": name, "pageListSerial": (c or {}).get("pageListSerial", 0)})
+
+
+def cmd_onenote_delete_section(section_id):
+    # A section already gone — from the listing, or its file from OneDrive —
+    # is deleted all the same.
+    section, item = cached_resource("sections", section_id), None
+    if section:
+        require_revision_access(section_id, SECTION_FILE_UNAVAILABLE, SECTION_FILE_NOT_GRANTED)
+        try:
+            item = web_session.section_item(section, graph)
+        except web_session.SectionGone:
+            item = None
+        except web_session.WebError as error:
+            fail(str(error))
+    if item:
+        status, res = graph_raw("DELETE", item)
+        if status not in (204, 200, 404):
+            try:
+                fail(graph_err(json.loads(res), status))
+            except ValueError:
+                fail("Graph error %s" % status)
+    pages, serial = forget_section(section_id)
+    out({"ok": True, "pages": pages, "pageListSerial": serial})
+
+
 def cmd_onenote_delete(page_id):
     require_writable("pages", page_id)
     with merge_store(page_id) as journal:
@@ -1929,6 +2028,10 @@ def main(argv):
         cmd_onenote_delete(argv[2])
     elif cmd == "create-section" and len(argv) >= 4:
         cmd_onenote_create_section(argv[2], argv[3])
+    elif cmd == "rename-section" and len(argv) >= 4:
+        cmd_onenote_rename_section(argv[2], argv[3])
+    elif cmd == "delete-section" and len(argv) >= 3:
+        cmd_onenote_delete_section(argv[2])
     elif cmd == "search-sync" and len(argv) >= 3:
         cmd_search_sync(argv[2])
     elif cmd == "search-step" and len(argv) >= 3:
@@ -1946,7 +2049,7 @@ def main(argv):
                 pass
         out({"ok": True})
     else:
-        fail("usage: onenote.py list [--cached|--max-age S|--force]|section-order|reorder-pages <file|->|page <id>|recording <src> <title>|update <id> <file>|create <sectionId> <file>|delete <id>|create-section <notebookId> <file>|clear-cache", 2)
+        fail("usage: onenote.py list [--cached|--max-age S|--force]|section-order|reorder-pages <file|->|page <id>|recording <src> <title>|update <id> <file>|create <sectionId> <file>|delete <id>|create-section <notebookId> <file>|rename-section <sectionId> <file>|delete-section <sectionId>|clear-cache", 2)
 
 
 def run(argv):

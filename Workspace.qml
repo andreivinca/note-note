@@ -249,6 +249,11 @@ Item {
   // selection pulls the cursor back to the note (selectPath).
   property string treeCursor: ""
   property string deletePath: ""
+  // A row's menu item waiting on its confirmation: { row, item, value }.
+  property var rowActionPending: null
+  // A name being asked for (`prompt`): { message, placeholder, confirmText,
+  // run(name) }.
+  property var promptPending: null
   property string missedSaveNotice: ""
   // ── state ───────────────────────────────────────────────────────────
   // Asked for by anyone whose state moved — a provider through
@@ -283,6 +288,8 @@ Item {
   function open(payloadJson) {
     root.opened = true
     root.deleteConfirmOpen = false
+    root.rowActionPending = null
+    root.promptPending = null
     root.page = ""
     root.pauseQueues(false)
     // A save that failed while nobody was looking is reported now, once.
@@ -861,7 +868,7 @@ Item {
   function retireProvider(provider) {
     root.cancelQueuedFor(provider)
     // Its writes die with it, so their callbacks never come: a group left
-    // pending would stay locked, under "Saving order…", for good.
+    // pending would stay locked for good.
     Object.keys(root.pendingReorders).forEach(function(key) {
       if (root.pendingReorders[key].provider === provider) {
         root.setPendingReorder(key, null)
@@ -1656,6 +1663,8 @@ Item {
     return !!p
   }
 
+  // A footer button that names a `prompt` asks for the name first, in the
+  // place its tab is.
   function runFooterAction(action, value) {
     var current = root.footerActions.find(function(item) {
       return item.provider === action.provider && item.section === action.section && item.path === action.path
@@ -1665,7 +1674,16 @@ Item {
       return false
     }
 
-    p.action(current.path, value, current.section)
+    if (current.prompt && !value) {
+      var tab = root.tabs.find(function(candidate) {
+        return candidate.key === current.provider + "/" + current.section
+      })
+      root.askName(current.title, tab ? tab.name : "", current.prompt, function(name) {
+        p.action(current.path, name, current.section)
+      })
+    } else {
+      p.action(current.path, value, current.section)
+    }
     return true
   }
 
@@ -2033,10 +2051,97 @@ Item {
     })
   }
 
+  // ── row menus ───────────────────────────────────────────────────────
+  // An item a provider put in one of its rows' `menu` (docs/providers.md).
+  // `command: "deleteNote"` is the app's own delete, confirmation and all;
+  // any other item is the provider's rowAction, with the name it `prompt`s
+  // for, or asked first when the item names a `confirm`.
+  function chooseRowAction(row, item, value) {
+    if (session.locked) {
+      return
+    }
+
+    if (item.command === "deleteNote") {
+      root.requestDelete(row.path)
+    } else if (item.prompt) {
+      root.askName(item.title, row.title, item.prompt, function(name) {
+        root.runRowAction(row, item, name)
+      })
+    } else if (item.confirm) {
+      root.rowActionPending = { row: row, item: item, value: value }
+    } else {
+      root.runRowAction(row, item, value)
+    }
+  }
+
+  function cancelRowAction() {
+    root.rowActionPending = null
+    editor.focusEditor()
+  }
+
+  // "<title> in “<place>”", the name typed going to `run`.
+  function askName(title, place, placeholder, run) {
+    root.promptPending = { message: place ? title + " in “" + place + "”" : title,
+                           placeholder: placeholder, confirmText: title, run: run }
+  }
+
+  function cancelPrompt() {
+    root.promptPending = null
+    editor.focusEditor()
+  }
+
+  function submitPrompt(name) {
+    var pending = root.promptPending
+    root.promptPending = null
+    pending.run(name)
+  }
+
+  function confirmRowAction() {
+    var pending = root.rowActionPending
+    root.rowActionPending = null
+    root.runRowAction(pending.row, pending.item, pending.value)
+  }
+
+  // An action can move the notes under its row or take them with it, the
+  // open one too: that note is written first and held still until the
+  // provider answers. The notes it reports `removed` went with what the user
+  // deleted, so nothing of theirs is written again.
+  function runRowAction(row, item, value) {
+    var p = providerById(row.provider)
+    if (!p || !p.rowAction || session.locked) {
+      return
+    }
+
+    root.flushSave()
+    session.lock()
+    p.rowAction(row.path, item.id, value, function(result) {
+      var removed = (result.removed || []).map(function(path) {
+        return session.resolvedPath(path)
+      })
+      removed.forEach(function(path) {
+        session.cancelPendingSave(path)
+      })
+      if (removed.indexOf(root.currentPath) >= 0) {
+        session.putAway()
+      }
+      session.unlock()
+      if (result.error) {
+        showStatus(p.name + ": " + result.error)
+      }
+    })
+  }
+
   // ── keys ────────────────────────────────────────────────────────────
   function handleShortcut(event) {
     if (root.deleteConfirmOpen) {
       return deleteConfirm.handleKey(event)
+    }
+    if (root.rowActionPending) {
+      return rowActionConfirm.handleKey(event)
+    }
+    // The name field has the keys it uses; no shortcut runs under it.
+    if (root.promptPending) {
+      return false
     }
     if (commandPalette.opened) {
       commandPalette.handleKey(event)
@@ -2438,7 +2543,8 @@ Item {
   Commands.WorkspaceActions {
     id: workspaceActions
     host: root
-    blocked: session.locked || lifecycle.busy || root.deleteConfirmOpen || editor.tools.panelOpen
+    blocked: session.locked || lifecycle.busy || root.deleteConfirmOpen || root.rowActionPending !== null
+      || root.promptPending !== null || editor.tools.panelOpen
   }
 
   Shortcuts.KeybindingRegistry {
@@ -2635,8 +2741,8 @@ Item {
           onTreeToggled: function(id) {
             root.treeToggle(id)
           }
-          onDeleteRequested: function(path) {
-            root.requestDelete(path)
+          onMenuActionRequested: function(row, item, value) {
+            root.chooseRowAction(row, item, value)
           }
           onReorderFinished: function(group, ids) {
             root.reorderItems(group, ids)
@@ -2908,6 +3014,44 @@ Item {
       cornerRadius: Style.cornerRadius
       onCanceled: root.cancelDelete()
       onConfirmed: root.confirmDelete()
+    }
+
+    ConfirmDialog {
+      id: rowActionConfirm
+      anchors.fill: parent
+      opened: root.rowActionPending !== null
+      z: 10
+      message: root.rowActionPending ? root.rowActionPending.item.confirm : ""
+      confirmText: root.rowActionPending ? root.rowActionPending.item.title : ""
+      background: root.background
+      foreground: root.foreground
+      scrim: root.scrim
+      selectedBackground: root.selectedBackground
+      selectedText: root.selectedText
+      fontFamily: root.interfaceFont
+      cornerRadius: Style.cornerRadius
+      onCanceled: root.cancelRowAction()
+      onConfirmed: root.confirmRowAction()
+    }
+
+    PromptDialog {
+      id: promptDialog
+      anchors.fill: parent
+      opened: root.promptPending !== null
+      z: 10
+      message: root.promptPending ? root.promptPending.message : ""
+      placeholderText: root.promptPending ? root.promptPending.placeholder : ""
+      confirmText: root.promptPending ? root.promptPending.confirmText : ""
+      background: root.background
+      foreground: root.foreground
+      accent: root.accent
+      scrim: root.scrim
+      fontFamily: root.interfaceFont
+      cornerRadius: Style.cornerRadius
+      onCanceled: root.cancelPrompt()
+      onSubmitted: function(name) {
+        root.submitPrompt(name)
+      }
     }
   }
 }

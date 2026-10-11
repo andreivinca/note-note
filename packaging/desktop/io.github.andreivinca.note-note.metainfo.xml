@@ -34,8 +34,21 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
-    <release version="1.0.40" date="2026-10-10">
+    <release version="1.0.40" date="2026-10-11">
       <description>
+        <p>Right-click a note to delete it; the × on each note is gone.
+        Right-click a section to make a section inside it, rename it or
+        delete it.</p>
+        <p>Folders inside a local notebook are now its sections, to any depth,
+        listed before its notes and folded until you open them. A notebook's
+        own tab has a New section button, and New section asks for the name
+        in a small dialog, in OneNote too.</p>
+        <p>OneNote sections can be renamed and deleted in personal notebooks
+        you can edit. The new name shows at once, and a deleted section goes
+        to the OneDrive recycle bin. With all OneNote notebooks in one tab,
+        New section moved from the footer to each notebook's right-click
+        menu.</p>
+        <p>Notebook and section rows show how many notes they hold.</p>
         <p>A title you type shows in the note list at once, instead of after
         the note is saved. With OneNote, which takes a few seconds to save,
         the list no longer lags behind the title, also when you move to

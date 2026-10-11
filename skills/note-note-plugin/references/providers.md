@@ -99,7 +99,8 @@ Item {
     } else {
       for (var i = 0; i < root.notes.length; i++) {
         var note = root.notes[i]
-        rows.push({ kind: "note", path: root.id + ":" + note.id, title: note.title, preview: note.body.split("\n")[0] })
+        rows.push({ kind: "note", path: root.id + ":" + note.id, title: note.title, preview: note.body.split("\n")[0],
+                    menu: [{ id: "delete", title: "Delete", icon: "󰆴", command: "deleteNote" }] })
       }
       footerActions.push({ path: "newNote", title: "New Note", icon: "󰐕", shortcut: "newNote" })
       footerActions.push({ path: "settings", title: "Settings…", icon: "󰒓" })
@@ -263,7 +264,7 @@ root.sections = [{
 root.updated()
 ```
 
-A row is `{ kind, path, title, preview, icon, level, expanded, reorder, version, modified }`:
+A row is `{ kind, path, title, preview, icon, level, expanded, menu, reorder, version, modified }`:
 
 - `kind: "note"` — `path` is the note's `<id>:<anything>` path.
 - `kind: "new"` — `path` is a create target handed to `create()`.
@@ -272,6 +273,17 @@ A row is `{ kind, path, title, preview, icon, level, expanded, reorder, version,
 - `version` — an opaque change marker (mtime, etag). When a listing shows a
   newer version of the open, unedited note, the host reloads it.
 - `modified` — ISO 8601 with a timezone, or epoch milliseconds, for the dates shown.
+- `menu` — what a right-click on the row offers: `[{ id, title, icon?,
+  command?, rename?, prompt?, confirm? }]`. Give a note `{ id: "delete", title:
+  "Delete", icon: "󰆴", command: "deleteNote" }` to delete it through the
+  app's own confirmation and `remove()`; there is no other delete in the
+  list. Any other item calls `rowAction(path, id, value, cb)` →
+  `cb({ error?, removed? })`: `rename: true` edits the row's title in place
+  first and passes the new one as `value`, `prompt: "Section name"` asks for
+  a name in a small dialog and passes it, `confirm` asks that question
+  first. The host writes the open note before the action and holds it until
+  you answer; report moved notes with `notePathChanged` and deleted ones in
+  `removed`.
 
 For ordering, declare `reorder: { scope: "opaque-group", id: "opaque-item",
 descendants: true }` on each reorderable row and implement
@@ -291,7 +303,8 @@ an explicit `reorder`, `null` included, overrides them.
 
 Footer actions are buttons pinned under the list: a click calls
 `action(path, value, sectionKey)`; with `inputPlaceholder` the row first
-collects a line of text, passed as `value`. `shortcut` ties Ctrl+N
+collects a line of text, passed as `value`, and with `prompt` a small dialog
+asks for it instead. `shortcut` ties Ctrl+N
 (`newNote`) or Ctrl+Shift+N (`newNotebook`) to the button. Creation handlers
 call `host.newNote(id, target)` or `host.newNotebook(value, id)` to use the
 app's own create-and-open flow.

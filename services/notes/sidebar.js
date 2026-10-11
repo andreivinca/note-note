@@ -26,7 +26,8 @@ function row(provider, key, source) {
            title: source.title || "", hasTitle: provider.hasTitle !== false,
            preview: source.preview || "", icon: source.icon || "",
            reorder: Ordering.descriptor(provider, ownKey(key), source), level: source.level || 0,
-           expanded: source.expanded === true, modified: source.modified || "" }
+           expanded: source.expanded === true, count: source.count, menu: source.menu || [],
+           modified: source.modified || "" }
 }
 
 function timestamp(value) {
@@ -38,7 +39,7 @@ function timestamp(value) {
 function footerAction(provider, key, action) {
   return { provider: provider.id, section: key, path: action.path, title: action.title,
            icon: action.icon || "", inputPlaceholder: action.inputPlaceholder || "",
-           shortcut: action.shortcut || "" }
+           prompt: action.prompt || "", shortcut: action.shortcut || "" }
 }
 
 function build(providers, active, query, contentHits) {

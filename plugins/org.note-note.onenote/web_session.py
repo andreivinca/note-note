@@ -36,6 +36,11 @@ class WebError(msgraph.GraphError):
     """An operation that must settle visibly, without automatic job replay."""
 
 
+class SectionGone(WebError):
+    """The section's file is no longer in OneDrive: it was deleted or moved
+    away since the notebook was listed."""
+
+
 def writable_notebook(notebook):
     """Whether the service can write this notebook's sections.
 
@@ -61,6 +66,26 @@ def personal_item(identifier):
     if not match:
         raise WebError("OneNote's revision service reaches only sections of personal notebooks")
     return match[1]
+
+
+def section_item(section, graph=msgraph.graph):
+    """The section's .one file, as a Graph item path, once Graph confirms it
+    is that file. It lives in its owner's OneDrive; a notebook shared with
+    this account is reached by that drive, not /me/drive."""
+    item_id = personal_item(section["id"])
+    drive_id = item_id.split("!", 1)[0]
+    path = "/drives/%s/items/%s" % (drive_id, urllib.parse.quote(item_id, safe=""))
+    status, metadata = graph("GET", path + "?$select=id,name,file,parentReference")
+    if status == 404:
+        raise SectionGone("This section is no longer in OneDrive — it was deleted or moved")
+    parent = metadata.get("parentReference") if isinstance(metadata, dict) else None
+    if (status != 200 or not isinstance(parent, dict)
+            or str(metadata.get("id", "")).casefold() != item_id.casefold()
+            or str(parent.get("driveId", "")).casefold() != drive_id.casefold()
+            or parent.get("driveType") != "personal"
+            or "file" not in metadata or not str(metadata.get("name", "")).lower().endswith(".one")):
+        raise WebError("The OneNote section could not be verified as a writable OneDrive file")
+    return path
 
 
 def preview_url(url):
@@ -161,18 +186,7 @@ class Session(Transport):
     @classmethod
     def for_section(cls, section, graph=msgraph.graph):
         item_id = personal_item(section["id"])
-        # The section's file lives in its owner's OneDrive; a notebook
-        # shared with this account is reached by that drive, not /me/drive.
-        drive_id = item_id.split("!", 1)[0]
-        path = "/drives/%s/items/%s" % (drive_id, urllib.parse.quote(item_id, safe=""))
-        status, metadata = graph("GET", path + "?$select=id,name,file,parentReference")
-        parent = metadata.get("parentReference") if isinstance(metadata, dict) else None
-        if (status != 200 or not isinstance(parent, dict)
-                or str(metadata.get("id", "")).casefold() != item_id.casefold()
-                or str(parent.get("driveId", "")).casefold() != drive_id.casefold()
-                or parent.get("driveType") != "personal"
-                or "file" not in metadata or not str(metadata.get("name", "")).lower().endswith(".one")):
-            raise WebError("The OneNote section could not be verified as a writable OneDrive file")
+        path = section_item(section, graph)
         status, preview = graph("POST", path + "/preview", data={}, retry_policy=msgraph.RetryPolicy.REPLAY)
         if status != 200 or not isinstance(preview, dict):
             raise WebError("Microsoft could not authorize changes to this section (HTTP %s)" % status)

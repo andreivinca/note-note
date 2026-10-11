@@ -389,7 +389,8 @@ Item {
     session.savesPending = pending
   }
 
-  // Used only after the user confirms deleting this note.
+  // Used only after the user confirms deleting this note, or the notebook
+  // or section it was in.
   function cancelPendingSave(path) {
     path = session.resolvedPath(path)
     if (path) {

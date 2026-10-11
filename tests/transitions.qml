@@ -1530,9 +1530,12 @@ ShellRoot {
           JSON.stringify(created.searchSections("book")) === '["section"]')
     created.notebookTabs = true
     created.rebuild()
-    created.action("newsection:other-book")
+    var lane = created.rq, queued = []
+    created.rq = { enqueue: function(opts) { queued.push(opts.key) } }
+    created.action("newsection:other-book", "Plans")
+    created.rq = lane
     check("OneNote footer section creation targets its own notebook",
-          created.newSectionNotebook === "other-book")
+          queued.length === 1 && queued[0] === "section:other-book")
     check("OneNote publishes section creation with its account footer and no New Note button",
           created.sections.every(function(section) {
             return section.footerActions.some(function(action) { return action.path === "newsection:" + section.key })

@@ -188,6 +188,13 @@ LaneProvider {
     })
   }
 
+  function bookPages(bookId, pages) {
+    return pages.filter(function(page) {
+      var section = root.sectionAt(page.sectionId)
+      return section && section.notebookId === bookId
+    })
+  }
+
   // Page order is written into the section's file in its owner's OneDrive:
   // a personal notebook this account owns, or one shared with it for
   // editing. web_session.py's writable_notebook() enforces the same rule.
@@ -215,6 +222,10 @@ LaneProvider {
         && !root.pendingPages[page.id] && !root.pendingDeletes[page.id]
     })
   }
+  // A page's right-click menu (PROVIDERS.md, `menu`) where the notebook can
+  // be written: the app's own delete.
+  readonly property var noteMenu: [{ id: "delete", title: "Delete", icon: "󰆴", command: "deleteNote" }]
+
   // One notebook's sections with their pages and New Note rows when open,
   // starting at `level`: 0 when the notebook is a tab
   // of its own, 1 when it sits under its own tree row.
@@ -226,17 +237,19 @@ LaneProvider {
         continue
       }
       var secOpen = root.expanded.indexOf(sec.id) >= 0
-      rows.push({ kind: "tree", path: sec.id, title: sec.name, level: level, expanded: secOpen })
+      var pages = root.sectionPages(sec.id).filter(function(page) {
+        return !root.pendingDeletes[page.id]
+      })
+      rows.push({ kind: "tree", path: sec.id, title: sec.name, level: level,
+                  expanded: secOpen, count: pages.length, menu: root.sectionMenu(sec) })
       if (!secOpen) {
         continue
       }
       var orderable = root.pageOrderingAvailable(sec)
-      for (var p = 0; p < root.pages.length; p++) {
-        var pg = root.pages[p]
-        if (pg.sectionId !== sec.id || root.pendingDeletes[pg.id]) {
-          continue
-        }
-        rows.push({ kind: "note", path: pathOf(pg.id), title: pg.title, preview: "",
+      var pageMenu = root.bookWritable(bookId) ? root.noteMenu : []
+      for (var p = 0; p < pages.length; p++) {
+        var pg = pages[p]
+        rows.push({ kind: "note", path: pathOf(pg.id), title: pg.title, preview: "", menu: pageMenu,
                     level: level + 1 + (pg.level || 0),
                     reorder: orderable && pg.level === 0
                       ? { scope: "pages:" + sec.id, id: pathOf(pg.id), descendants: true } : null,
@@ -252,19 +265,18 @@ LaneProvider {
     return rows
   }
   function noteList(pgs) { return pgs.map(function(p) { return { path: pathOf(p.id), title: p.title, preview: "", modified: p.modified || "" } }) }
+  // A notebook's tab has its New section button; the one tab holding every
+  // notebook has New section on each notebook row's menu instead.
   function accountActions(bookId) {
     var actions = []
-    var books = bookList().filter(function(book) {
-      return (!bookId || book.id === bookId) && root.bookWritable(book.id)
-    })
-    books.forEach(function(book) {
-      actions.push({ path: "newsection:" + book.id,
-                     title: books.length === 1 ? "New section" : "New section in " + book.name,
-                     icon: "󰉗" })
-    })
+    if (bookId && root.bookWritable(bookId)) {
+      actions.push({ path: "newsection:" + bookId, title: "New section", icon: "󰉗", prompt: "Section name" })
+    }
     actions.push({ path: "logout", title: "Sign out" + (ms.account ? " (" + ms.account + ")" : ""), icon: "󰍃" })
     return actions
   }
+
+  readonly property var notebookMenu: [{ id: "newSection", title: "New section", icon: "󰉗", prompt: "Section name" }]
 
   // `notes` on a section is its searchable whole, fold state ignored: rows
   // only carry the pages of expanded sections, and a search (and the hit
@@ -278,7 +290,7 @@ LaneProvider {
       // them OneNote's); the account footer appears on every tab, since any of
       // them is equally the account's.
       root.sections = books.map(function(b) {
-        var pgs = visiblePages.filter(function(p) { var sec = root.sectionAt(p.sectionId); return sec && sec.notebookId === b.id })
+        var pgs = root.bookPages(b.id, visiblePages)
         return { key: b.id, name: b.name, count: pgs.length, notes: noteList(pgs),
                  rows: bookRows(b.id, 0), footerActions: accountActions(b.id) }
       })
@@ -294,7 +306,9 @@ LaneProvider {
     } else {
       for (var b = 0; b < books.length; b++) {
         var open = root.expanded.indexOf(books[b].id) >= 0
-        rows.push({ kind: "tree", path: books[b].id, title: books[b].name, level: 0, expanded: open })
+        rows.push({ kind: "tree", path: books[b].id, title: books[b].name, level: 0,
+                    expanded: open, count: root.bookPages(books[b].id, visiblePages).length,
+                    menu: root.bookWritable(books[b].id) ? root.notebookMenu : [] })
         if (open) {
           rows = rows.concat(bookRows(books[b].id, 1))
         }
@@ -411,7 +425,7 @@ LaneProvider {
     root.persistRequested()
   }
 
-  function action(id) {
+  function action(id, value) {
     if (!ms) {
       return
     }
@@ -441,9 +455,11 @@ LaneProvider {
     } else if (id.indexOf("loadsection:") === 0) {
       pageInventory.request(id.substring(12), true, false)
     } else if (id.indexOf("newsection:") === 0) {
-      root.newSectionNotebook = id.substring(11)
-      root.newSectionError = ""
-      root.viewRequested("New section in " + notebookName(root.newSectionNotebook), sectionView, {})
+      root.createSection(id.substring(11), value, function(result) {
+        if (result.error) {
+          root.statusRequested("OneNote: " + result.error)
+        }
+      })
     } else if (id === "unavailable") {
       root.noticeRequested("Microsoft sign-in is not configured in this build",
         "This copy of Note Note has no app registration for OneNote built in (microsoftClientId in plugins/org.note-note.onenote/Provider.qml), so nobody can sign in yet.", "", [])
@@ -460,32 +476,25 @@ LaneProvider {
   }
 
   // ── new section ─────────────────────────────────────────────────────
-  property string newSectionNotebook: ""
-  property string newSectionError: ""
-  property bool newSectionBusy: false
-  function createSection(name) {
+  // From a notebook tab's footer button or a notebook row's menu, both
+  // after the host asked for the name (`prompt`). `done` hears { error }, or
+  // {} once the section is listed.
+  function createSection(notebook, name, done) {
     var n = name.trim()
     if (!n) {
-      root.newSectionError = "A section needs a name."
+      done({ error: "a section needs a name" })
       return
     }
-    if (root.newSectionBusy || !root.rq) {
+    if (!root.rq) {
+      done({ error: "OneNote is not signed in" })
       return
     }
-    var notebook = root.newSectionNotebook
-    root.newSectionBusy = true
-    root.newSectionError = ""
     root.rq.enqueue({ key: "section:" + notebook, mode: "append", priority: 0, owner: root,
                       flush: true, label: "new section" },
       function(ctx) { root.runScript(["create-section", notebook, "-"], JSON.stringify({ name: n }), ctx) },
       function(r, info) {
-        root.newSectionBusy = false
-        if (!r) {
-          root.newSectionError = info.cancelled ? "The window closed before the section was made." : ""
-          return
-        }
-        if (r.error) {
-          root.newSectionError = r.error
+        if (!r || r.error) {
+          done({ error: r ? r.error : (info.cancelled ? "the window closed before the section was made" : "the section was not made") })
           return
         }
         var sct = r.section
@@ -503,71 +512,155 @@ LaneProvider {
           exp.push(sct.id)
         }
         root.expanded = exp
-        root.viewCleared()
         root.rebuild()
         root.persistRequested()
         root.statusRequested("Section created")
+        done({})
       })
   }
 
-  Component {
-    id: sectionView
-    FocusScope {
-      width: parent ? parent.width : Style.space(600)
-      height: column.implicitHeight
-      Column {
-        id: column
-        spacing: Style.spacing.md
-        leftPadding: Style.spacing.md
-        topPadding: Style.spacing.md
-
-        Text {
-          textFormat: Text.PlainText
-          width: Style.space(520)
-          wrapMode: Text.Wrap
-          text: "The section is created in OneNote and appears in the tree; pages you add go into it."
-          color: Color.menu.text
-          font.family: Style.font.menuFamily
-          font.pixelSize: Style.font.body
-        }
-        TextField {
-          id: nameField
-          width: Style.space(320)
-          placeholderText: "Section name"
-          foreground: Color.menu.text
-          accent: Color.accent
-          font.family: Style.font.menuFamily
-          focus: true
-          Keys.onReturnPressed: root.createSection(text)
-        }
-        Text {
-          textFormat: Text.PlainText
-          visible: root.newSectionError.length > 0
-          text: root.newSectionError
-          color: Color.urgent
-          font.family: Style.font.menuFamily
-          font.pixelSize: Style.font.bodySmall
-        }
-        Row {
-          spacing: Style.spacing.sm
-          Button {
-            text: root.newSectionBusy ? "Creating…" : "Create"
-            bordered: true
-            enabled: !root.newSectionBusy
-            foreground: Color.menu.text
-            accent: Color.accent
-            onClicked: root.createSection(nameField.text)
-          }
-          Button {
-            text: "Cancel"
-            bordered: true
-            foreground: Color.menu.text
-            accent: Color.accent
-            onClicked: root.viewCleared()
-          }
-        }
-      }
+  // ── section rename and delete ───────────────────────────────────────
+  // A section of a personal notebook is a .one file in its owner's OneDrive,
+  // named after it: renaming or deleting the file renames the section in
+  // every OneNote app, or sends it to the recycle bin (onenote.py,
+  // rename-section and delete-section). Offered on the terms page
+  // ordering is.
+  function sectionMenu(sec) {
+    if (!root.ready || !root.ms.hasScope("Files.ReadWrite") || !root.pageOrderingNotebook(sec.notebookId)) {
+      return []
     }
+    return [{ id: "rename", title: "Rename", icon: "󰑕", rename: true },
+            { id: "delete", title: "Delete", icon: "󰆴",
+              confirm: "Delete the section “" + sec.name + "” and everything in it? It goes to your OneDrive recycle bin." }]
+  }
+
+  // The host holds the open note still meanwhile. A page of the section may
+  // still be saving, so an action waits for the writes accepted before it.
+  property var afterWrites: []
+  onWriteBusyChanged: {
+    if (!root.writeBusy) {
+      var waiting = root.afterWrites
+      root.afterWrites = []
+      waiting.forEach(function(run) {
+        run()
+      })
+    }
+  }
+
+  function rowAction(path, id, value, cb) {
+    if (id === "newSection") {
+      root.createSection(path, value, cb)
+      return
+    }
+    var sec = root.sectionAt(path)
+    var run = null
+    if (sec && id === "rename") {
+      // Shown at once, the way onenote.py will store it; renameSection puts
+      // the old name back if OneNote refuses the new one.
+      root.setSectionName(sec.id, value.trim().substring(0, 50).trim())
+      run = function() { root.renameSection(sec, value, cb) }
+    } else if (sec && id === "delete") {
+      run = function() { root.deleteSection(sec, cb) }
+    }
+    if (!run) {
+      cb({ error: "unknown section action" })
+    } else if (root.writeBusy) {
+      root.afterWrites = root.afterWrites.concat([run])
+    } else {
+      run()
+    }
+  }
+
+  // A section job's answer as rowAction's callback wants it.
+  function sectionFailure(r, info, verb) {
+    if (r) {
+      return r.error
+    }
+    return info.cancelled ? "the " + verb + " was cancelled" : "the " + verb + " was not completed"
+  }
+
+  function setSectionName(id, name) {
+    root.onSections = root.onSections.map(function(other) {
+      return other.id === id ? Object.assign({}, other, { name: name }) : other
+    })
+    root.rebuild()
+  }
+
+  // `sec` is the section as it was before rowAction showed the new name.
+  function renameSection(sec, name, cb) {
+    if (!root.rq) {
+      root.setSectionName(sec.id, sec.name)
+      cb({ error: "OneNote is not signed in" })
+      return
+    }
+    root.rq.enqueue({ key: "section:" + sec.id, mode: "append", priority: 0, owner: root,
+                      flush: true, label: "rename section" },
+      function(ctx) { root.runScript(["rename-section", sec.id, "-"], JSON.stringify({ name: name }), ctx) },
+      function(r, info) {
+        if (r && r.gone) {
+          cb({ error: r.error, removed: root.dropSection(sec, r) })
+          return
+        }
+        if (!r || r.error) {
+          root.setSectionName(sec.id, sec.name)
+          cb({ error: root.sectionFailure(r, info, "rename") })
+          return
+        }
+        root.supersedeOrderPass()
+        pageInventory.serial = Math.max(pageInventory.serial, r.pageListSerial || 0)
+        root.setSectionName(sec.id, r.name)
+        root.statusRequested("Section renamed")
+        cb({})
+      })
+  }
+
+  // Its pages go with it: the host is told, so it drops their drafts.
+  function deleteSection(sec, cb) {
+    if (!root.rq) {
+      cb({ error: "OneNote is not signed in" })
+      return
+    }
+    root.rq.enqueue({ key: "section:" + sec.id, mode: "append", priority: 0, owner: root,
+                      flush: true, label: "delete section" },
+      function(ctx) { root.runScript(["delete-section", sec.id], "", ctx) },
+      function(r, info) {
+        if (!r || r.error) {
+          cb({ error: root.sectionFailure(r, info, "delete") })
+          return
+        }
+        var removed = root.dropSection(sec, r)
+        root.statusRequested("Section deleted")
+        cb({ removed: removed })
+      })
+  }
+
+  // Takes a section that is gone off the model, as onenote.py's answer
+  // (forget_section) took it off the cache. Returns its pages' paths: the
+  // listed ones, and any the cache knew that were not listed yet.
+  function dropSection(sec, r) {
+    root.supersedeOrderPass()
+    pageInventory.serial = Math.max(pageInventory.serial, r.pageListSerial || 0)
+    var gone = root.pages.filter(function(page) {
+      return page.sectionId === sec.id
+    }).map(function(page) {
+      return page.id
+    })
+    var cached = r.pages || []
+    cached.forEach(function(id) {
+      if (gone.indexOf(id) < 0) {
+        gone.push(id)
+      }
+    })
+    gone.forEach(function(id) {
+      delete root.bodies[id]
+    })
+    root.pages = root.pages.filter(function(page) { return page.sectionId !== sec.id })
+    root.onSections = root.onSections.filter(function(other) { return other.id !== sec.id })
+    root.expanded = root.expanded.filter(function(id) { return id !== sec.id })
+    root.inventoryRevision++
+    root.rebuild()
+    root.persistRequested()
+    return gone.map(root.pathOf)
   }
 
   // ── running the script ──────────────────────────────────────────────

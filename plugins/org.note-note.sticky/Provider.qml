@@ -60,6 +60,9 @@ LaneProvider {
     return ""
   }
 
+  // A note's right-click menu (PROVIDERS.md, `menu`): the app's own delete.
+  readonly property var noteMenu: [{ id: "delete", title: "Delete", icon: "󰆴", command: "deleteNote" }]
+
   function rebuild() {
     var rows = []
     var footerActions = []
@@ -71,7 +74,8 @@ LaneProvider {
       rows.push({ kind: "action", path: "relogin", title: ms.loggingIn ? "Cancel signing in…" : "Sign in again to enable Sticky Notes…", icon: ms.loggingIn ? "󰅖" : "󰊻" })
     } else {
       for (var i = 0; i < root.notes.length; i++) {
-        rows.push({ kind: "note", path: pathOf(root.notes[i].id), title: "", preview: previewOf(root.notes[i].body), version: root.notes[i].modified || "", modified: root.notes[i].modified || "" })
+        rows.push({ kind: "note", path: pathOf(root.notes[i].id), title: "", preview: previewOf(root.notes[i].body), version: root.notes[i].modified || "", modified: root.notes[i].modified || "",
+                    menu: root.noteMenu })
       }
       footerActions.push({ path: "newNote", title: "New Note", icon: "󰐕", shortcut: "newNote" })
       footerActions.push({ path: "logout", title: "Sign out" + (ms.account ? " (" + ms.account + ")" : ""), icon: "󰍃" })

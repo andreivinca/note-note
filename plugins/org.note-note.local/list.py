@@ -1,12 +1,16 @@
-"""The local provider's listing: notebooks (folders) and their notes,
-oldest-first by birth time, as the tab-separated stream Provider.qml parses:
+"""The local provider's listing: notebooks and their sections (folders) and
+their notes, oldest-first by birth time, as the tab-separated stream
+Provider.qml parses:
 
     B<TAB>key                                        notebook order (.notebooks)
-    D<TAB>key                                        a notebook ("" = root)
+    D<TAB>key                                        a folder: "" the root, "Work" a
+                                                     notebook, "Work/Projects" a section
     O<TAB>key<TAB>name                               saved note order (.order)
     N<TAB>key<TAB>path<TAB>title<TAB>preview<TAB>size<TAB>mtime_ns
-    X<TAB>key<TAB>reason                             a notebook that could not be read
+    X<TAB>key<TAB>reason                             a folder that could not be read
     E<TAB>complete | E<TAB>partial<TAB>reason        always the last line
+
+Folders come depth first, a notebook before its sections (lib/notewalk.py).
 
 The last line says whether the rest can be trusted. A listing has a byte
 budget and a deadline, and one that reaches either stops there and says
@@ -52,7 +56,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "lib"))
-from notewalk import notebook_keys  # noqa: E402
+from notewalk import MAX_FOLDERS, folder_keys  # noqa: E402
 from readfile import read_capped  # noqa: E402
 from fileio import write_atomic  # noqa: E402
 import notefile  # noqa: E402
@@ -211,7 +215,8 @@ def main():
         for name in lines_of(os.path.join(root, ".notebooks")):
             emit("B", name)
 
-        for key in notebook_keys(root):
+        keys = folder_keys(root)
+        for key in keys[:MAX_FOLDERS]:
             d = os.path.join(root, key) if key else root
             emit("D", key)
             for name in lines_of(os.path.join(d, ".order")):
@@ -246,6 +251,8 @@ def main():
                     raise Cut("the listing took longer than %d seconds" % int(DEADLINE))
                 title, preview = head_of(path, deadline)
                 emit("N", key, path, title, preview, str(size), str(mtime))
+        if len(keys) > MAX_FOLDERS:
+            raise Cut("the notes folder holds more than %d folders" % MAX_FOLDERS)
     except Cut as cut:
         out.write(("E\tpartial\t" + str(cut) + "\n").encode())
         return

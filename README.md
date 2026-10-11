@@ -209,13 +209,19 @@ tab from left to right; numbers without a tab do nothing.
 Whether a source's notebooks spread into a tab
 each or fold inside a single tab is per source — the `notebookTabs`
 setting; your local folders spread by default, OneNote folds. Local notes offer
-**New Note** and **New notebook** at the bottom. OneNote offers **New section**
-in its footer and **New Note** only inside each section.
+**New Note** and **New notebook** at the bottom, and **New section** in a
+notebook's own tab: the folders inside a notebook are its sections, to any
+depth, listed before its notes and folded until you open them. OneNote offers
+**New section** in a notebook's own tab and **New Note** only inside each
+section. New section asks for the name in a small dialog.
 Providers supply all footer actions, including creation
 and account controls; every action uses the same full-width, stacked row.
 Lists keep their provider’s note order. Drag local notes to reorder them. Notebook trees keep
-their provider’s hierarchy and order. Delete a note with the `×` on
-its row. Rename or remove a notebook by renaming or removing its folder.
+their provider’s hierarchy and order, and show how many notes each holds.
+Right-click a note to delete it. Right-click a section — or a notebook, when
+notebooks share one tab — to make a section inside it, rename it or delete
+it. OneNote sections are renamed and deleted in personal notebooks you can
+edit; a deleted one goes to the OneDrive recycle bin.
 
 The body is Markdown, rendered live and saved back as Markdown, with a
 formatting toolbar for headings, lists, tables, links, images and the usual

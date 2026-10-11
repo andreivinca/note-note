@@ -1,6 +1,7 @@
 """Confirmed local mutations. A save includes asset staging and atomic commit."""
 import json
 import os
+import shutil
 import stat
 import sys
 import uuid
@@ -41,12 +42,64 @@ def inside(root, path):
     return path
 
 
+def folder(root, key):
+    """A notebook's or a section's folder: `key` its path from the root,
+    every part of it a folder the listing shows — not hidden
+    (lib/notewalk.py)."""
+    parts = key.split("/") if key else []
+    if not parts or any(not part or part.startswith(".") for part in parts):
+        raise ValueError("invalid notebook or section name")
+    return inside(root, os.path.join(root, *parts))
+
+
+def check_removable(path, top):
+    """Refuses a folder holding anything the app does not keep there: notes,
+    their order, their pictures, and sections holding the same."""
+    with os.scandir(path) as listing:
+        entries = list(listing)
+    for entry in entries:
+        if entry.is_dir(follow_symlinks=False) and entry.name == ".assets":
+            continue
+        if entry.is_dir(follow_symlinks=False) and not entry.name.startswith("."):
+            check_removable(entry.path, top)
+            continue
+        if (entry.name.endswith(".md") or entry.name == ".order") and entry.is_file(follow_symlinks=False):
+            continue
+        raise ValueError("“%s” is not a note, so nothing was deleted" % os.path.relpath(entry.path, top))
+
+
+def remove_folder(path):
+    """Deletes a notebook's or a section's folder, its sections with it, when
+    all of it is the app's. Anything else in it is the user's, so then nothing
+    is deleted and the folder is left as it was."""
+    if not stat.S_ISDIR(os.lstat(path).st_mode):
+        raise ValueError("the notebook or section is not a folder")
+    check_removable(path, path)
+    shutil.rmtree(path)
+
+
 def execute(payload):
     root = os.path.realpath(payload["root"])
     action = payload["action"]
     if action == "section":
-        path = inside(root, os.path.join(root, payload["key"]))
-        os.makedirs(path, mode=0o700, exist_ok=True)
+        os.makedirs(folder(root, payload["key"]), mode=0o700, exist_ok=True)
+        return {"ok": True}
+    if action == "renameSection":
+        # `name` is the folder's new name, beside it in the same parent.
+        key, name = payload["key"], payload["name"]
+        if "/" in name:
+            raise ValueError("invalid notebook or section name")
+        parent = key.rpartition("/")[0]
+        source, target = folder(root, key), folder(root, parent + "/" + name if parent else name)
+        if not stat.S_ISDIR(os.lstat(source).st_mode):
+            raise ValueError("the notebook or section is not a folder")
+        # rename(2) would replace an empty folder of that name without a word.
+        if os.path.lexists(target):
+            raise ValueError("a notebook or section with that name already exists")
+        os.rename(source, target)
+        return {"ok": True}
+    if action == "removeSection":
+        remove_folder(folder(root, payload["key"]))
         return {"ok": True}
     if action == "create":
         directory = os.path.join(root, payload.get("key", ""))

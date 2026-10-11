@@ -4,7 +4,7 @@ text contains the query, case-insensitively, one per line.
     python3 search.py <notesDir> <query> <maxNoteBytes>
 
 The folder walk is the listing's own (lib/notewalk.py) — folders are
-notebooks, only *.md files — and every read goes through lib/readfile.py
+notebooks and their sections, only *.md files — and every read goes through lib/readfile.py
 (one descriptor, no symlink following, regular files only, capped, against
 one shared deadline), so a search cannot be made to read a single byte the
 listing would not have. Within a folder, notes are tried in name order:
@@ -20,7 +20,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "lib"))
-from notewalk import notebook_keys  # noqa: E402
+from notewalk import MAX_FOLDERS, folder_keys  # noqa: E402
 from readfile import read_capped  # noqa: E402
 import notefile  # noqa: E402
 
@@ -36,7 +36,7 @@ def main():
     deadline = time.monotonic() + DEADLINE
     matched = 0
 
-    for key in notebook_keys(root):
+    for key in folder_keys(root)[:MAX_FOLDERS]:
         d = os.path.join(root, key) if key else root
         try:
             with os.scandir(d) as it:

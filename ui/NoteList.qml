@@ -13,9 +13,12 @@ import "../design/controls"
 //                      label, `icon` its glyph
 //   kind "tree"        an expandable group inside a notebook (OneNote
 //                      notebook / section): `path` is its id, `expanded`
-//                      its state; rows are indented by `level`
+//                      its state, optional `count` its note count;
+//                      rows are indented by `level`
 // Any row with a `reorder` group (services/notes/ordering.js) can be dragged
-// among the rows of that group; the rest keep their slots.
+// among the rows of that group; the rest keep their slots. A row's `menu`
+// lists what its provider offers on a right-click; an item with `rename`
+// edits the row's title in place before it is reported.
 Item {
   id: root
 
@@ -88,8 +91,27 @@ Item {
   signal treeToggled(string path)
   signal actionRequested(string id)
   signal footerActionRequested(var action, string value)
-  signal deleteRequested(string path)
+  // An item of a row's `menu` was chosen; `value` is the new title when the
+  // item renames, "" otherwise.
+  signal menuActionRequested(var row, var item, string value)
   signal reorderFinished(var group, var ids)
+
+  // The row whose title is being edited in place, { path, item } — the
+  // menu item that asked for it — or null.
+  property var renaming: null
+
+  RowMenu {
+    id: rowMenu
+    accent: root.accent
+    fontFamily: root.fontFamily
+    onChosen: function(row, item) {
+      if (item.rename) {
+        root.renaming = { path: row.path, item: item }
+      } else {
+        root.menuActionRequested(row, item, "")
+      }
+    }
+  }
 
   // Air between rows. A slot is a control's height plus this, and the card
   // sits inside the slot with this much between it and its neighbours, so
@@ -284,22 +306,11 @@ Item {
         objectName: "notebookHeaderCount"
         anchors.left: parent.left
         anchors.leftMargin: root.pagePadding + root.textInset
-        anchors.right: orderStatus.visible ? orderStatus.left : parent.right
-        anchors.rightMargin: orderStatus.visible ? Style.spacing.sm : root.pagePadding + root.textInset
+        anchors.right: parent.right
+        anchors.rightMargin: root.pagePadding + root.textInset
         elide: Text.ElideRight
         text: root.noteCount + (root.noteCount === 1 ? " note" : " notes")
         color: Style.secondaryText(root.foreground, 0.45)
-        font.pixelSize: Style.font.bodySmall
-      }
-      HeaderLabel {
-        id: orderStatus
-        anchors.right: parent.right
-        anchors.rightMargin: root.pagePadding + root.textInset
-        text: "Saving order…"
-        visible: root.model.some(function(row) {
-          return row.reorder && !!root.pendingReorders[Ordering.key(row.reorder)]
-        })
-        color: Style.secondaryText(root.foreground, 0.65)
         font.pixelSize: Style.font.bodySmall
       }
       Rectangle {
@@ -370,6 +381,16 @@ Item {
             readonly property bool isNew: modelData.kind === "new"
             readonly property bool isAction: modelData.kind === "action"
             readonly property bool isTree: modelData.kind === "tree"
+            readonly property bool hasCount: isTree && typeof modelData.count === "number" && modelData.count >= 0
+            readonly property bool hasMenu: (modelData.menu || []).length > 0
+            readonly property bool renaming: !isNote && root.renaming !== null && root.renaming.path === modelData.path
+            function finishRename() {
+              var target = root.renaming, title = renameField.text.trim()
+              root.renaming = null
+              if (title && title !== slot.modelData.title) {
+                root.menuActionRequested(slot.modelData, target.item, title)
+              }
+            }
             // One step of indent is the parent's icon column plus the gap
             // after it, so a child's icon starts under its parent's label —
             // less a nudge for the glyph being centered in a column wider
@@ -428,7 +449,7 @@ Item {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.leftMargin: root.textInset + slot.indent
-                anchors.rightMargin: Style.spacing.sm + (closeButton.opacity > 0 ? closeButton.width : 0)
+                anchors.rightMargin: Style.spacing.sm
                 anchors.verticalCenter: parent.verticalCenter
                 title: root.titleFor(slot.modelData)
                 hasTitle: slot.modelData.hasTitle !== false
@@ -454,8 +475,13 @@ Item {
                   font.family: Style.fontFamily
                   font.pixelSize: Style.font.iconSmall
                 }
+                // Only as wide as the title, so the count follows it; a title
+                // too long for the row elides, which leaves the count at the
+                // row's right edge.
                 Text {
-                  width: Math.max(0, parent.width - Style.font.iconSmall - parent.spacing)
+                  visible: !slot.renaming
+                  width: Math.max(0, Math.min(implicitWidth, parent.width - Style.font.iconSmall - parent.spacing
+                                              - (slot.hasCount ? treeCount.width + parent.spacing : 0)))
                   text: slot.isNew ? "New note…" : slot.modelData.title
                   textFormat: Text.PlainText
                   color: root.foreground
@@ -464,12 +490,70 @@ Item {
                   font.pixelSize: slot.isTree ? root.noteFontSize : Style.font.bodySmall
                   elide: Text.ElideRight
                 }
-              }
+                // Enter renames; Escape, or leaving the field, keeps the
+                // title as it was.
+                TextField {
+                  id: renameField
+                  objectName: "renameField-" + slot.modelData.path
+                  visible: slot.renaming
+                  anchors.verticalCenter: parent.verticalCenter
+                  width: Math.max(0, parent.width - Style.font.iconSmall - parent.spacing)
+                  foreground: root.foreground
+                  accent: root.accent
+                  font.family: root.fontFamily
+                  font.pixelSize: root.noteFontSize
+                  verticalPadding: Style.spacing.xxs
+                  // Focused as it appears: an item still hidden cannot take
+                  // the keyboard.
+                  onVisibleChanged: {
+                    if (visible) {
+                      text = slot.modelData.title || ""
+                      selectAll()
+                      forceActiveFocus()
+                    }
+                  }
+                  Keys.onPressed: function(event) {
+                    if (event.key === Qt.Key_Escape) {
+                      root.renaming = null
+                      event.accepted = true
+                    } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                      slot.finishRename()
+                      event.accepted = true
+                    }
+                  }
+                  onActiveFocusChanged: {
+                    if (!activeFocus && slot.renaming) {
+                      root.renaming = null
+                    }
+                  }
+                }
+                Rectangle {
+                  id: treeCount
+                  objectName: "treeNoteCount-" + slot.modelData.path
+                  visible: slot.hasCount && !slot.renaming
+                  anchors.verticalCenter: parent.verticalCenter
+                  width: Math.max(height, countText.implicitWidth + Style.spacing.sm * 2)
+                  height: countText.implicitHeight + Style.spacing.xxs * 2
+                  radius: Style.space(4)
+                  color: Util.alpha(root.foreground, 0.1)
 
+                  Text {
+                    id: countText
+                    anchors.centerIn: parent
+                    text: slot.hasCount ? slot.modelData.count : ""
+                    textFormat: Text.PlainText
+                    color: Util.alpha(root.foreground, 0.75)
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                  }
+                }
+              }
 
               MouseArea {
                 id: dragArea
                 anchors.fill: parent
+                // The rename field takes the clicks while it is open.
+                enabled: !slot.renaming
                 cursorShape: drag.active ? Qt.ClosedHandCursor : (slot.draggable ? Qt.OpenHandCursor : Qt.PointingHandCursor)
                 drag.target: (root.filtering || !slot.draggable) ? null : row
                 drag.axis: Drag.YAxis
@@ -524,25 +608,12 @@ Item {
                 }
               }
 
-              // Available on the current or hovered row, without shifting it.
-              Button {
-                id: closeButton
-                anchors.right: parent.right
-                anchors.rightMargin: Style.spacing.xs
-                anchors.verticalCenter: parent.verticalCenter
-                visible: slot.isNote
-                // Off entirely until you are on the row: 200 of these at a
-                // third of an opacity is a texture, not an affordance.
-                opacity: row.current || rowHover.hovered ? 1 : 0
-                Behavior on opacity { NumberAnimation { duration: 120 } }
-                iconText: "󰅖"
-                tooltipText: "Delete this note"
-                foreground: root.foreground
-                accent: root.accent
-                iconSize: Style.font.iconSmall
-                horizontalPadding: Style.spacing.xs
-                verticalPadding: Style.spacing.xxs
-                onClicked: root.deleteRequested(slot.modelData.path)
+              // The drag area takes the left button only, so a right-click
+              // falls through to here and opens the row's menu.
+              TapHandler {
+                acceptedButtons: Qt.RightButton
+                enabled: slot.hasMenu && !slot.renaming && !root.dragSlot
+                onTapped: rowMenu.openFor(slot.modelData)
               }
 
               Drag.active: dragArea.drag.active

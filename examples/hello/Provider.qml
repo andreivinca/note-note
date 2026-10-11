@@ -49,6 +49,10 @@ Item {
   }
   function saveState() { return { owner: root.owner, notes: root.notes, nextId: root.nextId } }
 
+  // What a right-click on a note offers (`menu`). `command: "deleteNote"`
+  // runs the app's own delete — its confirmation, then remove() below.
+  readonly property var noteMenu: [{ id: "delete", title: "Delete", icon: "󰆴", command: "deleteNote" }]
+
   function rebuild() {
     var rows = []
     var footerActions = []
@@ -56,7 +60,8 @@ Item {
       rows.push({ kind: "action", path: "setup", title: "Set up…", icon: "󰒓" })
     } else {
       for (var i = 0; i < root.notes.length; i++) {
-        rows.push({ kind: "note", path: root.id + ":" + root.notes[i].id, title: root.notes[i].title, preview: root.notes[i].body.split("\n")[0] })
+        rows.push({ kind: "note", path: root.id + ":" + root.notes[i].id, title: root.notes[i].title, preview: root.notes[i].body.split("\n")[0],
+                    menu: root.noteMenu })
       }
       footerActions.push({ path: "newNote", title: "New Note", icon: "󰐕", shortcut: "newNote" })
       footerActions.push({ path: "settings", title: "Settings…", icon: "󰒓" })
