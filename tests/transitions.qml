@@ -1471,8 +1471,8 @@ ShellRoot {
     folders.action("newNotebook", "Travel", "Work")
     check("local creation actions retain the active notebook and submitted name",
           creations.join(",") === "local:section:Work,local:Travel")
-    check("local supplies both footer actions",
-          folders.sections[0].footerActions.map(function(action) { return action.path }).join(",") === "newNote,newNotebook")
+    check("a local notebook tab supplies New Note, New section and New notebook",
+          folders.sections[0].footerActions.map(function(action) { return action.path }).join(",") === "newNote,newSection,newNotebook")
     // A listing cut short keeps the model it had and writes no order from
     // what it did reach; a whole listing lifts both holds.
     var said = []
@@ -1530,12 +1530,15 @@ ShellRoot {
           JSON.stringify(created.searchSections("book")) === '["section"]')
     created.notebookTabs = true
     created.rebuild()
+    // A new queue starts a listing of its own; the section's job is the one
+    // keyed to a notebook.
     var lane = created.rq, queued = []
     created.rq = { enqueue: function(opts) { queued.push(opts.key) } }
     created.action("newsection:other-book", "Plans")
     created.rq = lane
+    var sectionJobs = queued.filter(function(key) { return key.indexOf("section:") === 0 })
     check("OneNote footer section creation targets its own notebook",
-          queued.length === 1 && queued[0] === "section:other-book")
+          sectionJobs.length === 1 && sectionJobs[0] === "section:other-book", JSON.stringify(queued))
     check("OneNote publishes section creation with its account footer and no New Note button",
           created.sections.every(function(section) {
             return section.footerActions.some(function(action) { return action.path === "newsection:" + section.key })
@@ -1551,10 +1554,13 @@ ShellRoot {
           }))
     created.notebookTabs = false
     created.rebuild()
-    check("combined OneNote tabs preserve each notebook's section-creation target",
-          created.sections[0].footerActions.filter(function(action) {
-            return action.path.indexOf("newsection:") === 0
-          }).map(function(action) { return action.path }).sort().join(",") === "newsection:book,newsection:other-book")
+    var bookRows = created.sections[0].rows.filter(function(row) { return row.kind === "tree" && row.level === 0 })
+    check("the combined OneNote tab offers New section on each notebook's row, not in its footer",
+          !created.sections[0].footerActions.some(function(action) { return action.path.indexOf("newsection:") === 0 })
+          && bookRows.map(function(row) { return row.path }).sort().join(",") === "book,other-book"
+          && bookRows.every(function(row) {
+            return row.menu.some(function(item) { return item.id === "newSection" && !!item.prompt })
+          }), JSON.stringify(bookRows.map(function(row) { return row.path })))
     created.destroy()
     oneNote.notebookTabs = false
     oneNote.onSections = [{ id: "section", name: "Section", notebookId: "book", notebook: "Book" }]
