@@ -1674,9 +1674,17 @@ ShellRoot {
           orderingRows[0].reorder === undefined && orderingRows[1].reorder.scope === "pages:" + orderingSection
           && orderingRows[1].reorder.descendants && !orderingRows[2].reorder && orderingRows[2].level === 2
           && orderingRows[3].reorder.scope === orderingRows[1].reorder.scope)
-    orderingSource.pages[0].clientId = ""
-    check("incomplete OneNote identities disable ordering", !orderingSource.pageOrderingAvailable(orderingSource.onSections[0]))
-    orderingSource.pages[0].clientId = "a"
+    // What a startup listing does to a section the user worked in: its
+    // stamp moved, so its pages are listed again.
+    orderingSource.applyInventory({ sections: orderingSource.onSections, notebooks: orderingSource.onNotebooks,
+                                    pages: orderingSource.pages, pendingSections: [orderingSection], pageListSerial: 1 })
+    var relisted = orderingSource.bookRows(orderingBook, 0)[1].reorder
+    check("a section whose pages are being listed again keeps its page drags",
+          !!relisted && relisted.scope === "pages:" + orderingSection)
+    orderingSource.pages[1].level = undefined
+    check("a section listed before its pages carried their level offers no ordering",
+          !orderingSource.pageOrderingAvailable(orderingSource.onSections[0]))
+    orderingSource.pages[1].level = 1
     orderingSource.onNotebooks = [{ id: orderingBook, name: "Book", userRole: "Reader" }]
     check("read-only OneNote notebooks cannot expose reorder capabilities", !orderingSource.pageOrderingAvailable(orderingSource.onSections[0]))
     orderingSource.onNotebooks = [{ id: orderingBook, name: "Book", userRole: "Contributor" }]
@@ -1740,15 +1748,71 @@ ShellRoot {
           && written.expected.join(",") === "b,a,c" && written.order.join(",") === "c,a,b")
     drop("fourth", ["a", "c", "b"])
     writer.commands[1].context.done({ error: "the answer was lost" })
+    var rereads = function() {
+      return orderLane.jobs.some(function(job) { return job.options.key === "pages:" + orderingSection })
+    }
     check("an older write's failure leaves the section to the newer write behind it",
-          answers[answers.length - 1] === "third:the answer was lost" && !writer.pageOrderRecovery[orderingSection]
+          answers[answers.length - 1] === "third:the answer was lost" && !rereads()
           && writer.pageOrderingAvailable(writer.onSections[0]))
     writer.pages = parents(["b", "a", "c", "d"])
     run(orderLane.jobs.shift())
-    check("a write whose pages changed while it waited is refused, and the newest one's failure re-reads the section",
+    check("a write whose pages changed while it waited is refused, and the newest one's failure re-reads the section, which stays orderable",
           writer.commands.length === 2 && answers[answers.length - 1] === "fourth:The pages changed — try reordering again"
-          && writer.pageOrderRecovery[orderingSection]
-          && orderLane.jobs.some(function(job) { return job.options.key === "pages:" + orderingSection }))
+          && rereads() && writer.pageOrderingAvailable(writer.onSections[0]))
+    // An order waits while OneNote has still to answer for a page being
+    // made or deleted in its section. A page being made is in the order at
+    // once, and is written under the ID OneNote gives it.
+    orderLane.jobs = []
+    writer.pages = parents(["a", "b"])
+    var made = ""
+    writer.create("section:" + orderingSection, function(result) { made = result.path })
+    var creation = orderLane.jobs.shift()
+    var orderIdOf = function(path) {
+      var row = writer.bookRows(orderingBook, 0).filter(function(candidate) { return candidate.path === path })[0]
+      return row && row.reorder ? row.reorder.id : ""
+    }
+    check("a page being made is in its section's order at once",
+          creation.options.key === "create:section:" + orderingSection && orderIdOf(made) === made)
+    var answered = answers.length
+    drop("made", [writer.idOf(made), "a", "b"])
+    check("an order naming a page being made waits for OneNote to make it",
+          orderLane.jobs.length === 0 && answers.length === answered)
+    creation.settled({ page: { id: "made", sectionId: orderingSection, title: "", modified: "1", clientId: "made", level: 0 },
+                       note: { title: "", body: "", view: "made-base" }, pageListSerial: 2 })
+    var madeOrder = orderLane.jobs.shift()
+    run(madeOrder)
+    written = JSON.parse(writer.commands[writer.commands.length - 1].payload)
+    check("once made, the page is written in the order under its own ID, and its row keeps the order's name for it",
+          madeOrder.options.key === "page-order:" + orderingSection
+          && written.expected.join(",") === "a,b,made" && written.order.join(",") === "made,a,b"
+          && orderIdOf(writer.pathOf("made")) === made)
+    writer.commands[writer.commands.length - 1].context.done({ sections: writer.onSections,
+      pages: parents(["made", "a", "b"]), pendingSections: [], pageListSerial: 3 })
+    check("the made page's order settles with its write", answers[answers.length - 1] === "made:saved")
+    writer.pages = parents(["a", "b", "c", "d"])
+    var removal = null
+    writer.remove(writer.pathOf("d"), function(result) { removal = result })
+    var deletion = orderLane.jobs.shift()
+    answered = answers.length
+    drop("replaced", ["c", "b", "a"])
+    drop("held", ["b", "a", "c"])
+    check("an order asked for while a page of its section is deleted waits, and a newer one replaces it",
+          removal.pending && orderLane.jobs.length === 0 && answers.slice(answered).join(",") === "replaced:saved")
+    deletion.settled({ ok: true, pageListSerial: 4 })
+    run(orderLane.jobs.shift())
+    written = JSON.parse(writer.commands[writer.commands.length - 1].payload)
+    check("once the page is deleted, the order is written without it",
+          written.expected.join(",") === "a,b,c" && written.order.join(",") === "b,a,c")
+    writer.commands[writer.commands.length - 1].context.done({ sections: writer.onSections,
+      pages: parents(["b", "a", "c"]), pendingSections: [], pageListSerial: 5 })
+    var failedDraft = ""
+    writer.create("section:" + orderingSection, function(result) { failedDraft = result.path })
+    orderLane.jobs.shift().settled({ error: "uncertain network response" })
+    check("a draft OneNote could not make keeps its row, out of the section's order, which stays on",
+          answers[answers.length - 1] === "held:saved" && !!writer.pageAt(failedDraft) && orderIdOf(failedDraft) === ""
+          && writer.parentPageIds(orderingSection).join(",") === "b,a,c"
+          && writer.pageOrderingAvailable(writer.onSections[0]))
+    writer.remove(failedDraft, function(result) {})
     orderLane.jobs = []
     writer.destroy()
     var creations = []

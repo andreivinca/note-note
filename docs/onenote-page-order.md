@@ -63,12 +63,17 @@ changes written through it.
 
 ## Provider and UI behavior
 
-Ordering is available within fully loaded sections, with at least two parent
-pages, of personal notebooks the signed-in account owns or can edit (OneNote
-role Owner or Contributor). Read-only shares and work or school notebooks
-offer no drags; the provider and `reorder-pages` apply the same rule. Each
-parent declares its section's
-reorder group and carries its subpages. Subpage indentation is shown, and
+Ordering is available in personal notebooks the signed-in account owns or can
+edit (OneNote role Owner or Contributor), in sections with at least two parent
+pages whose hierarchy is listed: a section listed before pages carried their
+level has it once it is opened and listed again. Read-only shares and work or
+school notebooks offer no drags; the provider and `reorder-pages` apply the
+same rule. Nothing a section is doing turns ordering off: not a listing of its
+pages, which a startup listing starts for every section whose stamp moved, not
+an order still saving, not a page being made or deleted. Each parent declares
+its section's reorder group and carries its subpages; a page being made is in
+the group at once, at the end of its section, and a draft OneNote could not
+make leaves it. Subpage indentation is shown, and
 subpages retain their existing order and parent. Individual subpage promotion,
 cross-section moves and section reordering are not enabled.
 
@@ -92,9 +97,15 @@ The UI keeps a pending drag visible across refreshes while saving the order
 in the background, and the section can be dragged again at once. The
 provider writes a section's orders one at a time: a newer order replaces one
 still waiting, and each write starts from the order the one before it left.
-The newest order's failure restores canonical rows and triggers a section
-refresh, including when the server might have committed but its response
-was lost. An older write's failure leaves that to the newer write, whose own
+An order waits in the provider while OneNote has still to answer for a page
+being made or deleted in its section, since it names a made page by the ID its
+creation gives it and a page being deleted may be in OneNote until then. It is
+queued as soon as they answer, and the writes it waits on keep the app open
+meanwhile. A write that starts while the section is being listed again is
+checked against the pages listed before, and OneNote refuses it if it holds
+anything else. The newest order's failure restores canonical rows and
+triggers a section refresh, including when the server might have committed
+but its response was lost. An older write's failure leaves that to the newer write, whose own
 check finds what OneNote holds. No timeout or 5xx can replay the revision
 automatically. Explicit rejected key challenges may retry.
 

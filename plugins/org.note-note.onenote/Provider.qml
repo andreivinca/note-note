@@ -87,7 +87,7 @@ LaneProvider {
   property var creatingSections: ({}) // stand-in id -> section listed before OneNote has made it
   property var deletingSections: ({}) // section id -> true while its delete runs, the section hidden
   property var pageOrderWrites: ({}) // section id -> the newest order asked for it, until its write answers
-  property var pageOrderRecovery: ({})
+  property var heldPageOrders: ({})  // section id -> an order waiting for its pages being made or deleted
   property int nextDraft: 0
   property var expanded: []      // notebook/section ids the user opened
   property bool searchInventoryReady: false
@@ -110,6 +110,18 @@ LaneProvider {
     return root.pageAliases[id] || id
   }
   function pathOf(id) { return root.id + ":" + id }
+  // A page's ID in its section's order: the path it was first listed under.
+  // A page made here keeps its draft's, so an order asked for while OneNote
+  // was making it, and shown over the rows until it is saved, still names
+  // it once the page has an ID of its own (idOf resolves either).
+  function orderId(id) {
+    for (var draft in root.pageAliases) {
+      if (root.pageAliases[draft] === id) {
+        return root.pathOf(draft)
+      }
+    }
+    return root.pathOf(id)
+  }
   function pageAt(path) {
     var id = idOf(path)
     for (var i = 0; i < root.pages.length; i++) {
@@ -200,10 +212,16 @@ LaneProvider {
   }
 
   // What a section's page order arranges: its parent pages, each carrying
-  // its subpages.
+  // its subpages, as the list shows them. A page being deleted has left
+  // it, and a draft OneNote could not make is no page of the section; one
+  // still being made is, at the end, where OneNote puts a new page.
+  function orderedPage(page) {
+    var pending = root.pendingPages[page.id]
+    return page.level === 0 && !root.pendingDeletes[page.id] && !(pending && pending.error)
+  }
   function parentPageIds(sectionId) {
     return root.sectionPages(sectionId).filter(function(page) {
-      return page.level === 0
+      return root.orderedPage(page)
     }).map(function(page) {
       return page.id
     })
@@ -228,19 +246,19 @@ LaneProvider {
       && /^0-[0-9a-f]{16}!(?:[0-9]+|s[0-9a-f]{32})$/i.test(book.id)
   }
 
+  // Page ordering is the notebook's to allow, and nothing the section is
+  // doing turns it off: not a listing of its pages, not an order still
+  // saving, not a page being made or deleted. An order asked for meanwhile
+  // is queued (reorder). The section needs only its hierarchy, which a list
+  // from before pages carried their level lacks until the section is opened
+  // and listed again, and two parent pages to arrange.
   function pageOrderingAvailable(section) {
-    if (!root.ready || !root.ms.hasScope("Files.ReadWrite") || !root.pageOrderingNotebook(section.notebookId)
-        || pageInventory.pendingSections.indexOf(section.id) >= 0 || root.pageOrderRecovery[section.id]) {
+    if (!root.ready || !root.ms.hasScope("Files.ReadWrite") || !root.pageOrderingNotebook(section.notebookId)) {
       return false
     }
-    var pages = root.sectionPages(section.id)
-    var parents = pages.filter(function(page) {
-      return page.level === 0
-    })
-    return parents.length > 1 && pages.every(function(page) {
+    return root.parentPageIds(section.id).length > 1 && root.sectionPages(section.id).every(function(page) {
       return typeof page.level === "number" && page.level >= 0 && page.level <= 2
-        && Math.floor(page.level) === page.level && !!page.clientId
-        && !root.pendingPages[page.id] && !root.pendingDeletes[page.id]
+        && Math.floor(page.level) === page.level
     })
   }
   // A page's right-click menu (PROVIDERS.md, `menu`) where the notebook can
@@ -272,8 +290,8 @@ LaneProvider {
         var pg = pages[p]
         rows.push({ kind: "note", path: pathOf(pg.id), title: pg.title, preview: "", menu: pageMenu,
                     level: level + 1 + (pg.level || 0),
-                    reorder: orderable && pg.level === 0
-                      ? { scope: "pages:" + sec.id, id: pathOf(pg.id), descendants: true } : null,
+                    reorder: orderable && root.orderedPage(pg)
+                      ? { scope: "pages:" + sec.id, id: root.orderId(pg.id), descendants: true } : null,
                     version: pg.modified || "", modified: pg.modified || "" })
       }
       if (pageInventory.pendingSections.indexOf(sec.id) >= 0) {
@@ -741,12 +759,18 @@ LaneProvider {
     return root.runProcess(searchRunner, args, payload, callback)
   }
 
-  // A drop is taken however soon it follows the last: a section's order
-  // writes run one at a time, and a newer order replaces one still waiting,
+  // A drop is taken however soon it follows the last, whatever the section
+  // is doing (pageOrderingAvailable). Its order waits only while OneNote has
+  // still to answer for a page being made or deleted in the section: the
+  // order names a made page by the ID its creation gives it, and a page
+  // being deleted may be in OneNote until then. The writes it waits on keep
+  // the app open meanwhile (writeBusy). A section's order writes run one at
+  // a time, and a newer order replaces one still waiting, held or queued,
   // since it holds all of it. A write is checked against the order known
-  // when it starts, the one the write before it left. Only the newest
-  // order's failure re-reads the section: an older write's leaves it to
-  // the newer one, whose own check finds what OneNote holds.
+  // when it starts: the one the write before it left, or the pages listed
+  // before a listing still under way, which OneNote checks in turn. Only the
+  // newest order's failure re-reads the section: an older write's leaves it
+  // to the newer one, whose own check finds what OneNote holds.
   function reorder(scope, paths, callback) {
     var sectionId = scope.indexOf("pages:") === 0 ? scope.substring(6) : ""
     var section = root.sectionAt(sectionId)
@@ -761,11 +785,43 @@ LaneProvider {
       callback({ error: "The pages changed — try reordering again" })
       return
     }
-    root.pageOrderWrites = root.withEntry(root.pageOrderWrites, sectionId, wanted)
-    return root.rq.enqueue({ key: "page-order:" + sectionId, mode: "replace", priority: 0,
-                             owner: root, flush: true, label: "page order" },
+    var replaced = root.heldPageOrders[sectionId]
+    root.pageOrderWrites = root.withEntry(root.pageOrderWrites, sectionId, paths)
+    root.heldPageOrders = root.withEntry(root.heldPageOrders, sectionId, { paths: paths, callback: callback })
+    if (replaced) {
+      // The newer order holds all of this one and answers for it.
+      replaced.callback({})
+    }
+    root.sendHeldOrder(sectionId)
+  }
+
+  // Whether OneNote has still to answer for a page being made or deleted in
+  // the section.
+  function pagesInFlight(sectionId) {
+    return root.sectionPages(sectionId).some(function(page) {
+      var pending = root.pendingPages[page.id]
+      return (pending && !pending.error) || !!root.pendingDeletes[page.id]
+    })
+  }
+
+  // Asked again whenever a page of the section has been made or deleted.
+  function sendHeldOrder(sectionId) {
+    var held = root.heldPageOrders[sectionId]
+    if (!held || root.pagesInFlight(sectionId)) {
+      return
+    }
+    root.heldPageOrders = root.withoutEntry(root.heldPageOrders, sectionId)
+    root.writePageOrder(sectionId, held.paths, held.callback)
+  }
+
+  function writePageOrder(sectionId, paths, callback) {
+    root.rq.enqueue({ key: "page-order:" + sectionId, mode: "replace", priority: 0,
+                      owner: root, flush: true, label: "page order" },
       function(ctx) {
         var expected = root.parentPageIds(sectionId)
+        var wanted = paths.map(function(path) {
+          return root.idOf(path)
+        })
         if (!Ordering.isPermutation(expected, wanted)) {
           ctx.done({ error: "The pages changed — try reordering again" })
           return
@@ -779,7 +835,7 @@ LaneProvider {
           callback({})
           return
         }
-        var newest = root.pageOrderWrites[sectionId] === wanted
+        var newest = root.pageOrderWrites[sectionId] === paths
         if (newest) {
           root.pageOrderWrites = root.withoutEntry(root.pageOrderWrites, sectionId)
         }
@@ -789,7 +845,6 @@ LaneProvider {
         } else if (newest) {
           // The response might have been lost after a successful revision.
           // Refresh canonical Graph order rather than retrying the write.
-          root.pageOrderRecovery = root.withEntry(root.pageOrderRecovery, sectionId, true)
           pageInventory.request(sectionId, true, true)
         }
         root.rebuild()
@@ -862,15 +917,6 @@ LaneProvider {
       return
     }
     root.inventoryRevision++
-    if (Array.isArray(result.pages) && Array.isArray(result.pendingSections)) {
-      var recovering = Object.assign({}, root.pageOrderRecovery)
-      Object.keys(recovering).forEach(function(sectionId) {
-        if (result.pendingSections.indexOf(sectionId) < 0) {
-          delete recovering[sectionId]
-        }
-      })
-      root.pageOrderRecovery = recovering
-    }
     if (Array.isArray(result.notebooks)) {
       root.onNotebooks = result.notebooks
     }
@@ -1239,7 +1285,9 @@ LaneProvider {
       return
     }
     var id = "draft-" + Date.now() + "-" + (++root.nextDraft)
-    var pending = { page: { id: id, sectionId: section, title: "", modified: "" },
+    // A top-level page at the end of its section, which is where OneNote
+    // puts a new one, so the section's order takes it in at once.
+    var pending = { page: { id: id, sectionId: section, title: "", modified: "", level: 0 },
                     operations: [], error: "", handle: null }
     root.pendingPages = root.withEntry(root.pendingPages, id, pending)
     root.bodies[id] = { title: "", body: "", editable: true }
@@ -1284,12 +1332,17 @@ LaneProvider {
       var removed = result.cancelled === true && pending.operations.some(function(operation) { return operation.remove })
       if (removed) {
         root.discardPendingPage(id)
-      } else if (pending.operations.length === 0) {
-        // Waiting saves and deletes report the failure themselves; with
-        // none, the status line is the only place left to say it.
-        root.statusRequested(pending.error)
+      } else {
+        // The draft stays, out of its section's order (orderedPage).
+        root.rebuild()
+        if (pending.operations.length === 0) {
+          // Waiting saves and deletes report the failure themselves; with
+          // none, the status line is the only place left to say it.
+          root.statusRequested(pending.error)
+        }
       }
       root.finishPendingOperations(pending, { error: pending.error }, removed)
+      root.sendHeldOrder(pending.page.sectionId)
       return
     }
     var page = result.page
@@ -1331,6 +1384,7 @@ LaneProvider {
     }
     root.rebuild()
     root.persistRequested()
+    root.sendHeldOrder(page.sectionId)
   }
 
   function remove(path, cb) {
@@ -1416,6 +1470,10 @@ LaneProvider {
     }
     root.noteDeletionFinished(root.pathOf(id), result)
     root.rebuild()
+    // A page the listing had not reached was in no section's order.
+    if (deletion.page) {
+      root.sendHeldOrder(deletion.page.sectionId)
+    }
   }
 
   function sendDelete(id, deletion) {

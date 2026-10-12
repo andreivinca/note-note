@@ -156,8 +156,11 @@ Declare reorderable rows with `reorder: { scope, id, descendants? }` and
 implement `reorder(scope, ids, callback)`. Both identifiers are opaque strings
 owned by the provider; an empty scope is valid. Groups are isolated by provider
 and scope, independently of notebook tabs, row kind and displayed hierarchy.
-Set `reorder: null` when ordering is unavailable, such as an incomplete
-inventory, insufficient permissions or an unsupported resource.
+Set `reorder: null` when ordering is unavailable, such as insufficient
+permissions, an unsupported resource or an inventory that could not be listed
+in full. Work in flight is no reason: a listing, a save or a creation leaves
+the group declared, and an order asked for meanwhile is queued until it can be
+written.
 
 ```js
 { kind: "note", path: "example:page", level: 1,

@@ -64,10 +64,11 @@ unreadable one is reported by name — such names once found the properties
 every JavaScript object has, and a `.order` in one left the sidebar empty.
 The transition suite checks
 optimistic projection, refreshes, callbacks, drags while an order is saving,
-rollback, legacy compatibility, OneNote's permission/hierarchy declarations
-and its queued page order writes. The Python suite checks
-native Graph metadata, public identity joins, revision ancestry, conditional
-writes, subpage preservation and credential boundaries. These tests use no
+rollback, legacy compatibility, OneNote's permission/hierarchy declarations,
+its drags while a section is listed again, and its queued page order writes,
+including ones that wait for a page being made or deleted. The Python suite
+checks native Graph metadata, public identity joins, revision ancestry,
+conditional writes, subpage preservation and credential boundaries. These tests use no
 real tokens. The separate live app-credential round trip and its limitations
 are recorded in [OneNote page order](onenote-page-order.md).
 
