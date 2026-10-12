@@ -34,6 +34,28 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.0.41" date="2026-10-12">
+      <description>
+        <p>Bullets and numbered lists have styles: the arrow next to each
+        list button offers ●, ○ and ◾ bullets, and 1, a, A, I and i
+        numbering. Tab indents a list item and Shift+Tab outdents it, also
+        in a table cell; each level takes the next style, and returning to a
+        level continues its numbering. Local notes and OneNote keep the
+        styles; OneNote saves an indented item as the same item, with its
+        children and formatting.</p>
+        <p>Closing the window puts it away at once. Changes still being saved
+        finish in the background, and opening Note Note again meanwhile
+        brings the window back.</p>
+        <p>OneNote pages can be dragged into order right after the app opens
+        and while an earlier order is still saving. New and deleted OneNote
+        sections show at once.</p>
+        <p>Renaming asks for the new name in the name dialog. A local folder
+        renamed and renamed back no longer loses the open note's saves.</p>
+        <p>Fewer false conflicts when a list is split while blank lines are
+        removed or text is added, and fewer OneNote requests when reordering
+        pages.</p>
+      </description>
+    </release>
     <release version="1.0.40" date="2026-10-11">
       <description>
         <p>Right-click a note to delete it; the × on each note is gone.
