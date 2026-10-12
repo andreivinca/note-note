@@ -28,8 +28,8 @@ QQC.Menu {
   }
 
   // The item chosen, reported once the menu has closed: closing hands the
-  // keyboard back, and what an item opens next — a rename field — must take
-  // it after that, not before.
+  // keyboard back, and what an item opens next — a dialog asking for a name
+  // — must take it after that, not before.
   property var picked: null
   onClosed: {
     var item = menu.picked

@@ -105,19 +105,26 @@ rows offer what is the provider's alone — the host adds no item of its own.
   deleted from the list no other way, so a provider that can delete gives
   its notes this item.
 - Any other item calls `rowAction(path, id, value, cb)`. With `rename: true`
-  the host first edits the row's title in place, and `value` is the new
-  title — Enter submits a nonempty, changed title; Escape or leaving the field
-  keeps the old one. With `prompt`, the host first asks for a name in a
-  small dialog — "<item title> in “<row title>”", the `prompt` as the field's
-  placeholder — and `value` is the name. `value` is `""` otherwise. With
+  the host first asks for the row's new name in a small dialog — "<item
+  title> “<row title>”", the field opening on the row's title — and `value`
+  is the new name; the old name again calls nothing. With `prompt`,
+  the host first asks for a name in the same dialog — "<item title> in
+  “<row title>”", the `prompt` as the field's placeholder — and `value` is
+  the name. `value` is `""` otherwise. With
   `confirm`, the host asks that question first, the item's `title` on the
   button that goes ahead.
 - Before `rowAction` runs, the host writes the open note and holds it still
   until `cb({ error?, removed? })`: queue the action behind your accepted
-  writes. Report each note it moves with `notePathChanged` before you answer,
-  and the paths of the notes it deletes in `removed`: the host drops their
-  unsaved edits and puts the open note away when it is one of them. The host
-  reports an `error` on the status line.
+  writes. Call `cb` exactly once: the note stays held until you do (`cb()`
+  counts as `{}`). Report each note it moves with `notePathChanged` before
+  you answer, and the paths of the notes it deletes in `removed`: the host
+  drops their unsaved edits and puts the open note away when it is one of
+  them. The host reports an `error` on the status line.
+- A delete need not keep the user waiting: hide what goes, answer
+  `cb({ pending: true, removed })` at once, then report each removed note's
+  outcome with `noteDeletionFinished(path, result)` — `{}` once it is gone,
+  `{ error }` if it stays — as for `remove()`. The host keeps their unsaved
+  text meanwhile and gives it back if the delete fails.
 
 ```js
 { kind: "tree", path: "book:Work", title: "Work", menu: [
@@ -128,15 +135,20 @@ rows offer what is the provider's alone — the host adds no item of its own.
 ```
 
 Local notebooks are the folders under its root, and their sections the
-folders inside them, to any depth: each folder lists its sections first,
-shut until opened, then its own notes. A notebook row (with `notebookTabs`
-off) and a section row make a section inside, or rename or delete their
-folder; a folder holding anything but notes is not deleted. OneNote's
+folders inside them, 16 levels down at most: each folder lists its sections
+first, shut until opened, then its own notes. A notebook row (with
+`notebookTabs` off) and a section row make a section inside, or rename or
+delete their folder; a folder holding anything but notes is not deleted,
+and the delete is offered only while the listing read everything — a tree
+deeper than 16 levels or wider than 4096 folders lists as partial, and its
+folders cannot be deleted from the app. OneNote's
 notebook rows, in its one-tab shape, make a section; its section rows rename
 and delete one in personal notebooks the account can edit. Graph's OneNote API can do neither, but such a section is a
 `.one` file in its owner's OneDrive, named after the section: renaming the
 file renames the section in every OneNote app, and deleting it sends the
-section to the OneDrive recycle bin.
+section to the OneDrive recycle bin. A new section is listed at once and takes
+pages once OneNote has made it; a deleted one leaves the list at once and
+comes back if OneNote keeps it.
 
 ### Provider-defined ordering
 
@@ -371,7 +383,7 @@ to the running instance and `rebuild()` is called.
   you call back, or the tab it opens will be empty.
 - `action(id, value, sectionKey)` — footer actions include input and section
   context; inline actions supply only the id. Extra arguments can be ignored.
-- `rowAction(path, id, value, cb)` (optional) → `cb({ error?, removed? })` —
+- `rowAction(path, id, value, cb)` (optional) → `cb({ error?, removed?, pending? })` —
   an item of a row's `menu` (see "Row menus"); needed only by a provider
   whose menus hold more than `command` items.
 - `toggleTree(id)`

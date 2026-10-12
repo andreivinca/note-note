@@ -4,11 +4,8 @@
 .import "AudioObjects.js" as AudioObjects
 
 // A rich paste made to fit the notebook it lands in (docs/decisions.md, "A
-// rich paste brings only what the notebook can keep"). The paste used to put
-// in whatever the clipboard held, so a
-// notebook with no table tool still showed a pasted table — which its save
-// then flattened, or now refuses. The editor must not show what the
-// notebook cannot keep.
+// rich paste brings only what the notebook can keep"): the editor shows only
+// what the notebook can keep, since its save refuses anything else.
 //
 // What is read here is Qt's own serialisation of the clipboard (the
 // editor's pasteReader): the dialect's vocabulary, the one QuoteBars and the

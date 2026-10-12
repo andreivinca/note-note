@@ -209,7 +209,11 @@ check A → B → A loads, stale formatting/paste callbacks, save failures after
 selection changes, failed deletes, and settings changes while writes drain.
 Loads, deletes, save conflicts and settings drains finishing in either order
 leave the editor exactly as writable as the session's state says, and a
-document its provider opened read-only stays read-only.
+document its provider opened read-only stays read-only. A folder renamed and
+renamed back leaves its notes at their own paths, saves included; a row's
+rename through the workspace asks for the name in the name dialog, and the
+workspace lets go of the note however the provider answers; and only the
+open note's stored snapshot is kept.
 OneNote creation cases open editable drafts before any network response,
 append several pages in creation order, retain them during listings, and
 transfer early saves and conversions to the permanent page identity. They
@@ -449,8 +453,20 @@ Each pins a bug that shipped, and was found by a review of the Python:
 - **`plugins/org.note-note.local/selftest.py`, read-only notes** — a note
   holding what the editor cannot write back (raw HTML, a heading inside a
   quote) loads `editable: false` with a reason naming it, and a plain note
-  loads editable. The first autosave used to write the editor's shorter
-  version over the file.
+  loads editable: the first autosave would write the editor's shorter version
+  over the file.
+- **`plugins/org.note-note.local/selftest.py`, sections** — the folder walk
+  takes 16 levels and 4096 folders and says so when it stops short: a tree
+  deeper or wider lists as `E partial`, which keeps the folder menus' delete
+  away, and a tree of exactly 4096 folders is whole. Sections are made,
+  renamed and deleted with every part of their path checked; a rename onto
+  any existing folder is refused, and a folder holding a stray file, a
+  hidden folder or a symlink is not deleted, nor anything in it.
+- **`plugins/org.note-note.onenote/page_order_selftest.py`, sections** — a
+  rename and a delete reach the section's `.one` file; a file Graph no
+  longer finds takes the section off the list; a section the saved listing
+  does not hold — unread, or another account's — is refused with nothing
+  changed, never answered as gone.
 - **`plugins/org.note-note.sticky/selftest.py`** — a note longer than the provider's
   256 KiB ceiling is cut to it and says so (`truncatedAt`), and the
   provider opens such a note read-only with the reason. It used to open

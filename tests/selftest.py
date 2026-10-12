@@ -12,7 +12,7 @@ from transition_selftest import SUITES as TRANSITION_SUITES
 
 ROOT = Path(__file__).resolve().parents[1]
 TRANSITIONS = "tests/transition_selftest.py"
-SUITES = [
+SCRIPTS = [
     "plugins/org.note-note.onenote/audio_selftest.py",
     "lib/notemerge/selftest.py",
     "plugins/org.note-note.local/selftest.py",
@@ -37,22 +37,24 @@ SUITES = [
     "tests/tabstrip_selftest.py",
     "tests/ordering_selftest.py",
     "tests/signout_selftest.py",
-    # Each transition suite has a harness and a deadline of its own.
-    *[TRANSITIONS + " --suite " + name for name in TRANSITION_SUITES],
-    "tests/extensions_selftest.py",
 ]
+# Each run's arguments: every script, then each transition suite — which has
+# a harness and a deadline of its own — then the extension check.
+SUITES = ([(script,) for script in SCRIPTS]
+          + [(TRANSITIONS, "--suite", name) for name in TRANSITION_SUITES]
+          + [("tests/extensions_selftest.py",)])
 
 
 def main():
     failures = []
     env = dict(os.environ, QT_QPA_PLATFORMTHEME="generic")
     for suite in SUITES:
-        command = [sys.executable, *suite.split()]
-        if suite in ("tests/extensions_selftest.py", "tests/tabstrip_selftest.py"):
+        command = [sys.executable, *suite]
+        if suite[0] in ("tests/extensions_selftest.py", "tests/tabstrip_selftest.py"):
             command.append("--shell")
         # The host check belongs to the core suite; the editor suites stay
         # offscreen, as they are without it.
-        if suite == TRANSITIONS + " --suite core" and "--host" in sys.argv:
+        if suite == (TRANSITIONS, "--suite", "core") and "--host" in sys.argv:
             command.append("--host")
         try:
             result = subprocess.run(command, cwd=ROOT, env=env, capture_output=True, text=True, timeout=240)
@@ -60,7 +62,7 @@ def main():
             output = result.stdout + result.stderr
         except (OSError, subprocess.SubprocessError) as error:
             passed, output = False, str(error)
-        print(("PASS " if passed else "FAIL ") + suite, flush=True)
+        print(("PASS " if passed else "FAIL ") + " ".join(suite), flush=True)
         if not passed:
             failures.append(suite)
             print(output, flush=True)

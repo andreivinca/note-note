@@ -84,6 +84,8 @@ LaneProvider {
   property var pendingPages: ({})  // draft id -> page, deferred operations and create result
   property var pageAliases: ({})   // draft id -> Graph id, for callbacks captured before creation
   property var pendingDeletes: ({}) // page id -> hidden row and its original order
+  property var creatingSections: ({}) // stand-in id -> section listed before OneNote has made it
+  property var deletingSections: ({}) // section id -> true while its delete runs, the section hidden
   property var pageOrderWrites: ({})
   property var pageOrderRecovery: ({})
   property int nextDraft: 0
@@ -124,6 +126,15 @@ LaneProvider {
       }
     }
     return null
+  }
+  // A listing's sections with those still being created, which a listing
+  // made before OneNote had them does not hold.
+  function listedSections(sections) {
+    var listed = sections.slice()
+    for (var id in root.creatingSections) {
+      listed.push(root.creatingSections[id])
+    }
+    return listed
   }
   function sectionName(id) {
     var s = sectionAt(id)
@@ -233,7 +244,7 @@ LaneProvider {
     var rows = []
     for (var k = 0; k < root.onSections.length; k++) {
       var sec = root.onSections[k]
-      if (sec.notebookId !== bookId) {
+      if (sec.notebookId !== bookId || root.deletingSections[sec.id]) {
         continue
       }
       var secOpen = root.expanded.indexOf(sec.id) >= 0
@@ -283,7 +294,9 @@ LaneProvider {
   // count on the tab) must see the closed ones too.
   function rebuild() {
     var account = accountRows(), books = account ? [] : bookList()
-    var visiblePages = root.pages.filter(function(page) { return !root.pendingDeletes[page.id] })
+    var visiblePages = root.pages.filter(function(page) {
+      return !root.pendingDeletes[page.id] && !root.deletingSections[page.sectionId]
+    })
     if (root.notebookTabs && books.length > 0) {
       // A tab per notebook. No colour: each takes a pastel from its own
       // name, which is what tells Work from Personal apart (the logo keeps
@@ -395,7 +408,8 @@ LaneProvider {
       next.push(id)
     }
     root.expanded = next
-    if (i < 0 && root.sectionAt(id)) {
+    // A section still being created has no pages to fetch yet.
+    if (i < 0 && root.sectionAt(id) && !root.creatingSections[id]) {
       pageInventory.request(id, true, false)
     }
     rebuild()
@@ -477,8 +491,11 @@ LaneProvider {
 
   // ── new section ─────────────────────────────────────────────────────
   // From a notebook tab's footer button or a notebook row's menu, both
-  // after the host asked for the name (`prompt`). `done` hears { error }, or
-  // {} once the section is listed.
+  // after the host asked for the name (`prompt`). Listed at once under a
+  // stand-in id while OneNote makes it, it takes no page, rename or delete
+  // until then (create, sectionMenu). `done` hears { error } for a section
+  // that cannot be asked for, or {} once it is listed; OneNote refusing it
+  // takes it off the list and says why.
   function createSection(notebook, name, done) {
     var n = name.trim()
     if (!n) {
@@ -489,12 +506,29 @@ LaneProvider {
       done({ error: "OneNote is not signed in" })
       return
     }
+    var draft = { id: "draft-section-" + Date.now() + "-" + (++root.nextDraft), notebookId: notebook,
+                  name: n, notebook: root.notebookName(notebook) }
+    root.creatingSections = root.withEntry(root.creatingSections, draft.id, draft)
+    root.onSections = root.onSections.concat([draft])
+    var exp = root.expanded.slice()
+    if (exp.indexOf(notebook) < 0) {
+      exp.push(notebook)
+    }
+    exp.push(draft.id)
+    root.expanded = exp
+    root.rebuild()
+    done({})
     root.rq.enqueue({ key: "section:" + notebook, mode: "append", priority: 0, owner: root,
                       flush: true, label: "new section" },
       function(ctx) { root.runScript(["create-section", notebook, "-"], JSON.stringify({ name: n }), ctx) },
       function(r, info) {
+        root.creatingSections = root.withoutEntry(root.creatingSections, draft.id)
         if (!r || r.error) {
-          done({ error: r ? r.error : (info.cancelled ? "the window closed before the section was made" : "the section was not made") })
+          root.onSections = root.onSections.filter(function(other) { return other.id !== draft.id })
+          root.expanded = root.expanded.filter(function(id) { return id !== draft.id })
+          root.rebuild()
+          var error = r ? r.error : (info.cancelled ? "the window closed before the section was made" : "the section was not made")
+          root.statusRequested(root.name + ": " + error)
           return
         }
         var sct = r.section
@@ -503,19 +537,19 @@ LaneProvider {
         if (!sct.notebook) {
           sct.notebook = root.notebookName(sct.notebookId)
         }
-        root.onSections = root.onSections.concat([sct])
-        var exp = root.expanded.slice()
-        if (exp.indexOf(sct.notebookId) < 0) {
-          exp.push(sct.notebookId)
-        }
-        if (exp.indexOf(sct.id) < 0) {
-          exp.push(sct.id)
-        }
-        root.expanded = exp
+        // A listing may have brought the section already: that row goes, and
+        // the section takes the stand-in's place.
+        root.onSections = root.onSections.filter(function(other) {
+          return other.id !== sct.id
+        }).map(function(other) {
+          return other.id === draft.id ? sct : other
+        })
+        root.expanded = root.expanded.map(function(id) {
+          return id === draft.id ? sct.id : id
+        })
         root.rebuild()
         root.persistRequested()
         root.statusRequested("Section created")
-        done({})
       })
   }
 
@@ -524,9 +558,10 @@ LaneProvider {
   // named after it: renaming or deleting the file renames the section in
   // every OneNote app, or sends it to the recycle bin (onenote.py,
   // rename-section and delete-section). Offered on the terms page
-  // ordering is.
+  // ordering is, once OneNote has made the section.
   function sectionMenu(sec) {
-    if (!root.ready || !root.ms.hasScope("Files.ReadWrite") || !root.pageOrderingNotebook(sec.notebookId)) {
+    if (root.creatingSections[sec.id] || !root.ready || !root.ms.hasScope("Files.ReadWrite")
+        || !root.pageOrderingNotebook(sec.notebookId)) {
       return []
     }
     return [{ id: "rename", title: "Rename", icon: "󰑕", rename: true },
@@ -534,8 +569,8 @@ LaneProvider {
               confirm: "Delete the section “" + sec.name + "” and everything in it? It goes to your OneDrive recycle bin." }]
   }
 
-  // The host holds the open note still meanwhile. A page of the section may
-  // still be saving, so an action waits for the writes accepted before it.
+  // A page of the section may still be saving, so a section's request waits
+  // for the writes accepted before it.
   property var afterWrites: []
   onWriteBusyChanged: {
     if (!root.writeBusy) {
@@ -555,12 +590,22 @@ LaneProvider {
     var sec = root.sectionAt(path)
     var run = null
     if (sec && id === "rename") {
-      // Shown at once, the way onenote.py will store it; renameSection puts
-      // the old name back if OneNote refuses the new one.
-      root.setSectionName(sec.id, value.trim().substring(0, 50).trim())
+      // Shown at once as typed. renameSection then shows the name onenote.py
+      // stored, cut to OneNote's length, or puts the old one back if
+      // OneNote refuses the new one.
+      root.setSectionName(sec.id, value.trim())
       run = function() { root.renameSection(sec, value, cb) }
     } else if (sec && id === "delete") {
-      run = function() { root.deleteSection(sec, cb) }
+      // Off the list at once, the host told which notes went with it; the
+      // request follows (deleteSection), and a section OneNote keeps comes
+      // back.
+      var paths = root.sectionPages(sec.id).map(function(page) {
+        return root.pathOf(page.id)
+      })
+      root.deletingSections = root.withEntry(root.deletingSections, sec.id, true)
+      root.rebuild()
+      cb({ pending: true, removed: paths })
+      run = function() { root.deleteSection(sec, paths) }
     }
     if (!run) {
       cb({ error: "unknown section action" })
@@ -614,10 +659,14 @@ LaneProvider {
       })
   }
 
-  // Its pages go with it: the host is told, so it drops their drafts.
-  function deleteSection(sec, cb) {
+  // The request for a section rowAction has taken off the list already,
+  // with its pages, `paths`: OneNote deleting it drops it for good, and
+  // failing to brings it back. Either way the host hears each page's
+  // outcome (noteDeletionFinished), which keeps or gives back its unsaved
+  // text.
+  function deleteSection(sec, paths) {
     if (!root.rq) {
-      cb({ error: "OneNote is not signed in" })
+      root.finishSectionDeletion(sec, paths, { error: "OneNote is not signed in" })
       return
     }
     root.rq.enqueue({ key: "section:" + sec.id, mode: "append", priority: 0, owner: root,
@@ -625,13 +674,25 @@ LaneProvider {
       function(ctx) { root.runScript(["delete-section", sec.id], "", ctx) },
       function(r, info) {
         if (!r || r.error) {
-          cb({ error: root.sectionFailure(r, info, "delete") })
+          root.finishSectionDeletion(sec, paths, { error: root.sectionFailure(r, info, "delete") })
           return
         }
-        var removed = root.dropSection(sec, r)
+        root.dropSection(sec, r)
         root.statusRequested("Section deleted")
-        cb({ removed: removed })
+        root.finishSectionDeletion(sec, paths, {})
       })
+  }
+
+  function finishSectionDeletion(sec, paths, result) {
+    root.deletingSections = root.withoutEntry(root.deletingSections, sec.id)
+    root.rebuild()
+    // With no pages, no page's outcome says it failed.
+    if (result.error && paths.length === 0) {
+      root.statusRequested(root.name + ": " + result.error)
+    }
+    paths.forEach(function(path) {
+      root.noteDeletionFinished(path, result)
+    })
   }
 
   // Takes a section that is gone off the model, as onenote.py's answer
@@ -790,7 +851,7 @@ LaneProvider {
       root.onNotebooks = result.notebooks
     }
     if (Array.isArray(result.sections)) {
-      root.onSections = result.sections
+      root.onSections = root.listedSections(result.sections)
     }
     if (Array.isArray(result.pages)) {
       var pages = result.pages
@@ -815,7 +876,7 @@ LaneProvider {
     run: function(args, payload, callback) {
       return root.runProcess(inventoryRunner, args, payload, callback)
     }
-    preferredSections: root.expanded.filter(function(id) { return !!root.sectionAt(id) })
+    preferredSections: root.expanded.filter(function(id) { return !!root.sectionAt(id) && !root.creatingSections[id] })
     onLoaded: function(result) {
       root.applyInventory(result)
       root.rebuild()
@@ -874,7 +935,7 @@ LaneProvider {
         return
       }
       if (Array.isArray(result.sections)) {
-        root.onSections = result.sections
+        root.onSections = root.listedSections(result.sections)
       }
       if (Array.isArray(result.sectionOrderWarnings) && result.sectionOrderWarnings.length) {
         root.statusRequested("OneNote section order: " + result.sectionOrderWarnings.join("; "))
@@ -889,7 +950,9 @@ LaneProvider {
     inventoryReady: root.searchInventoryReady
     inventoryComplete: root.searchInventoryComplete
     session: root.ms ? root.ms.cacheSession : ""
-    pages: root.pages.filter(function(page) { return !root.pendingPages[page.id] && !root.pendingDeletes[page.id] })
+    pages: root.pages.filter(function(page) {
+      return !root.pendingPages[page.id] && !root.pendingDeletes[page.id] && !root.deletingSections[page.sectionId]
+    })
     queue: root.rq
     run: root.runLocal
     preferredSections: {
@@ -1142,6 +1205,12 @@ LaneProvider {
     if (!root.sectionAt(section) || !root.bookWritable(root.sectionAt(section).notebookId)) {
       if (cb) {
         cb({ error: "This section is not available for new pages." })
+      }
+      return
+    }
+    if (root.creatingSections[section]) {
+      if (cb) {
+        cb({ error: "This section is still being created — try again in a moment." })
       }
       return
     }

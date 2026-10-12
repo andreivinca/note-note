@@ -24,7 +24,9 @@ Item {
   // or the note goes, whatever notices come and go over it meanwhile.
   property var conflict: null
   // The editor may change the document: one is shown, loaded, the
-  // provider's to write, held by no operation and under no review.
+  // provider's to write, held by no operation and under no review. The
+  // editor's read-only flag is this, bound where the two are put together
+  // (Workspace.qml): nothing pushes it, so no transition can leave it stale.
   readonly property bool writable: session.currentPath !== "" && !session.loadingNote && !session.loadFailed
     && !session.locked && session.conflict === null && session.documentEditable
   property string loadingPath: ""
@@ -34,13 +36,14 @@ Item {
   property var editingView: null
   property int noteLoadSeq: 0
   property var saveEpoch: ({})
-  // What each note's provider is known to hold, in the editor's own form
-  // (snapshotDocument): path -> { title, body }. A save of exactly that
-  // changes nothing and is not sent — a space typed and taken back costs no
-  // request, and OneNote's are rationed. Known from a note shown as loaded
-  // and from a save landing; forgotten as a save starts, since nobody knows
-  // what the provider holds until it lands, nor after it fails.
-  property var stored: ({})
+  // What the open note's provider is known to hold, in the editor's own
+  // form: { path, document } (snapshotDocument), or null. A save of exactly
+  // that changes nothing and is not sent — a space typed and taken back
+  // costs no request, and OneNote's are rationed. Known from the note shown
+  // as loaded and from its save landing; forgotten as a save starts, since
+  // nobody knows what the provider holds until it lands, nor after it fails,
+  // and as a note is opened or deleted.
+  property var stored: null
   property var savesPending: ({})
   // Replaced wholesale, never mutated (setDraft), like savesPending:
   // unsavedTitles follows them.
@@ -69,17 +72,27 @@ Item {
     return session.pathAliases[path] || path
   }
 
-  // Creating a remote note replaces its provisional identity, without
+  // A note's identity changes under it — a remote note's provisional one
+  // replaced as it is created, a local note moved with its folder — without
   // loading the document again or changing the caret and undo history.
   // Callbacks accepted under the old identity still settle the same draft.
+  // An alias leads from a path out of use to the one in use, never further:
+  // a path in use again (a folder renamed back) is nobody's alias, and the
+  // aliases that led to `previous` lead to `next` now.
   function replacePath(previous, next, view) {
-    session.pathAliases[previous] = next
-    var maps = [session.saveEpoch, session.stored]
-    for (var i = 0; i < maps.length; i++) {
-      if (previous in maps[i]) {
-        maps[i][next] = maps[i][previous]
-        delete maps[i][previous]
+    delete session.pathAliases[next]
+    for (var alias in session.pathAliases) {
+      if (session.pathAliases[alias] === previous) {
+        session.pathAliases[alias] = next
       }
+    }
+    session.pathAliases[previous] = next
+    if (previous in session.saveEpoch) {
+      session.saveEpoch[next] = session.saveEpoch[previous]
+      delete session.saveEpoch[previous]
+    }
+    if (session.stored && session.stored.path === previous) {
+      session.stored = { path: next, document: session.stored.document }
     }
     var drafts = Object.assign({}, session.drafts)
     if (previous in drafts) {
@@ -113,23 +126,15 @@ Item {
     }
   }
 
-  // The editor's read-only flag, from the session's state alone. Every
-  // change to what `writable` weighs ends here; nothing restores a flag
-  // saved from before, which a transition finishing meanwhile made stale.
-  function updateReadOnly() {
-    editor.readOnly = !session.writable
-  }
-
   // Holds the open note still while an operation that must not see it
-  // change finishes — a delete, a settings change draining its writes.
+  // change finishes — a delete, a settings change draining its writes, a
+  // row's action.
   function lock() {
     session.locked = true
-    session.updateReadOnly()
   }
 
   function unlock() {
     session.locked = false
-    session.updateReadOnly()
   }
 
   function showConflict(path, conflict) {
@@ -139,7 +144,6 @@ Item {
     }
     var provider = session.providerFor(path)
     session.conflict = conflict
-    session.updateReadOnly()
     editor.showConflict({
       conflict: conflict,
       remoteName: provider ? provider.name : "Elsewhere",
@@ -171,7 +175,6 @@ Item {
   function closeConflict() {
     session.conflict = null
     editor.clearConflict()
-    session.updateReadOnly()
   }
 
   function cancelLoad() {
@@ -216,6 +219,7 @@ Item {
     session.loadingPath = path
     session.dirty = false
     session.editingView = null
+    session.stored = null
     // A note opens at its top (NoteEditor.showBody); a reload in place
     // keeps the caret and the scroll where the reader had them.
     var view = reload ? editor.viewState() : null
@@ -248,7 +252,6 @@ Item {
       session.noteUnavailable("The notebook is not available")
       return
     }
-    delete session.stored[path]
     var handle = provider.load(path, function(result) {
       if (!session.ownsLoad(path, generation)) {
         return
@@ -291,7 +294,7 @@ Item {
             })
           }
         } else {
-          session.stored[session.resolvedPath(path)] = editor.snapshotDocument()
+          session.stored = { path: session.resolvedPath(path), document: editor.snapshotDocument() }
           if (reload) {
             session.report(provider.name + ": reloaded, changed elsewhere")
           }
@@ -316,7 +319,6 @@ Item {
     session.loadingNote = false
     session.loadingPath = ""
     session.dirty = false
-    session.updateReadOnly()
     if (readOnly && reason) {
       session.report(reason)
     }
@@ -326,7 +328,6 @@ Item {
     session.loadFailed = true
     session.loadingNote = false
     session.loadingPath = ""
-    session.updateReadOnly()
     session.report(message)
   }
 
@@ -362,8 +363,9 @@ Item {
   // Whether `document` (snapshotDocument) is what the provider of `path`
   // already holds.
   function isStored(path, document) {
-    var known = session.stored[path]
-    return !!known && known.title === document.title && known.body === document.body
+    var known = session.stored
+    return !!known && known.path === path && known.document.title === document.title
+      && known.document.body === document.body
   }
 
   // `draft` is { document, view, epoch, error, conflict }; null drops it.
@@ -397,6 +399,9 @@ Item {
       session.saveEpoch[path] = (session.saveEpoch[path] || 0) + 1
       session.setDraft(path, null)
     }
+    if (session.stored && session.stored.path === path) {
+      session.stored = null
+    }
   }
 
   // The session reports every delete it does not complete, whether refused
@@ -417,14 +422,7 @@ Item {
       return
     }
     var current = path === session.currentPath
-    var recovery = current ? editor.snapshotDocument() : (session.drafts[path] || {}).document
-    var recoveryView = current ? session.editingView : (session.drafts[path] || {}).view
-    var unsaved = current ? session.dirty || session.saveInFlight(path) : !!session.drafts[path]
-    session.cancelPendingSave(path)
-    var deletions = Object.assign({}, session.pendingDeletions)
-    deletions[path] = { document: recovery, view: recoveryView, unsaved: unsaved,
-                        epoch: session.saveEpoch[path] }
-    session.pendingDeletions = deletions
+    var unsaved = session.holdForDeletion(path)
     session.lock()
     provider.remove(path, function(result) {
       path = session.resolvedPath(path)
@@ -437,6 +435,23 @@ Item {
       session.unlock()
       callback(result)
     })
+  }
+
+  // Sets a note's unsaved text aside while a delete runs, its saves
+  // stopped: a delete that fails gives it back as a draft (finishDeletion).
+  // Answers whether the note held unsaved text.
+  function holdForDeletion(path) {
+    path = session.resolvedPath(path)
+    var current = path === session.currentPath
+    var recovery = current ? editor.snapshotDocument() : (session.drafts[path] || {}).document
+    var recoveryView = current ? session.editingView : (session.drafts[path] || {}).view
+    var unsaved = current ? session.dirty || session.saveInFlight(path) : !!session.drafts[path]
+    session.cancelPendingSave(path)
+    var deletions = Object.assign({}, session.pendingDeletions)
+    deletions[path] = { document: recovery, view: recoveryView, unsaved: unsaved,
+                        epoch: session.saveEpoch[path] }
+    session.pendingDeletions = deletions
+    return unsaved
   }
 
   function refuseRemoval(message, callback) {
@@ -482,7 +497,7 @@ Item {
       session.dirty = false
       return
     }
-    delete session.stored[path]
+    session.stored = null
     var epoch = (session.saveEpoch[path] || 0) + 1
     session.saveEpoch[path] = epoch
     var draft = { document: document, view: session.editingView, epoch: epoch, error: "" }
@@ -521,9 +536,10 @@ Item {
         }
       } else {
         session.setDraft(path, null)
-        // A merge leaves the provider holding more than this draft.
-        if (!result.merged) {
-          session.stored[path] = draft.document
+        // A merge leaves the provider holding more than this draft; a note
+        // no longer open is known again when it is.
+        if (!result.merged && path === session.currentPath) {
+          session.stored = { path: path, document: draft.document }
         }
         if (path === session.currentPath && !session.dirty && result.version) {
           session.loadedVersion = result.version

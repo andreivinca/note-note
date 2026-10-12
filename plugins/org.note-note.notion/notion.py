@@ -95,14 +95,6 @@ def save_cache(data):
     save_private(CACHE, data)
 
 
-def drop_cache():
-    """The listing cache, gone; one already gone is fine."""
-    try:
-        os.remove(CACHE)
-    except FileNotFoundError:
-        pass
-
-
 # Every Notion request goes through this opener, which answers a redirect with
 # the 3xx it is instead of following it (provider_io.NoRedirect): the secret in
 # the Authorization header goes to api.notion.com and nowhere else. A test
@@ -224,7 +216,7 @@ def cmd_setup(path):
         session = previous.get("session", "")
     else:
         session = uuid.uuid4().hex
-        drop_cache()
+        discard(CACHE)
     save_private(TOKEN_FILE, {"token": tok, "workspace": name, "session": session})
     out({"ok": True, "workspace": name, "session": session})
 

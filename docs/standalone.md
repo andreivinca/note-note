@@ -39,7 +39,8 @@ processes are reaped asynchronously without blocking the UI.
 An Omarchy dismiss hides the workspace while accepted writes drain in the
 shell. A native close first flushes the editor, stops watchers and new reads,
 and waits for conversions, writes, provider changes and state persistence.
-Failure reopens the workspace with its draft and an error. Successful
+Changes that could not be written reopen the workspace with a question:
+closing anyway loses them. Successful
 drain emits `readyToClose`; only then does the launcher quit. OneNote content
 indexing stops during native shutdown.
 Closing drains accepted mutations rather than background listings or reads;

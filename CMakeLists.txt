@@ -94,9 +94,14 @@ if(BUILD_TESTING)
     add_test(NAME standalone COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/standalone_selftest.py $<TARGET_FILE:note-note>
         --harness $<TARGET_FILE:note-note-harness>)
-    # Each transition suite has a harness and a deadline of its own; the
-    # names are tests/transition_selftest.py's SUITES.
-    foreach(suite core tools lists blocks toolbar diacritics tables keys)
+    # Each transition suite has a harness and a deadline of its own. The
+    # names are tests/transition_selftest.py's SUITES, read from it, so a
+    # suite added there runs here too.
+    execute_process(COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/transition_selftest.py --list-suites
+        OUTPUT_VARIABLE transition_suites OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
+    string(REPLACE "\n" ";" transition_suites "${transition_suites}")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS tests/transition_selftest.py)
+    foreach(suite IN LISTS transition_suites)
         add_test(NAME native-transitions-${suite} COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/transition_selftest.py --standalone --suite ${suite})
         set_tests_properties(native-transitions-${suite} PROPERTIES

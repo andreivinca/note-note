@@ -27,6 +27,8 @@ PROCESS_LIMIT = 180
 def arguments():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--suite", choices=SUITES, help="run this suite only")
+    parser.add_argument("--list-suites", action="store_true",
+                        help="print the suite names, one per line, and run nothing (CMakeLists.txt reads them)")
     parser.add_argument("--standalone", action="store_true", help="run through the native harness, not Quickshell")
     parser.add_argument("--host", action="store_true",
                         help="also compile and instantiate the Omarchy host on Wayland (core suite)")
@@ -42,6 +44,9 @@ def arguments():
 
 def main():
     args = arguments()
+    if args.list_suites:
+        print("\n".join(SUITES))
+        return 0
     if args.suite:
         suites = [args.suite]
     elif args.host or args.notes:

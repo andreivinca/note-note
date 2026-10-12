@@ -1828,6 +1828,11 @@ def cmd_onenote_create_section(notebook_id, path):
 # recycle bin. Offered on the terms page ordering is (Provider.qml).
 SECTION_FILE_UNAVAILABLE = "Sections can be renamed and deleted only in personal notebooks you can edit"
 SECTION_FILE_NOT_GRANTED = "Sign in to OneNote again to let Note Note rename and delete sections"
+# The saved listing is the only record of a section's notebook and of what
+# this account may do there, so a section it does not hold — a listing not
+# read, or another account's — is unknown, not gone: only Graph can say it is
+# gone (web_session.SectionGone), and nothing is changed until it is known.
+SECTION_NOT_LISTED = "This section is not in the list Note Note last read from OneNote; refresh the list and try again"
 # What OneNote refuses in a section name.
 SECTION_NAME_REFUSED = '\\/*?"|<>:%#'
 
@@ -1855,8 +1860,9 @@ def forget_section(section_id):
 
 
 def answer_section_gone(section_id):
-    """A section deleted elsewhere since the list on screen was made — gone
-    from the listing, or its file from OneDrive: the list learns it now."""
+    """A section whose file Graph no longer finds (web_session.SectionGone):
+    deleted or moved elsewhere since the list on screen was made, and the
+    list learns it now."""
     pages, serial = forget_section(section_id)
     out({"error": "This section is no longer in OneDrive, so it was taken off the list",
          "gone": True, "pages": pages, "pageListSerial": serial})
@@ -1870,8 +1876,7 @@ def cmd_onenote_rename_section(section_id, path):
         fail("A section name cannot contain any of %s" % " ".join(SECTION_NAME_REFUSED))
     section = cached_resource("sections", section_id)
     if not section:
-        answer_section_gone(section_id)
-        return
+        fail(SECTION_NOT_LISTED)
     require_revision_access(section_id, SECTION_FILE_UNAVAILABLE, SECTION_FILE_NOT_GRANTED)
     try:
         item = web_session.section_item(section, graph)
@@ -1897,17 +1902,18 @@ def cmd_onenote_rename_section(section_id, path):
 
 
 def cmd_onenote_delete_section(section_id):
-    # A section already gone — from the listing, or its file from OneDrive —
-    # is deleted all the same.
-    section, item = cached_resource("sections", section_id), None
-    if section:
-        require_revision_access(section_id, SECTION_FILE_UNAVAILABLE, SECTION_FILE_NOT_GRANTED)
-        try:
-            item = web_session.section_item(section, graph)
-        except web_session.SectionGone:
-            item = None
-        except web_session.WebError as error:
-            fail(str(error))
+    section = cached_resource("sections", section_id)
+    if not section:
+        fail(SECTION_NOT_LISTED)
+    require_revision_access(section_id, SECTION_FILE_UNAVAILABLE, SECTION_FILE_NOT_GRANTED)
+    # A section whose file is already gone from OneDrive is deleted all the
+    # same.
+    try:
+        item = web_session.section_item(section, graph)
+    except web_session.SectionGone:
+        item = None
+    except web_session.WebError as error:
+        fail(str(error))
     if item:
         status, res = graph_raw("DELETE", item)
         if status not in (204, 200, 404):

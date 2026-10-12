@@ -249,11 +249,14 @@ Item {
   // selection pulls the cursor back to the note (selectPath).
   property string treeCursor: ""
   property string deletePath: ""
-  // A row's menu item waiting on its confirmation: { row, item, value }.
+  // A row's menu item waiting on its confirmation: { row, item }.
   property var rowActionPending: null
-  // A name being asked for (`prompt`): { message, placeholder, confirmText,
-  // run(name) }.
+  // A name being asked for (`prompt`, `rename`): { message, placeholder,
+  // text, confirmText, run(name) }, the field opening on `text`.
   property var promptPending: null
+  // Why a close stopped — changes that could not be written — asked as
+  // whether to close anyway and lose them; "" when nothing is asked.
+  property string closeWarning: ""
   property string missedSaveNotice: ""
   // ── state ───────────────────────────────────────────────────────────
   // Asked for by anyone whose state moved — a provider through
@@ -290,6 +293,7 @@ Item {
     root.deleteConfirmOpen = false
     root.rowActionPending = null
     root.promptPending = null
+    root.closeWarning = ""
     root.page = ""
     root.pauseQueues(false)
     // A save that failed while nobody was looking is reported now, once.
@@ -343,13 +347,15 @@ Item {
   }
 
   // A standalone process must not exit while a conversion or accepted
-  // mutation still owns a note. Failed drafts keep their window alive.
+  // mutation still owns a note. Changes that could not be written ask first:
+  // closing anyway loses them (closeWarning).
   function requestClose() {
     commandPalette.requestClose()
     if (root.closing) {
       return
     }
     root.closeError = ""
+    root.closeWarning = ""
     root.flushSave()
     root.opened = false
     session.cancelLoad()
@@ -373,11 +379,21 @@ Item {
     if (failure || session.dirty) {
       root.closing = false
       root.open("{}")
-      root.showStatus(failure || "The note still has unsaved changes")
+      root.closeWarning = failure || "The note still has unsaved changes"
       return
     }
     root.closing = false
     root.readyToClose()
+  }
+
+  function closeAnyway() {
+    root.closeWarning = ""
+    root.readyToClose()
+  }
+
+  function cancelClose() {
+    root.closeWarning = ""
+    editor.focusEditor()
   }
 
   function dismiss() {
@@ -1676,7 +1692,7 @@ Item {
 
     if (current.prompt && !value) {
       var tab = root.tabs.find(function(candidate) {
-        return candidate.key === current.provider + "/" + current.section
+        return candidate.key === root.sectionKey(p, { key: current.section })
       })
       root.askName(current.title, tab ? tab.name : "", current.prompt, function(name) {
         p.action(current.path, name, current.section)
@@ -2054,23 +2070,26 @@ Item {
   // ── row menus ───────────────────────────────────────────────────────
   // An item a provider put in one of its rows' `menu` (docs/providers.md).
   // `command: "deleteNote"` is the app's own delete, confirmation and all;
-  // any other item is the provider's rowAction, with the name it `prompt`s
-  // for, or asked first when the item names a `confirm`.
-  function chooseRowAction(row, item, value) {
+  // any other item is the provider's rowAction, with the row's new name it
+  // asks for (`rename`) or the name it `prompt`s for, or asked first when
+  // the item names a `confirm`.
+  function chooseRowAction(row, item) {
     if (session.locked) {
       return
     }
 
     if (item.command === "deleteNote") {
       root.requestDelete(row.path)
+    } else if (item.rename) {
+      root.askRename(row, item)
     } else if (item.prompt) {
       root.askName(item.title, row.title, item.prompt, function(name) {
         root.runRowAction(row, item, name)
       })
     } else if (item.confirm) {
-      root.rowActionPending = { row: row, item: item, value: value }
+      root.rowActionPending = { row: row, item: item }
     } else {
-      root.runRowAction(row, item, value)
+      root.runRowAction(row, item, "")
     }
   }
 
@@ -2082,7 +2101,19 @@ Item {
   // "<title> in “<place>”", the name typed going to `run`.
   function askName(title, place, placeholder, run) {
     root.promptPending = { message: place ? title + " in “" + place + "”" : title,
-                           placeholder: placeholder, confirmText: title, run: run }
+                           placeholder: placeholder, text: "", confirmText: title, run: run }
+  }
+
+  // "<title> “<row title>”", the field opening on the row's title to change
+  // or add to; a name other than that one renames the row.
+  function askRename(row, item) {
+    var run = function(name) {
+      if (name !== row.title) {
+        root.runRowAction(row, item, name)
+      }
+    }
+    root.promptPending = { message: item.title + " “" + row.title + "”", placeholder: row.title,
+                           text: row.title, confirmText: item.title, run: run }
   }
 
   function cancelPrompt() {
@@ -2099,13 +2130,15 @@ Item {
   function confirmRowAction() {
     var pending = root.rowActionPending
     root.rowActionPending = null
-    root.runRowAction(pending.row, pending.item, pending.value)
+    root.runRowAction(pending.row, pending.item, "")
   }
 
   // An action can move the notes under its row or take them with it, the
   // open one too: that note is written first and held still until the
   // provider answers. The notes it reports `removed` went with what the user
-  // deleted, so nothing of theirs is written again.
+  // deleted, so nothing of theirs is written again; while that delete still
+  // runs (`pending`), their unsaved text is kept until each note's outcome
+  // comes (noteDeletionFinished), as for a note's own delete.
   function runRowAction(row, item, value) {
     var p = providerById(row.provider)
     if (!p || !p.rowAction || session.locked) {
@@ -2115,11 +2148,16 @@ Item {
     root.flushSave()
     session.lock()
     p.rowAction(row.path, item.id, value, function(result) {
+      result = result || {}
       var removed = (result.removed || []).map(function(path) {
         return session.resolvedPath(path)
       })
       removed.forEach(function(path) {
-        session.cancelPendingSave(path)
+        if (result.pending) {
+          session.holdForDeletion(path)
+        } else {
+          session.cancelPendingSave(path)
+        }
       })
       if (removed.indexOf(root.currentPath) >= 0) {
         session.putAway()
@@ -2138,6 +2176,9 @@ Item {
     }
     if (root.rowActionPending) {
       return rowActionConfirm.handleKey(event)
+    }
+    if (root.closeWarning) {
+      return closeConfirm.handleKey(event)
     }
     // The name field has the keys it uses; no shortcut runs under it.
     if (root.promptPending) {
@@ -2544,6 +2585,7 @@ Item {
     id: workspaceActions
     host: root
     blocked: session.locked || lifecycle.busy || root.deleteConfirmOpen || root.rowActionPending !== null
+      || root.closeWarning !== ""
       || root.promptPending !== null || editor.tools.panelOpen
   }
 
@@ -2741,8 +2783,8 @@ Item {
           onTreeToggled: function(id) {
             root.treeToggle(id)
           }
-          onMenuActionRequested: function(row, item, value) {
-            root.chooseRowAction(row, item, value)
+          onMenuActionRequested: function(row, item) {
+            root.chooseRowAction(row, item)
           }
           onReorderFinished: function(group, ids) {
             root.reorderItems(group, ids)
@@ -2833,6 +2875,7 @@ Item {
               return p ? p.canImages === true : false
             }
             hasNote: root.currentPath !== ""
+            readOnly: !session.writable
             loading: root.loadingNote && root.loadingPath === root.currentPath
             plain: {
               var p = root.providerOf(root.currentPath)
@@ -3034,14 +3077,29 @@ Item {
       onConfirmed: root.confirmRowAction()
     }
 
+    ConfirmDialog {
+      id: closeConfirm
+      anchors.fill: parent
+      opened: root.closeWarning !== ""
+      z: 10
+      message: root.closeWarning + "\n\nClosing now loses these changes."
+      confirmText: "Close anyway"
+      background: root.background
+      foreground: root.foreground
+      scrim: root.scrim
+      selectedBackground: root.selectedBackground
+      selectedText: root.selectedText
+      fontFamily: root.interfaceFont
+      cornerRadius: Style.cornerRadius
+      onCanceled: root.cancelClose()
+      onConfirmed: root.closeAnyway()
+    }
+
     PromptDialog {
       id: promptDialog
       anchors.fill: parent
-      opened: root.promptPending !== null
+      prompt: root.promptPending
       z: 10
-      message: root.promptPending ? root.promptPending.message : ""
-      placeholderText: root.promptPending ? root.promptPending.placeholder : ""
-      confirmText: root.promptPending ? root.promptPending.confirmText : ""
       background: root.background
       foreground: root.foreground
       accent: root.accent

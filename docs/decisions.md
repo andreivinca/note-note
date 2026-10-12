@@ -708,7 +708,16 @@ report cannot drift), shows it — raw HTML as its source, in a code block —
 and the local provider's load answers `editable: false` with the names in
 its `reason`. *Considered:* refusing to display such a note through the
 converter-failure path. *Rejected:* that hides the content the rule exists
-to protect; read-only shows it and changes nothing. A table in a quote or
+to protect; read-only shows it and changes nothing.
+
+The check is the local provider's own, made in its read (operations.py):
+which notes may change is each provider's to say, and the host holds no
+provider's policy. Only the local provider writes the editor's Markdown over
+the note as it is; OneNote's and Notion's writers keep or refuse what they
+cannot write. It costs a second render of the note as it opens, in the
+provider's process. *Considered:* the host deciding from the editor's own
+render, one render instead of two. *Rejected:* that puts a provider's policy
+in the host. A table in a quote or
 a list item is read as GitHub reads it (mistune's `table_in_quote` and
 `table_in_list`), or a quoted table would collapse into one line of pipes
 without ever being reported.
@@ -961,14 +970,16 @@ The process runner owns startup, stdin delivery, both output and exit, the
 deadline and exactly-once completion for providers and conversion services.
 
 The editor's read-only flag is derived, never put back: the session weighs
-the load, a failed load, the lock a delete or a settings drain holds, an open
-conflict review and what the provider said of the document
-(`NoteSession.updateReadOnly`). A flag saved before a delete or a drain and
+the load, a failed load, the lock a delete, a settings drain or a row's
+action holds, an open conflict review and what the provider said of the
+document (`NoteSession.writable`), and the workspace binds the flag to that,
+as it binds `hasNote` and `loading`. Nothing pushes it, so no transition can
+be the one that forgot to. A flag saved before a delete or a drain and
 restored after it was stale whenever a load or a save conflict finished in
 between, and left an editable note read-only, or a note under review
 writable. The conflict review is the session's own and stands in the editor
 apart from notices and provider views. The workspace clears those whenever it
-opens, also after refusing to close over a conflicted draft; clearing the
+opens, also when a close stops over a conflicted draft to ask; clearing the
 review with them left its note read-only with no way to answer it.
 
 Notion text is split into bounded rich-text entries, then recombined by style

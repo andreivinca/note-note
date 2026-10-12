@@ -52,7 +52,9 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "..", "services", "markdown"))
+sys.path.insert(0, os.path.join(HERE, "..", "..", "lib"))
 import list as listing  # noqa: E402
+import notewalk  # noqa: E402
 from qthtml.imagesize import local_path  # noqa: E402
 
 FAILURES = []
@@ -554,6 +556,140 @@ def test_unkept_opens_read_only(directory, verbose):
     return failures
 
 
+def test_folder_walk(directory, verbose):
+    """The walk (lib/notewalk.py) takes a tree MAX_DEPTH folders deep and
+    MAX_FOLDERS folders wide, and says so when it stops short: a listing that
+    left folders out has not counted what is in them, and the delete a
+    notebook offers counts what was listed. A tree of exactly MAX_FOLDERS
+    folders is whole."""
+    failures = 0
+    deep = os.path.join(directory, "deep")
+    path = os.path.join(deep, "Work")
+    for level in range(notewalk.MAX_DEPTH + 3):
+        path = os.path.join(path, "s%d" % level)
+        if level == 1:
+            shallow = path
+    os.makedirs(path)
+    note(path, "bottom.md", 8)
+    with open(os.path.join(shallow, "found.md"), "w") as handle:
+        handle.write("---\ntitle: Found\n---\nthe needle\n")
+    keys, cut = notewalk.folder_keys(deep)
+    failures += check("the walk goes MAX_DEPTH folders down",
+                      max(key.count("/") + 1 for key in keys if key) == notewalk.MAX_DEPTH, repr(keys[-1:]))
+    failures += check("a tree deeper than that is cut, and the walk says so",
+                      cut == "the notes folder holds folders more than %d deep" % notewalk.MAX_DEPTH, repr(cut))
+    lines = stream(deep, 1000000)
+    failures += check("a listing that left folders out ends partial, and says why",
+                      lines[-1] == "E\tpartial\t" + cut, repr(lines[-1:]))
+    failures += check("a note below the cut is not listed, one above it is",
+                      [os.path.basename(line.split("\t")[2]) for line in lines if line.startswith("N\t")] == ["found.md"],
+                      repr(lines))
+    failures += check("the search reads a section's notes", found(deep, "needle") == ["found.md"],
+                      repr(found(deep, "needle")))
+
+    wide = os.path.join(directory, "wide")
+    for index in range(notewalk.MAX_FOLDERS):
+        os.makedirs(os.path.join(wide, "b%04d" % index))
+    keys, cut = notewalk.folder_keys(wide)
+    failures += check("a tree of exactly MAX_FOLDERS folders is whole",
+                      (len(keys), cut) == (notewalk.MAX_FOLDERS + 1, ""), repr((len(keys), cut)))
+    lines = stream(wide, 4000000)
+    failures += check("and its listing names every folder and ends complete",
+                      lines[-1] == "E\tcomplete"
+                      and sum(line.startswith("D\t") for line in lines) == notewalk.MAX_FOLDERS + 1, repr(lines[-1:]))
+    os.makedirs(os.path.join(wide, "b%04d" % notewalk.MAX_FOLDERS))
+    keys, cut = notewalk.folder_keys(wide)
+    failures += check("one folder more is cut, every folder taken kept",
+                      (len(keys), cut) == (notewalk.MAX_FOLDERS + 1,
+                                           "the notes folder holds more than %d folders" % notewalk.MAX_FOLDERS),
+                      repr((len(keys), cut)))
+    lines = stream(wide, 4000000)
+    failures += check("and its listing names the folders it took and ends partial",
+                      lines[-1] == "E\tpartial\t" + cut
+                      and sum(line.startswith("D\t") for line in lines) == notewalk.MAX_FOLDERS + 1, repr(lines[-1:]))
+    print("the folder walk's limits")
+    print("  %d checks failed" % failures if failures else "  all green")
+    return failures
+
+
+def test_folder_operations(directory, verbose):
+    """A section is a folder, made, renamed and deleted by operations.py with
+    every part of its path checked — no hidden folder, no symlink, nothing
+    outside the root — and deleted only when everything in it is the app's:
+    notes, their order, their pictures, and sections holding the same."""
+    failures = 0
+    root = os.path.join(directory, "folders")
+    work = os.path.join(root, "Work")
+    os.makedirs(work)
+
+    made = operation(root, action="section", key="Work/Plans/2026")
+    failures += check("a section is made, the sections above it with it",
+                      made.get("ok") is True and os.path.isdir(os.path.join(work, "Plans", "2026")), repr(made))
+    for key in ("", "Work/.hidden", "Work//Plans", "Work/../outside"):
+        refused = operation(root, action="section", key=key)
+        failures += check("a section key %r is refused" % key, "error" in refused, repr(refused))
+
+    note(os.path.join(work, "Plans"), "a.md", 8)
+    renamed = operation(root, action="renameSection", key="Work/Plans", name="Ideas")
+    failures += check("a section is renamed with everything in it",
+                      renamed.get("ok") is True and os.path.isfile(os.path.join(work, "Ideas", "a.md"))
+                      and os.path.isdir(os.path.join(work, "Ideas", "2026"))
+                      and not os.path.exists(os.path.join(work, "Plans")), repr(renamed))
+    os.makedirs(os.path.join(work, "Empty"))
+    for name, why in (("Empty", "onto a folder that is there, even an empty one"),
+                      ("a/b", "to a name holding a separator"), (".Ideas", "to a name that would hide it")):
+        refused = operation(root, action="renameSection", key="Work/Ideas", name=name)
+        failures += check("a rename %s is refused" % why,
+                          "error" in refused and os.path.isfile(os.path.join(work, "Ideas", "a.md")), repr(refused))
+    os.symlink(os.path.join(work, "Ideas"), os.path.join(work, "Linked"))
+    linked = operation(root, action="renameSection", key="Work/Linked", name="Moved")
+    failures += check("a symlinked section is not renamed",
+                      "error" in linked and os.path.islink(os.path.join(work, "Linked")), repr(linked))
+    os.remove(os.path.join(work, "Linked"))
+
+    book = os.path.join(root, "Book")
+    section = os.path.join(book, "Sub")
+    os.makedirs(os.path.join(section, ".assets"))
+    note(book, "n.md", 8)
+    note(section, "m.md", 8)
+    with open(os.path.join(section, ".order"), "w") as handle:
+        handle.write("m.md\n")
+    with open(os.path.join(section, ".assets", "paste-1.png"), "wb") as handle:
+        handle.write(b"png")
+    strays = [
+        ("a file that is not a note", lambda: note(section, "photo.jpg", 8), lambda: os.remove(os.path.join(section, "photo.jpg"))),
+        ("a hidden folder", lambda: os.makedirs(os.path.join(book, ".git")), lambda: os.rmdir(os.path.join(book, ".git"))),
+        ("a symlink, wherever it points", lambda: os.symlink(work, os.path.join(section, "Elsewhere")),
+         lambda: os.remove(os.path.join(section, "Elsewhere"))),
+        ("a symlinked note", lambda: os.symlink(os.path.join(work, "Ideas", "a.md"), os.path.join(section, "linked.md")),
+         lambda: os.remove(os.path.join(section, "linked.md"))),
+    ]
+    for what, put, take in strays:
+        put()
+        kept = operation(root, action="removeSection", key="Book")
+        failures += check("a notebook holding %s is not deleted, nor anything in it" % what,
+                          "error" in kept and os.path.isfile(os.path.join(book, "n.md"))
+                          and os.path.isfile(os.path.join(section, ".assets", "paste-1.png"))
+                          and os.path.isfile(os.path.join(work, "Ideas", "a.md")), repr(kept))
+        take()
+    assets = os.path.join(section, ".assets")
+    os.rename(assets, os.path.join(root, "pictures"))
+    os.symlink(os.path.join(root, "pictures"), assets)
+    kept = operation(root, action="removeSection", key="Book")
+    failures += check("a notebook whose pictures folder is a symlink is not deleted",
+                      "error" in kept and os.path.isdir(os.path.join(root, "pictures")), repr(kept))
+    os.remove(assets)
+    os.rename(os.path.join(root, "pictures"), assets)
+    refused = operation(root, action="removeSection", key="")
+    failures += check("the notes root is not a section to delete", "error" in refused and os.path.isdir(root), repr(refused))
+    gone = operation(root, action="removeSection", key="Book")
+    failures += check("a notebook of notes, their order and their pictures is deleted, its sections with it",
+                      gone.get("ok") is True and not os.path.exists(book) and os.path.isdir(work), repr(gone))
+    print("sections: made, renamed, deleted")
+    print("  %d checks failed" % failures if failures else "  all green")
+    return failures
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -572,6 +708,8 @@ def main():
         total += test_exact_names(directory, args.verbose)
         total += test_line_endings(directory, args.verbose)
         total += test_unkept_opens_read_only(directory, args.verbose)
+        total += test_folder_walk(directory, args.verbose)
+        total += test_folder_operations(directory, args.verbose)
 
     if FAILURES:
         print("\n%d failure(s):" % len(FAILURES))

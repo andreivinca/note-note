@@ -1,16 +1,16 @@
 import QtQuick
 import ".."
 
-// Asks for a name before something is made — a section, from a row's menu
-// item or a footer button that names a `prompt` (docs/providers.md). Enter
-// goes ahead with a nonempty name; Escape, Cancel or a click outside the
-// card lets it go.
+// Asks for a name: for something about to be made — a section, from a row's
+// menu item or a footer button that names a `prompt` — or a row's new one,
+// for an item that renames it (docs/providers.md). Enter goes ahead with a
+// nonempty name; Escape, Cancel or a click outside the card lets it go.
 FocusScope {
   id: dialog
-  property bool opened: false
-  property string message: ""
-  property string placeholderText: ""
-  property string confirmText: "Create"
+  // What is asked, or null when nothing is: { message, placeholder, text,
+  // confirmText }. The field opens on `text` — a rename's old name, to
+  // change or add to — and shows `placeholder` while it is empty.
+  property var prompt: null
   property color background: Color.background
   property color foreground: Color.foreground
   property color accent: Color.accent
@@ -19,7 +19,7 @@ FocusScope {
   property real cornerRadius: Style.cornerRadius
   signal canceled()
   signal submitted(string name)
-  visible: opened
+  visible: prompt !== null
 
   function submit() {
     var name = field.text.trim()
@@ -29,9 +29,10 @@ FocusScope {
   }
 
   // Focused as it appears: an item still hidden cannot take the keyboard.
+  // The caret ends after the text it opens on.
   onVisibleChanged: {
     if (visible) {
-      field.text = ""
+      field.text = dialog.prompt.text
       field.forceActiveFocus()
     }
   }
@@ -60,7 +61,7 @@ FocusScope {
         spacing: 20
         Text {
           width: parent.width
-          text: dialog.message
+          text: dialog.prompt ? dialog.prompt.message : ""
           textFormat: Text.PlainText
           wrapMode: Text.Wrap
           color: dialog.foreground
@@ -71,7 +72,7 @@ FocusScope {
           id: field
           objectName: "promptField"
           width: parent.width
-          placeholderText: dialog.placeholderText
+          placeholderText: dialog.prompt ? dialog.prompt.placeholder : ""
           foreground: dialog.foreground
           accent: dialog.accent
           font.family: dialog.fontFamily
@@ -93,7 +94,7 @@ FocusScope {
             onClicked: dialog.canceled()
           }
           Button {
-            text: dialog.confirmText
+            text: dialog.prompt ? dialog.prompt.confirmText : ""
             enabled: field.text.trim().length > 0
             onClicked: dialog.submit()
           }

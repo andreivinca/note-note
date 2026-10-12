@@ -264,12 +264,16 @@ root.sections = [{
 root.updated()
 ```
 
-A row is `{ kind, path, title, preview, icon, level, expanded, menu, reorder, version, modified }`:
+A row is `{ kind, path, title, preview, icon, level, expanded, count, menu, reorder, version, modified }`:
 
 - `kind: "note"` — `path` is the note's `<id>:<anything>` path.
 - `kind: "new"` — `path` is a create target handed to `create()`.
 - `kind: "action"` — `path` is an action ID handed to `action()`.
 - `kind: "tree"` — a foldable group; `path` is the tree ID for `toggleTree()`.
+- `count` — optional on a tree row: how many notes the group holds, shown
+  as a badge after its title, folded or not. Count every note in it,
+  subpages included, leave out notes being deleted, and omit `count` when
+  you do not know it.
 - `version` — an opaque change marker (mtime, etag). When a listing shows a
   newer version of the open, unedited note, the host reloads it.
 - `modified` — ISO 8601 with a timezone, or epoch milliseconds, for the dates shown.
@@ -278,12 +282,14 @@ A row is `{ kind, path, title, preview, icon, level, expanded, menu, reorder, ve
   "Delete", icon: "󰆴", command: "deleteNote" }` to delete it through the
   app's own confirmation and `remove()`; there is no other delete in the
   list. Any other item calls `rowAction(path, id, value, cb)` →
-  `cb({ error?, removed? })`: `rename: true` edits the row's title in place
-  first and passes the new one as `value`, `prompt: "Section name"` asks for
-  a name in a small dialog and passes it, `confirm` asks that question
+  `cb({ error?, removed? })`: `rename: true` asks for the row's new name in a
+  small dialog first and passes it as `value`, `prompt: "Section name"` asks
+  for a name in the same dialog and passes it, `confirm` asks that question
   first. The host writes the open note before the action and holds it until
-  you answer; report moved notes with `notePathChanged` and deleted ones in
-  `removed`.
+  you call `cb`, exactly once; report moved notes with `notePathChanged` and
+  deleted ones in `removed`. A delete can answer `{ pending: true, removed }`
+  at once, hiding what goes, and report each note's outcome later with
+  `noteDeletionFinished(path, result)`, as `remove()` does.
 
 For ordering, declare `reorder: { scope: "opaque-group", id: "opaque-item",
 descendants: true }` on each reorderable row and implement

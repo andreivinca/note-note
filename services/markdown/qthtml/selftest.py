@@ -224,11 +224,10 @@ CASES = {
         "```\ntotal = 12\n```\n\nSee [the list](https://example.com/list).\n"),
 }
 
-# Notes the editor cannot write back as they are. The writer used to drop
-# raw HTML, and to draw a quoted heading, list or code block as if it were
-# not quoted, so the first save wrote the shorter, flatter note over the
-# file. Now `unkept` names each (the reason the local provider opens such a
-# note read-only with), and the editor still shows all of it.
+# Notes the editor cannot write back as they are: raw HTML, and a quoted
+# heading, list or code block, which the writer cannot draw quoted. `unkept`
+# names each — the reason the local provider opens such a note read-only
+# with — and the editor still shows all of it.
 #   (name, markdown, what `unkept` names, what the editor's HTML still shows)
 UNKEPT = [
     ("HTML block", "<div>Keep me</div>\n", ["HTML"], "Keep me"),

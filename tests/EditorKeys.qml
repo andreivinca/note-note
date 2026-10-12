@@ -188,6 +188,16 @@ Window {
     report: function(message) {}
   }
 
+  // The editor's read-only flag bound as the host binds it (Workspace.qml),
+  // for a scenario that opens its note through `session`: whether the note
+  // may change is the session's to say. The next scenario starts with the
+  // flag its own again (resetEditor).
+  function bindToSession(session) {
+    editor.readOnly = Qt.binding(function() {
+      return !session.writable
+    })
+  }
+
   function mergeSave() {
     keys.tryVerify(function() { return mergeProvider.saves.length > 0 }, 3000)
     require(mergeProvider.saves.length > 0, "conflict action did not request a save")
@@ -204,6 +214,7 @@ Window {
     var conflict = { id: "first", parts: [
       { id: "body:0", field: "body", base: "original", local: "ours", remote: "theirs" }
     ] }
+    bindToSession(mergeSession)
     mergeSession.selectPath("test:merge")
     keys.tryVerify(function() { return !mergeSession.loadingNote }, 3000)
     editor.restoreDocument({ title: "Groceries", body: "<p>ours</p>", base: "" })
@@ -261,6 +272,7 @@ Window {
     var conflict = { id: "kept", parts: [
       { id: "body:0", field: "body", base: "original", local: "ours", remote: "theirs" }
     ] }
+    bindToSession(mergeSession)
     mergeSession.selectPath("test:kept")
     keys.tryVerify(function() { return !mergeSession.loadingNote }, 3000)
     editor.restoreDocument({ title: "Groceries", body: "<p>ours</p>", base: "" })
@@ -335,6 +347,7 @@ Window {
   // as the last save left it. OneNote's requests are rationed.
   function unchangedNoteUnsent() {
     quietProvider.saves = []
+    bindToSession(quietSession)
     quietSession.selectPath("test:quiet")
     keys.tryVerify(function() { return !quietSession.loadingNote }, 3000)
     editor.focusEditor()
@@ -3376,8 +3389,8 @@ Window {
   }
 
   // One scenario for each turn of the event loop, so a run stopped by its
-  // deadline ends with the scenario it is in. The suite used to run as one
-  // call, which kept the harness alive until its very last scenario.
+  // deadline ends with the scenario it is in rather than keeping the harness
+  // alive until its very last one.
   function runNext() {
     if (test.stopped || test.queue.length === 0) {
       test.running = ""

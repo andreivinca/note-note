@@ -145,8 +145,18 @@ ShellRoot {
       app.closingChanged.disconnect(refused)
       // Once the refusal has reopened the workspace.
       Qt.callLater(function() {
-        check("a close refused for the conflicted draft leaves the review over the note", app.opened && reviewed(),
+        check("a close stopped for the conflicted draft leaves the review over the note", app.opened && reviewed(),
               app.debugState())
+        check("the stopped close asks whether to close anyway and lose the changes",
+              app.closeWarning.indexOf("A note has unsaved changes") === 0, app.closeWarning)
+        var quits = 0
+        var quit = function() {
+          quits++
+        }
+        app.readyToClose.connect(quit)
+        app.closeAnyway()
+        app.readyToClose.disconnect(quit)
+        check("closing anyway closes", quits === 1 && app.closeWarning === "")
         app.selectPath("conflicted:b")
         check("another note opens editable, out from under the review", !state().conflict && !state().readOnly)
         app.selectPath("conflicted:a")
@@ -155,11 +165,67 @@ ShellRoot {
         app.confirmDelete()
         check("deleting the conflicted note puts its review away", !state().conflict && app.currentPath === "")
         app.providers = []
+        test.hostRowActionCases()
         test.processes--
       })
     }
     app.closingChanged.connect(refused)
     app.requestClose()
+  }
+  // A row's action through the workspace: a rename asks for the new name in
+  // the name dialog, which a write to the rows leaves standing; the action
+  // holds the note still until the provider answers, and lets go of it
+  // whatever the answer — an external provider may answer with nothing at
+  // all. Follows the conflict cases.
+  function hostRowActionCases() {
+    var app = test.appHost
+    var saves = [], actions = []
+    var source = { id: "rows", name: "Rows", markdown: false, hasTitle: false, canDelete: true, sections: [],
+      crumb: function(path) { return "Rows" },
+      load: function(path, callback) { callback({ body: path }) },
+      save: function(path, title, body, callback) { saves.push(callback) },
+      remove: function(path, callback) { callback({}) },
+      noteEdited: function(path) {},
+      refresh: function() {},
+      saveState: function() { return {} },
+      rowAction: function(path, id, value, callback) {
+        actions.push({ path: path, id: id, value: value, callback: callback })
+      } }
+    var held = function() {
+      return JSON.parse(app.debugState()).readOnly
+    }
+    var row = { provider: "rows", path: "dir:Plans", title: "Plans" }
+    var rename = { id: "rename", title: "Rename", rename: true }
+    app.providers = [source]
+    app.selectPath("rows:Plans/a")
+    descendant(app, "noteEditor").restoreDocument({ title: "", body: "rows:Plans/a, edited", base: "" })
+    app.onEdited()
+    var field = descendant(app, "promptField")
+    app.chooseRowAction(row, rename)
+    check("a rename asks for the row's new name in the name dialog, the field opening on the old one",
+          !!app.promptPending && app.promptPending.message === "Rename “Plans”"
+          && !!field && field.text === "Plans", JSON.stringify(app.promptPending))
+    app.rebuildRows()
+    check("a write to the rows leaves the name being asked for", !!app.promptPending)
+    app.submitPrompt("Plans")
+    check("the old name again renames nothing", !app.promptPending && actions.length === 0 && saves.length === 0)
+    app.chooseRowAction(row, { id: "newSection", title: "New section", prompt: "Section name" })
+    check("a name asked for something new opens on an empty field", !!field && field.text === "")
+    app.cancelPrompt()
+    app.chooseRowAction(row, rename)
+    app.submitPrompt("Ideas")
+    check("the new name reaches the provider while the note is held",
+          actions.length === 1 && actions[0].value === "Ideas" && held(), app.debugState())
+    saves.shift()({})
+    actions.shift().callback()
+    check("an action answered with nothing lets go of the note", !held(), app.debugState())
+    app.runRowAction(row, { id: "delete" }, "")
+    actions.shift().callback({ removed: ["rows:Plans/a"] })
+    check("the open note its action removed is put away", app.currentPath === "" && !app.dirty, app.debugState())
+    app.runRowAction(row, { id: "delete" }, "")
+    check("and the workspace is free for the next action", actions.length === 1)
+    actions.shift().callback({})
+    app.providers = []
   }
   function hostSearchCases() {
     var app = test.appHost
@@ -377,7 +443,6 @@ ShellRoot {
     property string title: ""
     property string body: ""
     property string documentBase: ""
-    property bool readOnly: false
     property var conversions: []
     property var conflictReview: null
     function cursorPosition() { return 0 }
@@ -438,7 +503,7 @@ ShellRoot {
     mergeSession.flushSave()
     document.conversions.shift()("ours", true)
     provider.saves.shift().callback({ error: "conflict", conflict: conflictPane.conflict })
-    check("conflict holds the draft and pauses saving", mergeSession.dirty && document.readOnly && !!document.conflictReview)
+    check("conflict holds the draft and pauses saving", mergeSession.dirty && !mergeSession.writable && !!document.conflictReview)
     conflictPane.choose("body:0", "both")
     check("conflict view enables save after each choice", conflictPane.complete)
     document.conflictReview.resolve(conflictPane.choices)
@@ -447,7 +512,7 @@ ShellRoot {
     check("resolution travels with the save snapshot", save.options.resolution.id === "conflict" &&
           save.options.resolution.choices["body:0"] === "both")
     save.callback({})
-    check("resolved save releases the draft", !mergeSession.dirty && !document.readOnly && !document.conflictReview)
+    check("resolved save releases the draft", !mergeSession.dirty && mergeSession.writable && !document.conflictReview)
 
     document.body = "older edit"
     mergeSession.onEdited()
@@ -457,7 +522,7 @@ ShellRoot {
     mergeSession.onEdited()
     provider.saves.shift().callback({ error: "conflict", conflict: conflictPane.conflict })
     check("older conflict cannot decide text typed during a save", document.body === "newer edit" &&
-          !document.conflictReview && !document.readOnly && mergeSession.dirty)
+          !document.conflictReview && mergeSession.writable && mergeSession.dirty)
     mergeSession.flushSave()
     document.conversions.shift()("newer edit", true)
     provider.saves.shift().callback({})
@@ -471,7 +536,7 @@ ShellRoot {
     check("late conflict preserves the selected note", document.body === "another note" && !document.conflictReview)
     mergeSession.selectPath("test:merge")
     check("returning to a conflicted draft opens its review", document.body === "edit before leaving" &&
-          !!document.conflictReview && document.readOnly)
+          !!document.conflictReview && !mergeSession.writable)
     mergeSession.cancelPendingSave("test:merge")
     mergeSession.dirty = false
     mergeSession.selectPath("test:recovery")
@@ -479,7 +544,7 @@ ShellRoot {
     check("recovery loads as unsaved and opens its conflict", mergeSession.dirty &&
           document.body === "recovered draft" && !!document.conflictReview)
     document.conflictReview.continueEditing()
-    check("conflict can return to editable draft", !document.readOnly && !document.conflictReview)
+    check("conflict can return to editable draft", mergeSession.writable && !document.conflictReview)
     mergeSession.cancelPendingSave("test:recovery")
     mergeSession.dirty = false
     mergeSession.currentPath = ""
@@ -521,10 +586,10 @@ ShellRoot {
     session.selectPath("test:C")
     provider.loads[4]({ body: "cut", editable: false, reason: "only part of it could be read" })
     check("a read-only load holds the editor and says the provider's reason",
-          document.readOnly && test.sessionReports.join("|") === "only part of it could be read")
+          !session.writable && test.sessionReports.join("|") === "only part of it could be read")
     session.selectPath("test:A")
     provider.loads[5]({ body: "A again" })
-    check("a writable load releases the editor again", !document.readOnly && test.sessionReports.length === 1)
+    check("a writable load releases the editor again", session.writable && test.sessionReports.length === 1)
     session.reloadCurrent()
     session.selectPath("test:B")
     provider.loads[6]({ body: "late reload" })
@@ -534,7 +599,7 @@ ShellRoot {
     test.sessionReports = []
     session.remove("test:B", function(result) {})
     provider.deletions.shift()({ error: "delete refused" })
-    check("failed delete preserves the editable unsaved note", session.dirty && document.body === "B" && !document.readOnly)
+    check("failed delete preserves the editable unsaved note", session.dirty && document.body === "B" && session.writable)
     check("the session reports a failed delete exactly once", test.sessionReports.join("|") === "Test: delete refused")
   }
 
@@ -641,7 +706,7 @@ ShellRoot {
     provider.saves.shift().callback({ error: "write failed" })
     lifecycle.tryCommit()
     check("failed save prevents teardown and config commit", result && result.error && host.retired === 0 && configFiles.writes === 0)
-    check("failed settings transition keeps the editable draft", session.dirty && !document.readOnly && !session.locked)
+    check("failed settings transition keeps the editable draft", session.dirty && session.writable && !session.locked)
 
     result = null
     lifecycle.apply(JSON.stringify({ providers: { test: { enabled: true, notebookTabs: true } } }), function(r) { result = r }, configFiles.revision)
@@ -659,7 +724,7 @@ ShellRoot {
     var appearanceConfig = { providers: host.config.providers, appearance: { theme: "example.colors/dark" } }
     lifecycle.apply(JSON.stringify(appearanceConfig), function(r) { result = r }, configFiles.revision)
     check("appearance-only settings never flush or lock a dirty note",
-          session.dirty && !session.locked && !document.readOnly && document.conversions.length === conversions)
+          session.dirty && !session.locked && session.writable && document.conversions.length === conversions)
     configFiles.callback({ ok: true })
     check("appearance settings preserve dirty document state", result.ok && session.dirty && host.retired === 0)
     session.flushSave()
@@ -702,7 +767,8 @@ ShellRoot {
     check("provider retires only after drain and confirmed settings write", host.retired === 1 && session.currentPath === "")
   }
 
-  // The editor's read-only flag follows the session's own state, whatever
+  // Whether the editor may change the note (`writable`, which the host binds
+  // the editor's read-only flag to) follows the session's own state, whatever
   // order a load, a delete, a save and a settings change finish in (review
   // finding #14): nothing puts back a flag saved before another finished.
   function editabilityCases() {
@@ -718,28 +784,28 @@ ShellRoot {
     provider.loads.shift()({ body: "A" })
     provider.deletions.shift()({})
     check("a note that loads while another is deleted is editable once the delete ends",
-          !removed.error && !session.locked && !document.readOnly)
+          !removed.error && !session.locked && session.writable)
     session.selectPath("test:B")
     removeOther()
     provider.deletions.shift()({})
     provider.loads.shift()({ body: "B" })
-    check("a note that loads after a delete ended is editable", !session.locked && !document.readOnly)
+    check("a note that loads after a delete ended is editable", !session.locked && session.writable)
     session.selectPath("test:C")
     removeOther()
     provider.loads.shift()({ body: "C" })
     provider.deletions.shift()({ error: "refused" })
     check("a note that loads while a delete fails is editable once it has failed",
-          !!removed.error && !session.locked && !document.readOnly)
+          !!removed.error && !session.locked && session.writable)
     session.selectPath("test:D")
     removeOther()
     provider.loads.shift()({ error: "unreachable" })
     provider.deletions.shift()({})
-    check("a load that fails during a delete leaves its note read-only", session.loadFailed && document.readOnly)
+    check("a load that fails during a delete leaves its note read-only", session.loadFailed && !session.writable)
     session.selectPath("test:E")
     removeOther()
     provider.loads.shift()({ body: "E", editable: false, reason: "shared for reading" })
     provider.deletions.shift()({})
-    check("a read-only document stays read-only when a delete ends", !session.locked && document.readOnly)
+    check("a read-only document stays read-only when a delete ends", !session.locked && !session.writable)
 
     var conflict = { id: "held", parts: [] }
     session.selectPath("test:F")
@@ -752,9 +818,9 @@ ShellRoot {
     provider.saves.shift().callback({ error: "conflict", conflict: conflict })
     provider.deletions.shift()({})
     check("a conflict that lands during a delete keeps its review and its read-only note",
-          !session.locked && document.conflictReview && document.readOnly)
+          !session.locked && document.conflictReview && !session.writable)
     document.conflictReview.continueEditing()
-    check("answering the review gives the note back", !document.conflictReview && !document.readOnly && session.dirty)
+    check("answering the review gives the note back", !document.conflictReview && session.writable && session.dirty)
     session.flushSave()
     document.conversions.shift()("F edited", true)
     provider.saves.shift().callback({})
@@ -766,7 +832,7 @@ ShellRoot {
     lifecycle.apply(tabs, function(result) { settled = result }, configFiles.revision)
     provider.loads.shift()({ body: "G" })
     check("a provider-settings change refused during a load leaves the loaded note editable",
-          !!settled.error && !session.locked && !document.readOnly)
+          !!settled.error && !session.locked && session.writable)
     document.body = "G edited"
     session.onEdited()
     lifecycle.apply(tabs, function(result) { settled = result }, configFiles.revision)
@@ -774,11 +840,84 @@ ShellRoot {
     provider.saves.shift().callback({ error: "conflict", conflict: conflict })
     lifecycle.tryCommit()
     check("a conflict that lands while settings drain keeps its review and its read-only note",
-          !!settled.error && !session.locked && document.conflictReview && document.readOnly)
+          !!settled.error && !session.locked && document.conflictReview && !session.writable)
     document.conflictReview.continueEditing()
     session.flushSave()
     document.conversions.shift()("G edited", true)
     provider.saves.shift().callback({})
+    session.selectPath("")
+  }
+
+  // A local folder renamed and renamed back moves its notes there and back
+  // (notePathChanged, replacePath): a path in use again is nobody's alias,
+  // so the open note's saves and its folder's other notes find their files.
+  function renameBackCases() {
+    provider.loads = []
+    provider.saves = []
+    var move = function(from, to) {
+      session.replacePath("test:" + from + "/n", "test:" + to + "/n", null)
+      session.replacePath("test:" + from + "/m", "test:" + to + "/m", null)
+    }
+    session.selectPath("test:Plans/n")
+    provider.loads.shift()({ body: "n" })
+    move("Plans", "Ideas")
+    move("Ideas", "Plans")
+    check("a folder renamed back leaves its notes at their own paths",
+          session.currentPath === "test:Plans/n" && session.resolvedPath("test:Plans/n") === "test:Plans/n"
+          && session.resolvedPath("test:Ideas/m") === "test:Plans/m")
+    document.body = "n edited"
+    session.onEdited()
+    session.flushSave()
+    move("Plans", "Ideas")
+    move("Ideas", "Plans")
+    document.conversions.shift()("n edited", true)
+    check("a save converting through a rename and back goes to the note's path",
+          provider.saves.length === 1 && provider.saves[0].path === "test:Plans/n")
+    provider.saves.shift().callback({})
+    check("and settles, nothing left pending", !session.busy && !session.dirty && !session.drafts["test:Plans/n"])
+    document.body = "n edited again"
+    session.onEdited()
+    session.flushSave()
+    document.conversions.shift()("n edited again", true)
+    check("the note's next save is sent as well", provider.saves.length === 1 && provider.saves[0].path === "test:Plans/n")
+    provider.saves.shift().callback({})
+    session.selectPath("test:Plans/m")
+    check("another note of the folder opens at its own path", session.currentPath === "test:Plans/m" && session.loadingNote)
+    provider.loads.shift()({ body: "m" })
+    session.replacePath("test:Chain/a", "test:Chain/b", null)
+    session.replacePath("test:Chain/b", "test:Chain/c", null)
+    check("an old path follows its note through two renames", session.resolvedPath("test:Chain/a") === "test:Chain/c")
+    session.selectPath("")
+  }
+
+  // What the provider holds (stored) is known for the open note alone: from
+  // its load and its save landing. Another note's landing does not take its
+  // place, and opening or deleting a note forgets it.
+  function storedCases() {
+    provider.loads = []
+    provider.saves = []
+    provider.deletions = []
+    session.selectPath("test:S1")
+    provider.loads.shift()({ body: "S1" })
+    check("the open note's provider is known to hold what it loaded",
+          !!session.stored && session.stored.path === "test:S1")
+    document.body = "S1 edited"
+    session.onEdited()
+    session.selectPath("test:S2")
+    check("opening another note forgets the first one's", session.stored === null)
+    document.conversions.shift()("S1 edited", true)
+    provider.loads.shift()({ body: "S2" })
+    provider.saves.shift().callback({})
+    check("a save landing for a note no longer open leaves the open note's",
+          !!session.stored && session.stored.path === "test:S2" && session.stored.document.body === "S2")
+    session.selectPath("test:S1")
+    provider.loads.shift()({ body: "S1 edited" })
+    session.onEdited()
+    session.flushSave()
+    check("a note typed back to what its provider holds sends no save", provider.saves.length === 0 && !session.dirty)
+    session.remove("test:S1", function(result) {})
+    check("a deleted note's is forgotten", session.stored === null)
+    provider.deletions.shift()({})
     session.selectPath("")
   }
 
@@ -1561,6 +1700,75 @@ ShellRoot {
           && bookRows.every(function(row) {
             return row.menu.some(function(item) { return item.id === "newSection" && !!item.prompt })
           }), JSON.stringify(bookRows.map(function(row) { return row.path })))
+
+    // A section shows as soon as it is asked for and leaves the list as soon
+    // as it is deleted; OneNote's answer only settles what then stays.
+    var jobs = []
+    created.rq = { depth: 0, enqueue: function(opts, start, settled) {
+      jobs.push({ key: opts.key, settled: settled })
+      return { cancel: function() {} }
+    }, cancelOwner: function(owner) {} }
+    // A section's job; a new queue starts a listing of its own besides.
+    var sectionJob = function() {
+      for (var i = 0; i < jobs.length; i++) {
+        if (jobs[i].key.indexOf("section:") === 0) {
+          return jobs.splice(i, 1)[0]
+        }
+      }
+      return null
+    }
+    var queued = function(key) {
+      return jobs.some(function(job) { return job.key === key })
+    }
+    var listedIds = function() {
+      return created.onSections.map(function(section) { return section.id })
+    }
+    var rowPaths = function() {
+      created.rebuild()
+      return created.sections[0].rows.map(function(row) { return row.path })
+    }
+    var asked = null
+    created.createSection("other-book", "Ideas", function(result) { asked = result })
+    var draft = created.onSections.filter(function(section) { return section.name === "Ideas" })[0]
+    check("a new OneNote section is listed before OneNote answers",
+          !!asked && !asked.error && !!draft && rowPaths().indexOf(draft.id) >= 0 && queued("section:other-book"),
+          JSON.stringify({ asked: asked, draft: draft, rows: rowPaths(), jobs: jobs.map(function(job) { return job.key }) }))
+    var refused = null
+    created.create("section:" + draft.id, function(result) { refused = result })
+    check("a section still being created takes no page and offers no rename or delete",
+          !!refused && String(refused.error).indexOf("still being created") >= 0
+          && created.sectionMenu(draft).length === 0, JSON.stringify(refused))
+    sectionJob().settled({ section: { id: "made", notebookId: "other-book", name: "Ideas" }, pageListSerial: 0 }, {})
+    check("OneNote's answer puts the made section in the stand-in's place",
+          listedIds().indexOf("made") >= 0 && listedIds().indexOf(draft.id) < 0 && rowPaths().indexOf("made") >= 0)
+    created.createSection("other-book", "Broken", function(result) {})
+    var broken = created.onSections.filter(function(section) { return section.name === "Broken" })[0]
+    sectionJob().settled({ error: "refused" }, {})
+    check("a section OneNote refuses leaves the list again", listedIds().indexOf(broken.id) < 0)
+
+    created.pages = [{ id: "p1", sectionId: "made", title: "One" }, { id: "p2", sectionId: "made", title: "Two" }]
+    var outcomes = []
+    created.noteDeletionFinished.connect(function(path, result) {
+      outcomes.push(path + ":" + (result.error || "ok"))
+    })
+    var answered = null
+    created.rowAction("made", "delete", "", function(result) { answered = result })
+    check("a deleted OneNote section leaves the list at once, its pages reported going",
+          !!answered && answered.pending === true
+          && answered.removed.join(",") === created.pathOf("p1") + "," + created.pathOf("p2")
+          && rowPaths().indexOf("made") < 0 && queued("section:made"), JSON.stringify(answered))
+    sectionJob().settled({ error: "the section is open elsewhere" }, {})
+    check("a section OneNote keeps comes back, each page told the delete failed",
+          rowPaths().indexOf("made") >= 0
+          && outcomes.join(",") === created.pathOf("p1") + ":the section is open elsewhere," + created.pathOf("p2") + ":the section is open elsewhere",
+          outcomes.join(","))
+    outcomes = []
+    created.rowAction("made", "delete", "", function(result) {})
+    sectionJob().settled({ ok: true, pages: ["p1", "p2"], pageListSerial: 0 }, {})
+    check("a section OneNote deletes is gone for good, each page told so",
+          listedIds().indexOf("made") < 0 && rowPaths().indexOf("made") < 0
+          && outcomes.join(",") === created.pathOf("p1") + ":ok," + created.pathOf("p2") + ":ok", outcomes.join(","))
+    created.rq = lane
     created.destroy()
     oneNote.notebookTabs = false
     oneNote.onSections = [{ id: "section", name: "Section", notebookId: "book", notebook: "Book" }]
@@ -1693,7 +1901,7 @@ ShellRoot {
           source.pages.map(function(page) { return page.id }).join(",") === "a,b," + firstId + "," + secondId + ",z")
     creationSession.selectPath(first)
     check("a new OneNote draft opens without a remote page read",
-          !creationSession.loadingNote && !document.readOnly && mergeLane.jobs.length === 2)
+          !creationSession.loadingNote && creationSession.writable && mergeLane.jobs.length === 2)
     document.title = "Typed immediately"
     document.body = "early content"
     creationSession.onEdited()
@@ -1762,7 +1970,7 @@ ShellRoot {
     creationSession.reports = []
     mergeLane.jobs.shift().settled({ error: "uncertain network response" })
     check("failed creation keeps typed content editable and reports an unsaved draft",
-          document.body === "keep this on failure" && !document.readOnly && creationSession.dirty &&
+          document.body === "keep this on failure" && creationSession.writable && creationSession.dirty &&
           !!creationSession.drafts[failed].error && !!source.pageAt(failed))
     check("a failed creation with a waiting save is reported once, by that save",
           statuses.length === 0 && creationSession.reports.length === 1 &&
@@ -1885,7 +2093,7 @@ ShellRoot {
           accepted.pending && replies === 1 && creationSession.currentPath === "onenote:c" &&
           source.sections[0].notes.map(function(note) { return note.path }).join(",") === "onenote:a,onenote:c,onenote:d,onenote:x")
     check("remote deletion drains in the background while the editor stays usable",
-          creationSession.busy && !creationSession.locked && !document.readOnly && document.body === "body c" &&
+          creationSession.busy && !creationSession.locked && creationSession.writable && document.body === "body c" &&
           mergeLane.jobs.length === 1 && mergeLane.jobs[0].options.flush)
     var duplicate = null
     creationSession.reports = []
@@ -1913,7 +2121,7 @@ ShellRoot {
           creationSession.drafts["onenote:b"].view === "b-base" && !!creationSession.failureFor(["onenote"]))
     creationSession.selectPath("onenote:b")
     check("reopening a restored note shows its unsaved text for editing",
-          creationSession.dirty && !document.readOnly && document.body === "unsaved text before deletion")
+          creationSession.dirty && creationSession.writable && document.body === "unsaved text before deletion")
     creationSession.flushSave()
     document.conversions.shift()(document.body, true)
     mergeLane.jobs.shift().settled({ title: document.title, body: document.body, view: "b-saved" })
@@ -2013,6 +2221,8 @@ ShellRoot {
         mergeCases()
         lifecycleCases()
         editabilityCases()
+        renameBackCases()
+        storedCases()
         oneNoteCases()
         oneNoteCreationCases()
         oneNoteDeletionCases()
@@ -2026,6 +2236,8 @@ ShellRoot {
       mergeCases()
       lifecycleCases()
       editabilityCases()
+      renameBackCases()
+      storedCases()
       pureCases()
       oneNoteCases()
       oneNoteCreationCases()

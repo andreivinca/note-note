@@ -380,5 +380,116 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(saved.call_args.args[0]["pages"], [page])
 
 
+class SectionFileTests(unittest.TestCase):
+    """A section is renamed and deleted through its .one file (rename-section
+    and delete-section), and only Graph can say that file is gone: a section
+    the saved listing does not hold is left exactly as it is."""
+    NOTEBOOK = "0-0123456789abcdef!12"
+    ITEM = "/drives/0123456789abcdef/items/0123456789abcdef%2112"
+
+    def listing(self):
+        return {"notebooks": [{"id": self.NOTEBOOK, "userRole": "Owner"}],
+                "sections": [{"id": "s", "notebookId": self.NOTEBOOK, "name": "Old"},
+                             {"id": "t", "notebookId": self.NOTEBOOK, "name": "Other"}],
+                "pages": [{"id": "p1", "sectionId": "s"}, {"id": "p2", "sectionId": "t"}],
+                "pageListSerial": 1}
+
+    def run_command(self, command, cache, item=ITEM, graph=(200, {}), raw=(204, "")):
+        """The command's answer, whether it failed, and the patched calls —
+        run against `cache`, Graph finding the file at `item` (or raising
+        it) and answering `graph` to a rename and `raw` to a delete."""
+        output = io.StringIO()
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch.object(onenote, "load_listing", return_value=cache))
+            stack.enter_context(patch.object(onenote, "listing_lock", return_value=contextlib.nullcontext()))
+            saved = stack.enter_context(patch.object(onenote, "save_listing"))
+            stack.enter_context(patch.object(onenote, "content_index"))
+            stack.enter_context(patch.object(onenote, "merge_store"))
+            stack.enter_context(patch.object(onenote, "read_payload", return_value={"name": "New"}))
+            stack.enter_context(patch.object(web, "write_granted", return_value=True))
+            if isinstance(item, Exception):
+                found = stack.enter_context(patch.object(web, "section_item", side_effect=item))
+            else:
+                found = stack.enter_context(patch.object(web, "section_item", return_value=item))
+            renamed = stack.enter_context(patch.object(onenote, "graph", return_value=graph))
+            deleted = stack.enter_context(patch.object(onenote, "graph_raw", return_value=raw))
+            stack.enter_context(contextlib.redirect_stdout(output))
+            failed = False
+            try:
+                command()
+            except SystemExit:
+                failed = True
+        calls = {"saved": saved, "found": found, "renamed": renamed, "deleted": deleted}
+        return json.loads(output.getvalue()), failed, calls
+
+    def rename(self):
+        onenote.cmd_onenote_rename_section("s", "-")
+
+    def delete(self):
+        onenote.cmd_onenote_delete_section("s")
+
+    def test_a_rename_renames_the_sections_file(self):
+        cache = self.listing()
+        answer, failed, calls = self.run_command(self.rename, cache)
+        self.assertFalse(failed)
+        self.assertEqual((answer["ok"], answer["name"]), (True, "New"))
+        calls["renamed"].assert_called_once_with("PATCH", self.ITEM, {"name": "New.one"},
+                                                 retry_policy=onenote.msgraph.RetryPolicy.NEVER)
+        self.assertEqual([section["name"] for section in cache["sections"]], ["New", "Other"])
+
+    def test_a_rename_onto_a_name_the_notebook_has_is_refused(self):
+        cache = self.listing()
+        answer, failed, calls = self.run_command(self.rename, cache, graph=(409, {}))
+        self.assertTrue(failed)
+        self.assertIn("already has a section called", answer["error"])
+        self.assertEqual(cache["sections"][0]["name"], "Old")
+        calls["saved"].assert_not_called()
+
+    def test_a_rename_of_a_file_gone_takes_the_section_off_the_list(self):
+        cache = self.listing()
+        answer, failed, calls = self.run_command(self.rename, cache, item=web.SectionGone("gone"))
+        self.assertFalse(failed)
+        self.assertEqual((answer["gone"], answer["pages"]), (True, ["p1"]))
+        calls["renamed"].assert_not_called()
+        self.assertEqual([section["id"] for section in cache["sections"]], ["t"])
+
+    def test_a_delete_deletes_the_sections_file(self):
+        cache = self.listing()
+        answer, failed, calls = self.run_command(self.delete, cache)
+        self.assertFalse(failed)
+        self.assertEqual((answer["ok"], answer["pages"]), (True, ["p1"]))
+        calls["deleted"].assert_called_once_with("DELETE", self.ITEM)
+        self.assertEqual([section["id"] for section in cache["sections"]], ["t"])
+
+    def test_a_delete_of_a_file_already_gone_is_done_all_the_same(self):
+        cache = self.listing()
+        answer, failed, calls = self.run_command(self.delete, cache, item=web.SectionGone("gone"))
+        self.assertFalse(failed)
+        self.assertTrue(answer["ok"])
+        calls["deleted"].assert_not_called()
+        self.assertEqual([section["id"] for section in cache["sections"]], ["t"])
+
+    def test_a_delete_onedrive_refuses_changes_nothing(self):
+        cache = self.listing()
+        refusal = (403, json.dumps({"error": {"message": "Access denied"}}))
+        answer, failed, calls = self.run_command(self.delete, cache, raw=refusal)
+        self.assertTrue(failed)
+        self.assertEqual(answer["error"], "Access denied")
+        self.assertEqual(len(cache["sections"]), 2)
+        calls["saved"].assert_not_called()
+
+    def test_a_section_the_saved_listing_does_not_hold_is_left_alone(self):
+        unread, without = None, {"notebooks": [], "sections": [], "pages": []}
+        for cache in (unread, without):
+            for command in (self.rename, self.delete):
+                with self.subTest(cache=cache, command=command.__name__):
+                    answer, failed, calls = self.run_command(command, cache)
+                    self.assertTrue(failed)
+                    self.assertEqual(answer["error"], onenote.SECTION_NOT_LISTED)
+                    self.assertNotIn("gone", answer)
+                    for name in ("found", "renamed", "deleted", "saved"):
+                        calls[name].assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

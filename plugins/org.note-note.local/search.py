@@ -20,7 +20,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "lib"))
-from notewalk import MAX_FOLDERS, folder_keys  # noqa: E402
+from notewalk import folder_keys  # noqa: E402
 from readfile import read_capped  # noqa: E402
 import notefile  # noqa: E402
 
@@ -36,7 +36,9 @@ def main():
     deadline = time.monotonic() + DEADLINE
     matched = 0
 
-    for key in folder_keys(root)[:MAX_FOLDERS]:
+    # Best-effort, like the deadline: a walk cut short searches what it took.
+    keys, _ = folder_keys(root)
+    for key in keys:
         d = os.path.join(root, key) if key else root
         try:
             with os.scandir(d) as it:

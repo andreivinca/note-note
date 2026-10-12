@@ -458,6 +458,9 @@ Item {
     if (!end.complete) {
       root.statusRequested(root.name + ": " + end.reason + " — showing what was listed")
       if (root.notes.length > 0 || root.notebooks.length > 0) {
+        // The rows kept are drawn again without what only a whole listing
+        // offers — a folder's delete, a drag — until one lands.
+        rebuild()
         return
       }
     }
@@ -513,7 +516,10 @@ Item {
   }
 
   // Staging, writing, creating and deleting share one ordering policy.
-  // Callers and models see success only after the filesystem has committed.
+  // Callers and models see success only after the filesystem has committed:
+  // `commit(answer)` runs first, on success only, and returns what `cb` is
+  // told beside the answer — the path a note was created at, the notes a
+  // delete took — or nothing.
   function mutate(key, payload, commit, cb) {
     return mutations.enqueue({ key: key, mode: "append", owner: root, flush: true }, function(ctx) {
       root.mutationRevision++
@@ -525,7 +531,7 @@ Item {
       root.mutationRevision++
       var answer = result || { error: info.cancelled ? "operation cancelled" : "operation was not completed" }
       if (!answer.error) {
-        commit(answer)
+        answer = Object.assign({}, answer, commit(answer))
       }
       if (cb) {
         cb(answer)
@@ -568,9 +574,9 @@ Item {
       }
       arr.splice(at, 0, entry)
       root.notes = arr
-      result.path = entry.path
       rebuild()
       persistOrder(key)
+      return { path: entry.path }
     }, cb)
   }
 
@@ -612,9 +618,8 @@ Item {
         root.notebooks = root.notebooks.concat([{ key: key, name: key, dir: root.dirOf(key) }])
         persistNotebookOrder()
       }
-      result.key = root.notebookTabs ? key : "notes"
-      result.target = "section:" + key
       rebuild()
+      return { key: root.notebookTabs ? key : "notes", target: "section:" + key }
     }, cb)
   }
 
@@ -701,11 +706,13 @@ Item {
     }, cb)
   }
 
-  // Its sections go with it. operations.py keeps a folder holding anything
-  // that is not a note.
+  // Its sections go with it. The answer names the notes that went with it
+  // (`removed`), taken as the folder goes, so a note made in it while the
+  // delete waited its turn is one of them. operations.py keeps a folder
+  // holding anything that is not a note.
   function removeFolder(key, cb) {
     mutate("section:" + key, { action: "removeSection", key: key }, function(result) {
-      result.removed = root.notesUnder(key).map(function(note) {
+      var removed = root.notesUnder(key).map(function(note) {
         return note.path
       })
       var gone = function(other) { return root.within(other, key) }
@@ -719,6 +726,7 @@ Item {
         persistNotebookOrder()
       }
       root.persistRequested()
+      return { removed: removed }
     }, cb)
   }
 

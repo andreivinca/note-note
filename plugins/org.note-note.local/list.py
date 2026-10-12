@@ -56,7 +56,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "lib"))
-from notewalk import MAX_FOLDERS, folder_keys  # noqa: E402
+from notewalk import folder_keys  # noqa: E402
 from readfile import read_capped  # noqa: E402
 from fileio import write_atomic  # noqa: E402
 import notefile  # noqa: E402
@@ -215,8 +215,8 @@ def main():
         for name in lines_of(os.path.join(root, ".notebooks")):
             emit("B", name)
 
-        keys = folder_keys(root)
-        for key in keys[:MAX_FOLDERS]:
+        keys, walk_cut = folder_keys(root)
+        for key in keys:
             d = os.path.join(root, key) if key else root
             emit("D", key)
             for name in lines_of(os.path.join(d, ".order")):
@@ -251,8 +251,10 @@ def main():
                     raise Cut("the listing took longer than %d seconds" % int(DEADLINE))
                 title, preview = head_of(path, deadline)
                 emit("N", key, path, title, preview, str(size), str(mtime))
-        if len(keys) > MAX_FOLDERS:
-            raise Cut("the notes folder holds more than %d folders" % MAX_FOLDERS)
+        # The walk left folders out: what they hold was neither listed nor
+        # counted.
+        if walk_cut:
+            raise Cut(walk_cut)
     except Cut as cut:
         out.write(("E\tpartial\t" + str(cut) + "\n").encode())
         return
