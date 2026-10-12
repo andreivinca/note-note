@@ -126,20 +126,17 @@ class StructureTests(unittest.TestCase):
             with self.subTest(damage=damage), self.assertRaises(web.WebError):
                 ordering.SectionOrder(state, pages)
 
-    def test_write_contains_only_section_root_and_readback_verifies_order(self):
+    def test_write_contains_only_section_root_and_is_not_read_back(self):
         state, pages = fixture()
         session = Mock()
-        session.read_section.side_effect = [state, copy.deepcopy(state)]
-
-        def commit(current, root):
-            self.assertIs(current, state)
-            session.read_section.side_effect = iter([dict(state, RevisionList=[dict(state["RevisionList"][0],
-                ObjectGroups=[{"Objects": [root] + state["RevisionList"][0]["ObjectGroups"][0]["Objects"][1:]}])])])
-
-        session.write_section.side_effect = commit
+        session.read_section.return_value = state
         arranged = ordering.reorder(session, pages, ["opaque-0", "opaque-2"], ["opaque-2", "opaque-0"])
         self.assertEqual([page["id"] for page in arranged], ["opaque-2", "opaque-0", "opaque-1"])
+        session.read_section.assert_called_once()
         session.write_section.assert_called_once()
+        current, root = session.write_section.call_args.args
+        self.assertIs(current, state)
+        self.assertEqual(root["ObjectId"], state["RevisionList"][0]["ObjectGroups"][0]["Objects"][0]["ObjectId"])
 
     def test_old_cached_page_lists_stay_complete_until_their_section_is_opened(self):
         section = {"id": "s", "modified": "unchanged"}
@@ -255,6 +252,19 @@ class TransportTests(unittest.TestCase):
                     self.session.request("POST", web.ENDPOINT, mutation=True)
         self.assertNotIn("private", str(caught.exception))
 
+    def test_the_revision_service_counts_against_the_providers_one_budget(self):
+        """Graph and the revision service are one budget: every request is
+        admitted under the provider's rate key, and background work leaves
+        notes their share of it."""
+        with patch.object(web.ratelimit, "attempt_loop", return_value=(200, b"", {})) as admit, \
+                patch.object(web.msgraph.settings, "rate_key", "budget"), \
+                patch.object(web.msgraph.settings, "rate_windows", [(60, 100)]):
+            self.session.request("POST", web.ENDPOINT)
+            with web.msgraph.background_requests():
+                self.session.request("GET", "https://my.microsoftpersonalcontent.com/personal/preview")
+        self.assertEqual([(call.args[:2], call.kwargs["reserve"]) for call in admit.call_args_list],
+                         [(("budget", [(60, 100)]), 0), (("budget", [(60, 100)]), 20)])
+
     def test_broken_response_to_a_write_is_an_uncertain_outcome(self):
         for error in (http.client.IncompleteRead(b"partial"), http.client.BadStatusLine("garbage")):
             with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"NOTE_NOTE_RATE_DIR": directory}):
@@ -266,10 +276,12 @@ class TransportTests(unittest.TestCase):
 
 
 class CommandTests(unittest.TestCase):
-    def command(self, stack, cache, pages, listings, arranged=None, error=None):
-        """cmd_reorder_pages against `cache`, with Graph answering `listings`."""
+    def command(self, stack, cache, pages, listings, arranged=None, error=None, budget_wait=0):
+        """cmd_reorder_pages against `cache`, with Graph answering `listings`
+        and OneNote's budget leaving notes their share for `budget_wait`."""
         stack.enter_context(patch.object(onenote, "read_payload", return_value={
             "sectionId": "s", "expected": ["opaque-0", "opaque-2"], "order": ["opaque-2", "opaque-0"]}))
+        budget = stack.enter_context(patch.object(onenote.ratelimit, "background_delay", return_value=budget_wait))
         stack.enter_context(patch.object(onenote, "cached_resource", return_value={"id": "s"}))
         stack.enter_context(patch.object(onenote, "require_revision_access"))
         collect = stack.enter_context(patch.object(onenote, "collect_section_pages", side_effect=listings))
@@ -280,7 +292,7 @@ class CommandTests(unittest.TestCase):
         stack.enter_context(patch.object(onenote, "load_order", return_value={}))
         sleep = stack.enter_context(patch.object(onenote.time, "sleep"))
         saved = stack.enter_context(patch.object(onenote, "save_listing"))
-        return collect, sleep, saved
+        return collect, sleep, saved, budget
 
     def test_post_write_errors_never_request_job_replay_and_invalidate_the_section(self):
         _, pages = fixture()
@@ -291,7 +303,7 @@ class CommandTests(unittest.TestCase):
                      "inventoryComplete": True}
             output = io.StringIO()
             with self.subTest(error=type(error).__name__), contextlib.ExitStack() as stack:
-                _, _, saved = self.command(stack, cache, pages, [{"pages": pages}], error=error)
+                _, _, saved, _ = self.command(stack, cache, pages, [{"pages": pages}], error=error)
                 stack.enter_context(contextlib.redirect_stdout(output))
                 with self.assertRaises(SystemExit):
                     onenote.cmd_reorder_pages("-")
@@ -302,26 +314,40 @@ class CommandTests(unittest.TestCase):
             self.assertNotIn("s", saved.call_args.args[0]["sectionPages"])
             self.assertGreater(saved.call_args.args[0]["pageListSerial"], 1)
 
-    def test_graph_confirmation_backs_off_and_never_waits_after_its_last_listing(self):
+    def test_an_order_without_room_beyond_what_notes_keep_fails_before_any_request(self):
+        """Page order comes after notes in OneNote's one budget: when only
+        the share kept for notes is left, the order fails at once."""
+        _, pages = fixture()
+        cache = {"sections": [{"id": "s"}], "pages": pages, "pageListSerial": 1}
+        output = io.StringIO()
+        with contextlib.ExitStack() as stack:
+            collect, _, saved, budget = self.command(stack, cache, pages, [], budget_wait=30)
+            stack.enter_context(contextlib.redirect_stdout(output))
+            with self.assertRaises(SystemExit):
+                onenote.cmd_reorder_pages("-")
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["error"], "The order was not saved — OneNote's requests are kept for notes right now")
+        self.assertNotIn("kind", result)
+        budget.assert_called_once_with(onenote.msgraph.settings.rate_key, onenote.msgraph.settings.rate_windows)
+        collect.assert_not_called()
+        saved.assert_not_called()
+
+    def test_a_written_order_is_recorded_without_listing_the_section_again(self):
+        """OneNote's answer to the write is the confirmation: the order is
+        recorded at once, with no wait and no listing after the write."""
         _, pages = fixture()
         arranged = ordering.SectionOrder(fixture()[0], pages).arranged_pages(pages, ["opaque-2", "opaque-0"])
-        stale = {"pages": pages}
-        for listings, sleeps, confirmed in (([stale, stale, {"pages": arranged}], [1, 2], True),
-                                            ([stale, stale, stale, stale], [1, 2, 4], False)):
-            cache = {"sections": [{"id": "s", "name": "S", "notebookId": "n"}], "pages": pages, "sectionPages": {"s": {"modified": "m"}},
-                     "pageListSerial": 1}
-            output = io.StringIO()
-            with self.subTest(confirmed=confirmed), contextlib.ExitStack() as stack:
-                collect, sleep, _ = self.command(stack, cache, pages, listings, arranged=arranged)
-                stack.enter_context(contextlib.redirect_stdout(output))
-                if confirmed:
-                    onenote.cmd_reorder_pages("-")
-                else:
-                    with self.assertRaises(SystemExit):
-                        onenote.cmd_reorder_pages("-")
-            self.assertEqual([call.args[0] for call in sleep.call_args_list], sleeps)
-            self.assertEqual(collect.call_count, len(listings))
-            self.assertEqual("error" in json.loads(output.getvalue()), not confirmed)
+        cache = {"sections": [{"id": "s", "name": "S", "notebookId": "n"}], "pages": pages,
+                 "sectionPages": {"s": {"modified": "m"}}, "pageListSerial": 1}
+        output = io.StringIO()
+        with contextlib.ExitStack() as stack:
+            collect, sleep, saved, _ = self.command(stack, cache, pages, [{"pages": pages}], arranged=arranged)
+            stack.enter_context(contextlib.redirect_stdout(output))
+            onenote.cmd_reorder_pages("-")
+        self.assertTrue(json.loads(output.getvalue())["ok"])
+        collect.assert_called_once()
+        sleep.assert_not_called()
+        self.assertEqual([page["id"] for page in saved.call_args.args[0]["pages"]], ["opaque-2", "opaque-0", "opaque-1"])
 
     def test_revisions_require_a_personal_notebook_the_account_can_edit(self):
         personal = "0-0123456789abcdef!12"

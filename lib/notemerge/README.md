@@ -12,10 +12,13 @@ preserving whitespace, Unicode and trailing newlines. Entry labels align
 independently of checkbox states, including when nearby prose changes.
 Repeated labels retain their occurrence order. A partial insertion, removal,
 or rename of indistinguishable repeated entries requires review.
-Conflicting line groups are refined into corresponding entries and insertion
-gaps, then whole words within one entry. Words never align across separate
-entries; checking a deleted item remains a conflict. Line terminators merge
-independently, so appending a line can combine with editing the preceding line.
+Conflicting line groups are refined into edits against the original line
+ranges, then whole words within one entry. Replacing one block with several
+can merge with independent edits or deletions beside it, including a styled
+list split next to removed blank paragraphs. Words never align across separate
+entries; checking a deleted item remains a conflict. Final line terminators
+merge independently, so appending entries can combine with editing or splitting
+the preceding line without discarding blank lines inside the replacement.
 Word refinement is bounded to 4,096 tokens per input line. Independent edits
 merge; identical changes appear once. Overlapping edits return structured conflicts
 and **no writable note**. The library never inserts textual conflict markers.

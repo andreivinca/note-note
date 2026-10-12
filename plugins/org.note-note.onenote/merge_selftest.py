@@ -575,6 +575,215 @@ class SaveTests(unittest.TestCase):
         self.assertNotIn("color:", self.remote)
         self.assertIn('data-tag="to-do:completed"', self.remote)
 
+    def test_list_styles_from_graph_survive_editing_and_saving(self):
+        source = ('<ol><li>Parent</li><ol><li style="list-style-type:upper-alpha">Upper</li>'
+                  '<li style="list-style-type:lower-alpha">Lower</li>'
+                  '<ol><li style="list-style-type:lower-roman">Roman</li></ol></ol></ol>'
+                  '<ol><li style="list-style-type:upper-roman">One</li>'
+                  '<li style="list-style-type:upper-roman">Two</li>'
+                  '<ol><li style="list-style-type:lower-alpha">Nested</li></ol></ol>'
+                  '<ul><li>Bullet</li><ul><li style="list-style-type:circle">Circle</li>'
+                  '<ul><li style="list-style-type:square">Square</li></ul></ul></ul>')
+        self.remote = '<html><head><title>Title</title></head><body><div>' + source + '</div></body></html>'
+        tree = ET.fromstring(self.remote)
+        for index, element in enumerate(tree.iter()):
+            element.set("id", "%s:%d" % (element.tag, index))
+        self.remote = ET.tostring(tree, encoding="unicode")
+        loaded = self.load()
+        self.assertTrue(loaded["editable"])
+        body = to_markdown(to_html(loaded["body"])).replace("Nested", "Edited")
+        result = self.save(note(body), loaded["view"])
+        self.assertTrue(result.get("ok"), result)
+        reread = self.load()["body"]
+        self.assertIn("Edited", reread)
+        for style in ("upper-alpha", "lower-alpha", "lower-roman", "upper-roman", "circle", "square"):
+            self.assertIn("list-style-type:" + style, reread)
+        lists = []
+
+        def collect(tokens, depth=1):
+            for token in tokens:
+                if token["type"] == "list":
+                    lists.append((depth, token["attrs"].get("list_style", "")))
+                    for item in token["children"]:
+                        collect(item["children"], depth + 1)
+
+        collect(parse(reread))
+        self.assertIn((2, "upper-alpha"), lists)
+        self.assertIn((2, "lower-alpha"), lists)
+        self.assertIn((3, "lower-roman"), lists)
+        self.assertIn((3, "square"), lists)
+
+    def test_changing_list_markers_without_editing_text_is_saved(self):
+        self.remote = ('<html><head><title>Title</title></head><body><div>'
+                       '<ol id="ol:list"><li id="li:first">First</li><li id="li:second">Second</li></ol>'
+                       '<p id="p:footer">Footer</p></div></body></html>')
+        loaded = self.load()
+        changed = '<ol style="list-style-type:upper-roman"><li>First</li><li>Second</li></ol>\n\nFooter'
+        result = self.save(note(changed), loaded["view"])
+        self.assertTrue(result.get("ok"), result)
+        self.assertIn("list-style-type:upper-roman", self.load()["body"])
+        identifiers = {node.get("id") for node in ET.fromstring(self.remote).iter()}
+        self.assertIn("p:footer", identifiers)
+
+    def test_native_nested_list_edit_preserves_unchanged_items(self):
+        self.remote = ('<html><head><title>Title</title></head><body><div id="div:outline">'
+                       '<ol id="ol:outline"><li id="li:parent"><p id="p:parent">Parent</p>'
+                       '<ol id="ol:children"><li id="li:upper" style="list-style-type:upper-alpha">Upper</li>'
+                       '<li id="li:lower" style="list-style-type:lower-alpha"><p id="p:lower">Lower</p>'
+                       '<ol id="ol:grandchildren"><li id="li:leaf" style="list-style-type:lower-roman">Leaf</li>'
+                       '</ol></li></ol></li></ol></div></body></html>')
+        original = ET.fromstring(self.remote)
+        loaded = self.load()
+        result = self.save(note(loaded["body"].replace("Leaf", "Edited leaf")), loaded["view"])
+        self.assertTrue(result.get("ok"), result)
+        operations = [op for method, _, data in self.calls if method == "PATCH" for op in json.loads(data)]
+        self.assertEqual([op["target"] for op in operations], ["li:leaf"])
+        identifiers = {node.get("id") for node in ET.fromstring(self.remote).iter()}
+        self.assertTrue({node.get("id") for node in original.iter() if node.get("id") != "li:leaf"} <= identifiers)
+        self.assertEqual(self.load()["body"], loaded["body"].replace("Leaf", "Edited leaf"))
+
+    def test_insertions_around_outline_list_use_its_container(self):
+        self.remote = ('<html><head><title>Title</title></head><body><div id="div:outline">'
+                       '<ol id="ol:outline"><li id="li:first" style="list-style-type:upper-roman">First</li>'
+                       '<li id="li:second" style="list-style-type:upper-roman">Second</li></ol>'
+                       '<br/></div></body></html>')
+        loaded = self.load()
+        desired = 'Before\n\n' + loaded["body"] + '\n\n\u00a0\n\nAfter'
+        result = self.save(note(desired), loaded["view"])
+        self.assertTrue(result.get("ok"), result)
+        operations = [op for method, _, data in self.calls if method == "PATCH" for op in json.loads(data)]
+        self.assertEqual([(op["target"], op["action"], op.get("position")) for op in operations],
+                         [("div:outline", "append", "before"), ("div:outline", "append", "after")])
+        self.assertEqual(self.load()["body"], desired)
+        identifiers = {node.get("id") for node in ET.fromstring(self.remote).iter()}
+        self.assertTrue({"div:outline", "ol:outline", "li:first", "li:second"} <= identifiers)
+
+    def test_split_native_nested_list_and_append_deep_list(self):
+        self.remote = ('<html><head><title>Title</title></head><body><div id="div:first">'
+                       '<ol id="ol:first"><li id="li:parent"><p id="p:parent">Parent</p>'
+                       '<ol id="ol:children"><li id="li:upper" style="list-style-type:upper-alpha">Upper</li>'
+                       '<li id="li:lower" style="list-style-type:lower-alpha"><p id="p:lower">Lower</p>'
+                       '<ol id="ol:nested"><li id="li:nested" style="list-style-type:lower-roman">Nested</li>'
+                       '</ol></li></ol></li></ol></div><div id="div:last">'
+                       '<ol id="ol:last"><li id="li:last" style="list-style-type:upper-roman">Last</li>'
+                       '</ol><br/></div></body></html>')
+        loaded = self.load()
+        desired = ('<ol><li><p>Parent</p><ol style="list-style-type:upper-alpha"><li><p>Upper</p></li>'
+                   '</ol></li></ol>\n\n'
+                   '<ol style="list-style-type:lower-alpha" data-list-indent="2"><li><p>Lower</p>'
+                   '<ol style="list-style-type:lower-roman"><li><p>Nested</p></li></ol></li></ol>\n\n'
+                   '<ol style="list-style-type:upper-roman"><li><p>Last</p></li></ol>\n\n\u00a0\n\n\u00a0\n\n'
+                   '<ol style="list-style-type:lower-roman" data-list-indent="6">'
+                   '<li><p>Added</p></li><li></li></ol>')
+        result = self.save(note(desired), loaded["view"])
+        self.assertTrue(result.get("ok"), result)
+        self.assertEqual(self.load()["body"], desired)
+        operations = [op for method, _, data in self.calls if method == "PATCH" for op in json.loads(data)]
+        self.assertEqual([(op["target"], op["action"]) for op in operations],
+                         [("div:last", "append"), ("div:last", "append"), ("li:lower", "replace")])
+        identifiers = {node.get("id") for node in ET.fromstring(self.remote).iter()}
+        self.assertTrue({"li:parent", "p:parent", "li:upper", "li:last"} <= identifiers)
+
+    def test_indenting_and_outdenting_a_styled_item_is_saved(self):
+        self.remote = page_html(note("1. First\n2. Second\n3. Third\n4. Last\n\nFooter"))
+        original = ET.fromstring(self.remote)
+        kept = {node.get("id") for node in original.iter() if node.text in {"First", "Last", "Footer"}}
+        loaded = self.load()
+        indented = ('<ol><li><p>First</p><ol style="list-style-type:lower-alpha">'
+                    '<li><p>Second</p></li><li><p>Third</p></li></ol></li><li><p>Last</p></li></ol>\n\nFooter')
+        result = self.save(note(indented), loaded["view"])
+        self.assertTrue(result.get("ok"), result)
+        loaded = self.load()
+        self.assertIn("list-style-type:lower-alpha", loaded["body"])
+        self.assertTrue(kept.issubset({node.get("id") for node in ET.fromstring(self.remote).iter()}))
+        result = self.save(note("1. First\n2. Edited\n3. Third\n4. Last\n\nFooter"), loaded["view"])
+        self.assertTrue(result.get("ok"), result)
+        self.assertEqual(self.load()["body"], "1. First\n2. Edited\n3. Third\n4. Last\n\nFooter")
+        self.assertTrue(kept.issubset({node.get("id") for node in ET.fromstring(self.remote).iter()}))
+
+    def test_list_split_merges_with_remote_blank_deletion_and_reopens_cleanly(self):
+        original = ('<ol style="list-style-type:lower-roman" data-list-indent="6">'
+                    '<li><p>First</p></li><li><p>Last</p></li></ol>')
+        split = ('<ol style="list-style-type:lower-roman" data-list-indent="6">'
+                 '<li><p>First</p></li></ol>\n\n'
+                 '<ol style="list-style-type:lower-alpha" data-list-indent="2">'
+                 '<li><p>Last</p></li></ol>')
+        self.remote = page_html(note("Before\n\n" + "\u00a0\n\n" * 3 + original))
+        loaded = self.load()
+        self.remote = page_html(note("Before\n\n" + "\u00a0\n\n" * 2 + original))
+        result = self.save(note(loaded["body"].replace(original, split)), loaded["view"])
+        self.assertTrue(result.get("ok"), result)
+        expected = "Before\n\n" + "\u00a0\n\n" * 2 + split
+        self.assertEqual(result["body"], expected)
+        reopened = self.load()
+        self.assertEqual(reopened["body"], expected)
+        self.assertNotIn("conflict", reopened)
+        self.assertNotIn("recovered", reopened)
+
+    def test_list_split_merges_with_remote_appended_lists_and_reopens_cleanly(self):
+        original = ('<ol style="list-style-type:lower-roman" data-list-indent="6">'
+                    '<li><p>First</p></li><li><p>Last</p></li></ol>')
+        split = ('<ol style="list-style-type:lower-roman" data-list-indent="6">'
+                 '<li><p>First</p></li></ol>\n\n'
+                 '<ol data-list-indent="4"><li><p>Last</p></li></ol>')
+        added = ('\n\n<ol style="list-style-type:lower-alpha" data-list-indent="2">'
+                 '<li><p>Added</p></li></ol>\n\n1. More\n2. ')
+        self.remote = page_html(note(original))
+        loaded = self.load()
+        self.remote = page_html(note(original + added))
+        result = self.save(note(split), loaded["view"])
+        self.assertTrue(result.get("ok"), result)
+        expected = onenote.normalize_note(note(split + added))["body"]
+        self.assertEqual(result["body"], expected)
+        reopened = self.load()
+        self.assertEqual(reopened["body"], expected)
+        self.assertNotIn("conflict", reopened)
+        self.assertNotIn("recovered", reopened)
+
+    def test_changing_list_family_keeps_neighbouring_paragraphs(self):
+        self.remote = page_html(note("Above\n\n- First\n- Second\n\nFooter"))
+        paragraphs = {node.get("id") for node in ET.fromstring(self.remote).iter("p")}
+        loaded = self.load()
+        numbered = ('Above\n\n<ol style="list-style-type:upper-roman">'
+                    '<li>First</li><li>Second</li></ol>\n\nFooter')
+        result = self.save(note(numbered), loaded["view"])
+        self.assertTrue(result.get("ok"), result)
+        self.assertIn("list-style-type:upper-roman", self.load()["body"])
+        self.assertTrue(paragraphs.issubset({node.get("id") for node in ET.fromstring(self.remote).iter("p")}))
+
+    def test_styled_lists_in_table_cells_keep_their_markers(self):
+        source = ('<table><tr><td><ol start="4" style="list-style-type:upper-roman">'
+                  '<li>Four</li><li>Five</li></ol></td><td><p>Keep</p></td></tr></table>')
+        for _ in range(3):
+            rendered = onenote.onenote_md.markdown_to_onenote_html(source)
+            source = onenote.onenote_md.html_to_markdown(rendered)["body"]
+            self.assertIn('start="4"', source)
+            self.assertIn("list-style-type:upper-roman", source)
+            self.assertIn("Keep", source)
+
+    def test_indented_first_items_keep_their_depth(self):
+        for style in ("disc", "circle", "square", "decimal", "lower-alpha", "lower-roman"):
+            for depth in (2, 4, 9):
+                with self.subTest(style=style, depth=depth):
+                    tag = "ul" if style in ("disc", "circle", "square") else "ol"
+                    source = ('<%s style="list-style-type:%s" data-list-indent="%d"><li>First</li></%s>'
+                              % (tag, style, depth, tag))
+                    for _ in range(3):
+                        rendered = onenote.onenote_md.markdown_to_onenote_html(source)
+                        source = onenote.onenote_md.html_to_markdown(rendered)["body"]
+                        token = parse(source)[0]
+                        self.assertEqual(token["attrs"]["list_indent"], depth)
+                        self.assertEqual(token["attrs"].get("list_style", style), style)
+
+    def test_styled_list_labels_keep_literal_markdown_prefixes(self):
+        for label in ("# Topic", "1. literal", "- literal", "> literal"):
+            with self.subTest(label=label):
+                source = '<ol><li style="list-style-type:upper-roman">%s</li></ol>' % html.escape(label)
+                loaded = onenote.onenote_md.html_to_markdown(source)
+                item = parse(loaded["body"])[0]["children"][0]
+                self.assertEqual(item["children"][0]["type"], "paragraph")
+                rendered = ET.fromstring(onenote.onenote_md.markdown_to_onenote_html(loaded["body"]))
+                self.assertEqual("".join(next(rendered.iter("li")).itertext()), label)
 
     def test_nested_table_conversion_preserves_cell_blocks(self):
         source = ('<table><tr><td><p>Parent</p></td><td><p>Neighbour</p></td></tr><tr><td>'
@@ -840,6 +1049,9 @@ class SaveTests(unittest.TestCase):
         patch.object(onenote, "AUDIO_INDEX", str(Path(self.temp.name) / "audio/index.json")).start()
         patch.object(onenote, "PENDING_UPLOADS_DIR", str(Path(self.temp.name) / "uploads")).start()
         patch.object(onenote, "cached_audio", side_effect=lambda src, title: self.audio_paths.get(src)).start()
+        # This fixture models Graph's HTML commands. Native ownership,
+        # conditional writes and readback have their own revision fixtures.
+        patch.object(onenote.list_edits, "needs_native", return_value=False).start()
 
     def store(self, page_id="page"):
         return MergeStore(self.temp.name, "onenote", "test-account", page_id,

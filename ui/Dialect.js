@@ -10,7 +10,7 @@ var IMAGE_LINE_GAP_PX = 8
 // The native text inspector's interface the editor was written against
 // (cpp/textblocks.h, TextBlocks::Version): a built module of another
 // version is refused whole at load.
-var NATIVE_VERSION = 5
+var NATIVE_VERSION = 6
 
 // The invisible characters the editor itself plants, mirrored from
 // services/markdown/qthtml/dialect.py: Markdown has no empty paragraph, so a

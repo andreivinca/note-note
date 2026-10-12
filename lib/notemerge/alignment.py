@@ -61,7 +61,10 @@ def align(before, after, key):
         old_count, new_count = old_counts[identity], new_counts[identity]
         if identity is not None and old_count != new_count and max(old_count, new_count) > 1:
             raise AmbiguousAlignment("cannot identify which repeated entry was inserted, removed, or renamed")
-    matcher = SequenceMatcher(None, _occurrences(old_keys), _occurrences(new_keys), autojunk=False)
+    # Separators can extend a content match, but cannot anchor one: repeated
+    # blanks must not displace the identity of an unchanged neighbouring entry.
+    matcher = SequenceMatcher(lambda item: item[0] is None,
+                              _occurrences(old_keys), _occurrences(new_keys), autojunk=False)
     return tuple(Span(*span) for span in matcher.get_opcodes())
 
 

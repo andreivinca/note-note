@@ -6,9 +6,12 @@ Tool {
   toolId: "outdent"
   label: "Outdent"
   icon: "󰉵"
-  available: !editor.inTable && !editor.inCode
+  available: (!editor.inTable || editor.inList) && !editor.inCode
 
   function execute() {
+    if (editor.indentBlocks(-1)) {
+      return
+    }
     editor.transformBlocks(function(line) {
       if (line.isList) {
         return line.indent.substring(2) + line.prefix + line.content

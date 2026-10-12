@@ -32,6 +32,7 @@ QtObject {
   readonly property string nbsp4: "\u00a0\u00a0\u00a0\u00a0"
 
   readonly property bool canColorText: host.canColorText
+  readonly property bool canStyleLists: host.canStyleLists && supports("listStyles")
 
   function setTextColor(color) {
     if (!canColorText || !acceptsInline()) {
@@ -126,8 +127,8 @@ QtObject {
 
   // Both conversion stages reject a changed note, document or selection.
   // Replacement is one undo transaction, including the optional landing edit.
-  function withMarkdown(edit, asText) {
-    host.withMarkdown(edit, asText)
+  function withMarkdown(edit, asText, paragraphs) {
+    host.withMarkdown(edit, asText, paragraphs)
   }
 
   function replaceDocument(markdown, caret, then) {
@@ -246,7 +247,7 @@ QtObject {
   // Block tools share selection boundaries, stale-context checks and one
   // undoable replacement. The edit returns Markdown lines, or nothing when
   // the selected blocks cannot be changed. asText unfences existing code.
-  function editBlocks(edit, asText) {
+  function editBlocks(edit, asText, paragraphs) {
     var caret = textArea.cursorPosition
     var before = textLines(), caretLine = 0
     while (caretLine + 1 < before.starts.length && before.starts[caretLine + 1] <= caret) {
@@ -271,7 +272,7 @@ QtObject {
         var line = Math.min(caretLine, after.starts.length - 1)
         textArea.cursorPosition = Math.min(after.starts[line] + caretOffset, after.ends[line])
       })
-    }, asText)
+    }, asText, paragraphs)
   }
 
   function transformBlocks(transform, options) {
@@ -297,7 +298,7 @@ QtObject {
       for (var i = 0; i < lines.length; i++) {
         // Table rows/HTML tables and fenced code are never restyled. A
         // Markdown separator is not a paragraph; only lists may remove it.
-        if (i < first || i > last || code[i] || MarkdownBlocks.isTable(map, i)
+        if (i < first || i > last || code[i] || MarkdownBlocks.isStructured(map, i)
             || (!isList && (map.kinds || [])[i] === "separator")) {
           out.push(lines[i])
           prevItem = false
@@ -309,7 +310,7 @@ QtObject {
           while (j <= last && j < lines.length && lines[j] === "") {
             j++
           }
-          if (prevItem && j <= last && j < lines.length && !code[j] && !MarkdownBlocks.isTable(map, j)
+          if (prevItem && j <= last && j < lines.length && !code[j] && !MarkdownBlocks.isStructured(map, j)
               && itemRx.test(restyle(lines[j]))) {
             changed = true
             continue
@@ -342,7 +343,7 @@ QtObject {
         return
       }
       return out
-    })
+    }, undefined, true)
   }
 
   // The list styles as Markdown writes them: what shows a line is of the
@@ -371,6 +372,17 @@ QtObject {
       var prefix = markdown.marked.test(line.prefix) ? "" : markdown.prefix
       return line.indent + prefix + (line.content || Dialect.EMPTY_ITEM)
     }, { list: true })
+  }
+
+  function setListStyle(style) {
+    if (!writable || !canStyleLists) {
+      return
+    }
+    host.toggleListStyle(style, false)
+  }
+
+  function indentBlocks(direction) {
+    return writable && host.indentBlocks(direction)
   }
 
   function blockParts(line) {

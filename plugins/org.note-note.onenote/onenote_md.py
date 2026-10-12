@@ -24,6 +24,7 @@ from parse import parse as _parse  # noqa: E402
 # Markdown; OneNote's is a bare <br /> (Converter.block).
 from qthtml.dialect import BLANK_PARAGRAPH  # noqa: E402
 import htmltables  # noqa: E402
+import liststyles  # noqa: E402
 import textcolor  # noqa: E402
 import audio  # noqa: E402
 
@@ -189,7 +190,7 @@ class Converter:
                 else:
                     self.read_only()
                     out.append("[unsupported: %s]" % c.tag)
-            elif c.tag in ("span", "code", "font", "s", "strike", "del", "cite"):
+            elif c.tag in ("span", "p", "code", "font", "s", "strike", "del", "cite"):
                 tag = c.attrs.get("data-tag", "")
                 inner = self.inline(c)
                 # OneNote writes formatting as styled spans, not <b>/<i>/<u>.
@@ -293,6 +294,12 @@ class Converter:
                 self.lines.append("")
             return
         if t in ("ul", "ol"):
+            if self.has_list_styles(node):
+                if self.lines and self.lines[-1] != "":
+                    self.lines.append("")
+                self.lines.extend([htmltables.markup(self.styled_lists(node)), ""])
+                self.last = None
+                return
             start = node.attrs.get("start", "1") if t == "ol" else "1"
             n = int(start) - 1 if re.fullmatch(r"-?\d+", start) else 0
             for c in node.children:
@@ -301,12 +308,20 @@ class Converter:
                     self.list_item(c, t, n, depth)
                 elif c.tag == "br":
                     pass
+                elif c.tag in ("ul", "ol"):
+                    self.block(c, depth + 1)
                 else:
                     self.block(c, depth)
             if depth == 0:
                 self.lines.append("")
             return
         if t == "li":
+            style = liststyles.from_attributes(node.attrs, "")
+            if style:
+                container = Node("ol" if style in liststyles.NUMBERS else "ul")
+                container.children = [node]
+                self.block(container, depth)
+                return
             self.list_item(node, "ul", 1, depth)
             return
         if t == "table":
@@ -344,9 +359,7 @@ class Converter:
         inline_nodes, sublists = [], []
         for c in node.children:
             (sublists if c.tag in ("ul", "ol") else inline_nodes).append(c)
-        holder = Node("span")
-        holder.children = inline_nodes
-        text = self.inline(holder).strip()
+        text = self.list_inline(node)
         marker = ("%d. " % n) if kind == "ol" else "- "
         checkbox = text.startswith(("[ ] ", "[x] "))
         if not checkbox and inline_nodes and inline_nodes[0].tag is None:
@@ -354,6 +367,62 @@ class Converter:
         self.lines.append("  " * depth + marker + text.replace("\n", " "))
         for s in sublists:
             self.block(s, depth + 1)
+
+    def list_inline(self, node):
+        # Native list items can carry tags and formatting on the li itself;
+        # Graph-created items also put them on an inner span or paragraph.
+        content = Node("span", node.attrs)
+        content.children = [child for child in node.children if child.tag not in ("ul", "ol")]
+        holder = Node("span")
+        holder.children = [content]
+        return self.inline(holder).strip()
+
+    def has_list_styles(self, node):
+        if node.tag in ("ul", "ol"):
+            default = liststyles.default(node.tag == "ol")
+            inherited = liststyles.from_attributes(node.attrs, default)
+            if inherited != default or any(child.tag == "li" and
+                    liststyles.from_attributes(child.attrs, inherited) != default for child in node.children):
+                return True
+            first = next((child for child in node.children if child.tag in ("li", "ul", "ol")), None)
+            if first is not None and first.tag != "li":
+                return True
+        return any(self.has_list_styles(child) for child in node.children)
+
+    def styled_lists(self, node, depth=1):
+        """Graph puts marker styles on items and sublists beside items."""
+        ordered = node.tag == "ol"
+        inherited = liststyles.from_attributes(node.attrs, liststyles.default(ordered))
+        groups = []
+        for child in node.children:
+            if child.tag in ("ul", "ol"):
+                nested = self.styled_lists(child, depth + 1)
+                if groups and groups[-1]["children"]:
+                    groups[-1]["children"][-1]["children"].extend(nested)
+                else:
+                    for token in nested:
+                        token["attrs"]["list_indent"] = max(depth + 1, token["attrs"].get("list_indent", 0))
+                    groups.extend(nested)
+                continue
+            if child.tag != "li":
+                continue
+            style = liststyles.from_attributes(child.attrs, inherited)
+            if not groups or groups[-1]["attrs"]["list_style"] != style:
+                start = int(node.attrs.get("start", "1")) if not groups else 1
+                groups.append({"type": "list", "tight": True,
+                               "attrs": {"ordered": ordered, "start": start, "list_style": style},
+                               "children": []})
+            text = self.list_inline(child)
+            item = {"type": "list_item"}
+            if text.startswith(("[ ] ", "[x] ")):
+                item.update(type="task_list_item", attrs={"checked": text.startswith("[x]")})
+                text = text[4:]
+            item["children"] = _parse(escape_line_start(text.replace("\n", " ")))
+            for nested in child.children:
+                if nested.tag in ("ul", "ol"):
+                    item["children"].extend(self.styled_lists(nested, depth + 1))
+            groups[-1]["children"].append(item)
+        return groups
 
     def table(self, node):
         tasks = any("to-do" in child.attrs.get("data-tag", "") for child in _find_all(node, "p"))
@@ -634,29 +703,59 @@ def _render_list(t, out, depth, image_ref=None, audio_ref=None):
     ordered = t.get("attrs", {}).get("ordered", False)
     # A top-level list made only of checkboxes is how OneNote's own to-do
     # paragraphs come back from the editor; write them as such.
-    if depth == 0 and not ordered and items and all(i["type"] == "task_list_item" for i in items) and not any(_has_sublist(i) for i in items):
+    if (depth == 0 and not ordered and t.get("attrs", {}).get("list_indent", 0) <= 1
+            and items and all(i["type"] == "task_list_item" for i in items) and not any(_has_sublist(i) for i in items)):
         for i in items:
             tag = "to-do:completed" if i.get("attrs", {}).get("checked") else "to-do"
             out.append(_p(tag, _item_inline(i, image_ref, audio_ref)))
         return
     start = t.get("attrs", {}).get("start", 1)
     attrs = ' start="%d"' % start if ordered and start != 1 else ""
-    out.append("<ol%s>" % attrs if ordered else "<ul>")
+    style = t.get("attrs", {}).get("list_style", "")
+    extra_indent = max(0, t.get("attrs", {}).get("list_indent", 0) - depth - 1)
+    list_tag = "ol" if ordered else "ul"
+    out.extend(["<%s>" % list_tag] * extra_indent)
+    out.append("<%s%s>" % (list_tag, attrs))
     for i in items:
-        li = ["<li>"]
+        item_style = i.get("attrs", {}).get("list_style", style)
+        item_attrs = liststyles.attributes(item_style) if item_style != liststyles.default(ordered) else ""
+        li = ["<li%s>" % item_attrs]
         if i["type"] == "task_list_item":
             tag = "to-do:completed" if i.get("attrs", {}).get("checked") else "to-do"
             li.append('<span data-tag="%s">%s</span>' % (tag, _item_inline(i, image_ref, audio_ref)))
         else:
             li.append(_item_inline(i, image_ref, audio_ref))
-        for c in i.get("children") or []:
-            if c["type"] == "list":
-                sub = []
-                _render_list(c, sub, depth + 1, image_ref, audio_ref)
-                li.extend(sub)
+        if not li[-1]:
+            li[-1] = "<br/>"
         li.append("</li>")
         out.append("".join(li))
+        # Graph places a sublist beside its parent item. Use that same
+        # structure so a leaf edit can retain the containing list's IDs.
+        for c in _nested_lists(i.get("children") or []):
+            if c["type"] == "list":
+                _render_list(c, out, depth + extra_indent + 1, image_ref, audio_ref)
     out.append("</ol>" if ordered else "</ul>")
+    out.extend(["</%s>" % list_tag] * extra_indent)
+
+
+def _nested_lists(children):
+    """Qt separates adjacent marker styles; Graph stores them on each item."""
+    result = []
+    for token in children:
+        if token["type"] != "list":
+            continue
+        attrs = token.get("attrs", {})
+        items = [dict(item, attrs=dict(item.get("attrs", {}), list_style=attrs.get("list_style", "")))
+                 for item in token.get("children", [])]
+        previous = result[-1] if result else None
+        if (previous and previous["children"] and previous["attrs"].get("ordered") == attrs.get("ordered")
+                and attrs.get("start", 1) == 1 and not attrs.get("list_indent")
+                and not previous["attrs"].get("list_indent")
+                and previous["children"][-1].get("attrs", {}).get("list_style", "") != attrs.get("list_style", "")):
+            previous["children"].extend(items)
+        else:
+            result.append(dict(token, children=items))
+    return result
 
 
 def _has_sublist(item):
@@ -667,7 +766,10 @@ def _item_inline(item, image_ref=None, audio_ref=None):
     parts = []
     for c in item.get("children") or []:
         if c["type"] in ("block_text", "paragraph"):
-            parts.append(" ".join(h for _, h in _paragraphs(c.get("children"), image_ref, audio_ref)))
+            fragments = []
+            for tag, content in _paragraphs(c.get("children"), image_ref, audio_ref):
+                fragments.append('<span data-tag="%s">%s</span>' % (tag, content) if tag else content)
+            parts.append(" ".join(fragments))
     return " ".join(parts)
 
 

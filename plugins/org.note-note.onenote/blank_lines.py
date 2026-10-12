@@ -10,7 +10,7 @@ written, against the page revision just read. See docs/onenote-blank-lines.md.
 import re
 import uuid
 
-from revision_objects import (CHILDREN, PAGE_METADATA, Section, latest_objects, page_guid, properties,
+from revision_objects import (CHILDREN, CONTENT_ROOT, PAGE_METADATA, Section, latest_objects, page_guid, properties,
                               references, with_children)
 from web_session import WebError
 
@@ -32,15 +32,31 @@ class Page:
     def __init__(self, state):
         self.objects, self.roots = latest_objects(state)
         self.owners, self.parents = {}, {}
-        for identifier, obj in self.objects.items():
+        self.reachable = set()
+
+        def visit(identifier):
+            if identifier in self.reachable:
+                raise WebError("Microsoft returned an ambiguous page hierarchy")
+            self.reachable.add(identifier)
+            obj = self.objects.get(identifier)
+            if obj is None:
+                raise WebError("Microsoft returned an incomplete page hierarchy")
             props = properties(obj)
             if obj.get("ClassId") == ELEMENT:
                 for content in references(props.get(CONTENT, "")):
+                    if content in self.owners:
+                        raise WebError("Microsoft returned content with two owners")
                     self.owners[content] = identifier
             for child in references(props.get(CHILDREN, "")):
-                if child in self.parents:
-                    raise WebError("Microsoft returned an element with two parents")
                 self.parents[child] = identifier
+                visit(child)
+            for content in references(props.get(CONTENT, "")):
+                visit(content)
+
+        root = self.roots.get(CONTENT_ROOT)
+        if root not in self.objects:
+            raise WebError("Microsoft returned a page without its content root")
+        visit(root)
 
     def identity(self):
         """The page's client ID, from the cell's own page metadata."""
@@ -56,7 +72,7 @@ class Page:
         if not match:
             raise WebError("OneNote returned an unexpected element ID")
         reference = "%s|%d" % (uuid.UUID(match[1]), int(match[2]))
-        if self.objects.get(reference, {}).get("ClassId") == ELEMENT:
+        if self.objects.get(reference, {}).get("ClassId") in {ELEMENT, 0x60019}:
             return reference
         if reference not in self.owners:
             raise WebError(CHANGED)

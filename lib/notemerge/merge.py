@@ -1,4 +1,6 @@
 """Line merges with word-level refinement and explicitly resolved conflicts."""
+from collections import deque
+from dataclasses import dataclass
 from difflib import SequenceMatcher
 import hashlib
 import json
@@ -39,67 +41,92 @@ def _merge_words(base, local, remote):
     return "".join(merged)
 
 
+@dataclass(frozen=True)
+class _LineEdit:
+    start: int
+    end: int
+    lines: list
+
+    def precedes(self, other):
+        # An insertion at a replacement's boundary is independent. Two
+        # insertions in the same gap must agree or be reviewed.
+        return self.end <= other.start and (self.start, self.end) != (other.start, other.end)
+
+
 def _line_edits(base, changed):
-    """Separate replacements/deletions of entries from insertions in gaps."""
-    entries = [None] * len(base)
-    insertions = {}
+    """Edits in base coordinates, retaining whole structural replacements."""
+    edits = deque()
     for span in align(base, changed, text_key):
         old_size = span.before_end - span.before_start
         values = changed[span.after_start:span.after_end]
-        if span.kind == "insert":
-            insertions[span.before_start] = values
-        elif span.kind != "delete":
-            if old_size != len(values):
-                raise AmbiguousAlignment("a structural replacement has no corresponding lines")
-            entries[span.before_start:span.before_end] = values
-    return entries, insertions
+        if old_size == len(values):
+            for index, value in enumerate(values, span.before_start):
+                if base[index] != value:
+                    edits.append(_LineEdit(index, index + 1, [value]))
+        elif not values:
+            for index in range(span.before_start, span.before_end):
+                edits.append(_LineEdit(index, index + 1, []))
+        else:
+            edits.append(_LineEdit(span.before_start, span.before_end, values))
+    return edits
 
 
-def _merge_line(base, local, remote):
-    # Adding a following entry changes the previous line's terminator, not
-    # its text. Keep those independent when the other side edits that text.
-    contents = [line.rstrip("\r\n") for line in (base, local, remote)]
-    endings = [line[len(content):] for line, content in zip((base, local, remote), contents)]
-    content = _merge_words(*contents)
+def _merge_replacement(base, local, remote):
+    # Appending entries adds a terminator to the previous last line. Merge
+    # that boundary separately even when the other side splits the line.
+    # Strip only the final line's terminator so blank lines remain content.
+    if not base or not local or not remote:
+        return None
+    lines = (base, local, remote)
+    contents = ["".join(value[:-1]) + value[-1].rstrip("\r\n") for value in lines]
+    endings = [value[-1][len(value[-1].rstrip("\r\n")):] for value in lines]
+    if contents[1] == contents[2] or contents[2] == contents[0]:
+        content = contents[1]
+    elif contents[1] == contents[0]:
+        content = contents[2]
+    elif len(base) == len(local) == len(remote) == 1:
+        content = _merge_words(*contents)
+    else:
+        return None
     ending = _merge_words(*endings)
     if content is None or ending is None:
         return None
-    return content + ending
+    return (content + ending).splitlines(keepends=True)
 
 
 def _refine(group):
-    """Merge aligned entries and their gaps; refine words within one entry.
+    """Merge disjoint edits; refine words when both edit the same entry.
 
     Entry state cannot migrate through a token match to an adjacent item.
-    Insertions occupy gaps, and editing a deleted entry remains a conflict.
+    Structural replacements can change the number of lines without touching
+    neighbouring edits. Editing a deleted entry remains a conflict.
     """
     base, local, remote = group[1:]
     try:
-        ours, our_insertions = _line_edits(base, local)
-        theirs, their_insertions = _line_edits(base, remote)
+        ours = _line_edits(base, local)
+        theirs = _line_edits(base, remote)
     except AmbiguousAlignment:
         return None
-    merged = []
-    for index in range(len(base) + 1):
-        left, right = our_insertions.get(index, []), their_insertions.get(index, [])
-        if left and right and left != right:
-            return None
-        merged.extend(left or right)
-        if index == len(base):
-            break
-        before, left, right = base[index], ours[index], theirs[index]
-        if left == right or right == before:
-            line = left
-        elif left == before:
-            line = right
-        elif left is None or right is None:
-            return None
+    merged, index = [], 0
+    while ours or theirs:
+        if ours and (not theirs or ours[0].precedes(theirs[0])):
+            edit = ours.popleft()
+        elif theirs and (not ours or theirs[0].precedes(ours[0])):
+            edit = theirs.popleft()
         else:
-            line = _merge_line(before, left, right)
-            if line is None:
+            left, right = ours.popleft(), theirs.popleft()
+            if (left.start, left.end) != (right.start, right.end):
                 return None
-        if line is not None:
-            merged.append(line)
+            edit = left
+            if left.lines != right.lines:
+                lines = _merge_replacement(base[left.start:left.end], left.lines, right.lines)
+                if lines is None:
+                    return None
+                edit = _LineEdit(left.start, left.end, lines)
+        merged.extend(base[index:edit.start])
+        merged.extend(edit.lines)
+        index = edit.end
+    merged.extend(base[index:])
     return "".join(merged)
 
 

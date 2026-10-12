@@ -435,6 +435,11 @@ QVariantList TextBlocks::blocks() const
         entry.insert(QStringLiteral("marginRight"), format.rightMargin());
         entry.insert(QStringLiteral("background"), format.background().style() != Qt::NoBrush);
         entry.insert(QStringLiteral("list"), block.textList() != nullptr);
+        if (const QTextList *list = block.textList()) {
+            entry.insert(QStringLiteral("listStyle"), int(list->format().style()));
+            entry.insert(QStringLiteral("listIndent"), list->format().indent());
+            entry.insert(QStringLiteral("listNumber"), list->itemNumber(block) + list->format().start());
+        }
         // A horizontal rule: Qt keeps it as an empty block wearing this
         // property, and the editor needs to know — a rule that ends the
         // note leaves the caret no position after it (escapeForward).

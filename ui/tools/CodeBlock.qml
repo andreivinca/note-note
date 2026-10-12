@@ -15,7 +15,7 @@ Tool {
         return lines
       }, editor.blockAt(editor.selection().from))
     } else {
-      editor.editBlocks(fenceBlocks)
+      editor.editBlocks(fenceBlocks, undefined, true)
     }
   }
 
@@ -31,8 +31,8 @@ Tool {
     }
     var from = range.from, to = range.to
     for (var i = first; i <= last; i++) {
-      if (MarkdownBlocks.isTable(map, i) || map.kinds[i] === "rule") {
-        editor.report("Code blocks cannot replace tables or horizontal rules")
+      if (MarkdownBlocks.isStructured(map, i) || map.kinds[i] === "rule") {
+        editor.report("Code blocks cannot replace tables, styled lists or horizontal rules")
         return
       }
       if (map.blocks[i] >= 0) {

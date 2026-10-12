@@ -246,17 +246,17 @@ def kinds_agree(native, scanned):
 
 
 def box_states(markdown):
-    """The note's checkboxes in document order, True for a checked one —
-    fences skipped, a `- [x]` inside code is text."""
-    out, fence = [], False
-    for line in markdown.split("\n"):
-        stripped = line.strip()
-        if stripped.startswith("```"):
-            fence = not fence
-            continue
-        if (not fence and stripped[:5] in ("- [ ]", "- [x]", "- [X]")
-                and (len(stripped) == 5 or stripped[5] == " ")):
-            out.append(stripped[3].lower() == "x")
+    """Checkboxes in document order, including semantic HTML lists and tables."""
+    from parse import parse
+
+    def collect(tokens):
+        for token in tokens:
+            if token["type"] == "task_list_item":
+                out.append(token.get("attrs", {}).get("checked", False))
+            collect(token.get("children", []))
+
+    out = []
+    collect(parse(markdown))
     return out
 
 

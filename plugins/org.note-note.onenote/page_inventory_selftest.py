@@ -127,6 +127,18 @@ class ListingTests(unittest.TestCase):
         _, graph = self.step((200, {"value": []}))
         graph.assert_not_called()
 
+    def test_a_refresh_leaves_a_section_recorded_moments_ago(self):
+        """Graph shows a written page order some seconds late, so a refresh
+        does not list a section whose pages were recorded in the last
+        RELIST_AFTER seconds, and lists one recorded before that."""
+        for age, listed in ((5, False), (onenote.RELIST_AFTER + 5, True)):
+            self.save(pages=[page("p")], sectionPages={"s": {"modified": "1", "at": time.time() - age,
+                                                            "metadata": onenote.PAGE_METADATA_VERSION}})
+            self.payload.return_value = {"sectionId": "s", "refresh": True}
+            with self.subTest(age=age), patch.object(onenote, "graph", return_value=(200, {"value": [page("q")]})) as graph:
+                onenote.cmd_list_step("-")
+            self.assertEqual(graph.called, listed)
+
     def test_section_refresh_does_not_renew_the_account_listing(self):
         discovered = time.time() - 700
         self.save(sections=[section("s"), section("other")],

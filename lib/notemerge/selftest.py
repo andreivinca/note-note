@@ -73,6 +73,76 @@ class MergeTests(unittest.TestCase):
         remote = note("red apples\nwarm bread")
         self.assertEqual(merge_note(base, local, remote)["note"], note("green apples\nwarm bread"))
 
+    def test_splitting_a_styled_list_merges_with_adjacent_blank_deletion(self):
+        original = ('<ol style="list-style-type:lower-roman" data-list-indent="6">'
+                    '<li><p>First</p></li><li><p>Last</p></li></ol>')
+        split = ('<ol style="list-style-type:lower-roman" data-list-indent="6">'
+                 '<li><p>First</p></li></ol>\n\n'
+                 '<ol style="list-style-type:lower-alpha" data-list-indent="2">'
+                 '<li><p>Last</p></li></ol>')
+        base = note("Before\n\n" + "\u00a0\n\n" * 3 + original)
+        local = note(base["body"].replace(original, split))
+        remote = note("Before\n\n" + "\u00a0\n\n" * 2 + original)
+        expected = note(remote["body"].replace(original, split))
+        for ours, theirs in ((local, remote), (remote, local)):
+            with self.subTest(local=ours):
+                self.assertEqual(merge_note(base, ours, theirs)["note"], expected)
+
+    def test_structural_replacements_merge_only_with_independent_edits(self):
+        base = note("Before\nOld block\nAfter\n")
+        local = note("Before\nNew first\nNew second\nAfter\n")
+        for remote, expected in (
+                ("Old block\nAfter\n", "New first\nNew second\nAfter\n"),
+                ("Before\nOld block\n", "Before\nNew first\nNew second\n"),
+                ("Before\nInserted\nOld block\nAfter\n", "Before\nInserted\nNew first\nNew second\nAfter\n"),
+                ("Before\nOld block\nInserted\nAfter\n", "Before\nNew first\nNew second\nInserted\nAfter\n"),
+                ("BEFORE\nOld block\nAFTER\n", "BEFORE\nNew first\nNew second\nAFTER\n")):
+            for ours, theirs in ((local, note(remote)), (note(remote), local)):
+                with self.subTest(local=ours, remote=theirs):
+                    self.assertEqual(merge_note(base, ours, theirs)["note"], note(expected))
+        for remote in ("Before\nOther block\nAfter\n", "Before\nAfter\n"):
+            for ours, theirs in ((local, note(remote)), (note(remote), local)):
+                with self.subTest(local=ours, remote=theirs):
+                    self.assertIsNotNone(merge_note(base, ours, theirs)["conflict"])
+
+    def test_splitting_the_last_line_merges_with_appended_entries(self):
+        for newline in ("\n", "\r\n"):
+            for trailing in ("", newline):
+                base = note("Before" + newline + "Old block")
+                local = note("Before" + newline + "New first" + newline + "New second" + trailing)
+                remote = note(base["body"] + newline * 2 + "Added" + trailing)
+                expected = note(local["body"].removesuffix(trailing) + newline * 2 + "Added" + trailing)
+                for ours, theirs in ((local, remote), (remote, local)):
+                    with self.subTest(newline=newline, trailing=trailing, local=ours):
+                        self.assertEqual(merge_note(base, ours, theirs)["note"], expected)
+
+    def test_structural_replacement_preserves_blank_lines_before_its_terminator(self):
+        base = note("Old block")
+        local = note("New first\n\nNew second\n\n")
+        for ending, expected in (("\n", local), ("\r\n", None)):
+            remote = note("Old block" + ending)
+            for ours, theirs in ((local, remote), (remote, local)):
+                with self.subTest(ending=ending, local=ours):
+                    self.assertEqual(merge_note(base, ours, theirs)["note"], expected)
+
+    def test_disjoint_replacements_and_deletions_preserve_both_changes(self):
+        lines = ["Alpha\n", "Beta\n", "Gamma\n", "Delta\n"]
+        edits = [(start, end, replacement)
+                 for start in range(len(lines)) for end in range(start + 1, len(lines) + 1)
+                 for replacement in ([], ["New\n"], ["New first\n", "New second\n"])]
+        for left, right in itertools.product(edits, repeat=2):
+            if left[1] > right[0] and right[1] > left[0]:
+                continue
+            right = (right[0], right[1], [line.replace("New", "Remote") for line in right[2]])
+            local = lines[:left[0]] + left[2] + lines[left[1]:]
+            remote = lines[:right[0]] + right[2] + lines[right[1]:]
+            expected = list(lines)
+            for start, end, content in sorted((left, right), reverse=True):
+                expected[start:end] = content
+            with self.subTest(local=left, remote=right):
+                result = merge_note(note("".join(lines)), note("".join(local)), note("".join(remote)))
+                self.assertEqual(result["note"], note("".join(expected)))
+
     def test_independent_words_merge_but_same_word_changes_do_not(self):
         base = note("Buy milk today")
         self.assertEqual(merge_note(base, note("Buy bread today"), note("Buy milk tomorrow"))["note"],
@@ -150,6 +220,14 @@ class MergeTests(unittest.TestCase):
 
 
 class AlignmentTests(unittest.TestCase):
+    def test_blank_removal_keeps_the_unchanged_content_anchor(self):
+        before = ["\u00a0\n", "\n", "Old block\n", "\n"]
+        after = ["Old block\n", "\n"]
+        spans = align(before, after, key=lambda line: line.strip() or None)
+        matched = [(old, new) for span in spans if span.kind == "equal"
+                   for old, new in zip(range(span.before_start, span.before_end), range(span.after_start, span.after_end))]
+        self.assertIn((2, 0), matched)
+
     def test_arbitrary_provider_records_use_the_same_alignment(self):
         original = [{"label": "Same", "checked": False}, {"label": "Same", "checked": False}, {"label": "Footer"}]
         edited = [{"label": "Same", "checked": True}, {"label": "Same", "checked": False}, {"label": "New footer"}]
@@ -258,6 +336,33 @@ class StoreTests(unittest.TestCase):
             store.stage(recovered["view"], recovered)
             result = store.prepare(latest)
             self.assertEqual(result["note"], note("- [x] Apples\n- [x] Bread\n- [ ] Coffee"))
+
+    def test_recovery_rechecks_a_structural_conflict_and_keeps_fresh_changes(self):
+        base = note("Before\n\n\u00a0\n\nOld block\n\nFooter")
+        local = note(base["body"].replace("Old block", "New first\n\nNew second"))
+        remote = note(base["body"].replace("\u00a0\n\n", ""))
+        with self.store() as store:
+            view = store.open(base)["view"]
+            store.stage(view, local)
+            store.prepare(remote)
+            store._state["draft"]["conflict"] = {"id": "old-engine", "parts": []}
+            store._persist()
+            original = store.path.read_bytes()
+        with self.store() as store:
+            recovered = store.recover()
+            self.assertTrue(recovered["retry"])
+            self.assertNotIn("conflict", recovered)
+            self.assertEqual(recovered["body"], local["body"])
+            self.assertEqual(store.path.read_bytes(), original)
+            latest = note(remote["body"].replace("Footer", "Updated footer"))
+            store.stage(recovered["view"], recovered)
+            result = store.prepare(latest)
+            expected = note(latest["body"].replace("Old block", "New first\n\nNew second"))
+            self.assertEqual(result["note"], expected)
+            store.commit(result["note"])
+        with self.store() as store:
+            self.assertIsNone(store.recover())
+            self.assertEqual(store.open(expected)["body"], expected["body"])
 
     def test_stale_read_does_not_undo_an_acknowledged_save(self):
         with self.store() as store:

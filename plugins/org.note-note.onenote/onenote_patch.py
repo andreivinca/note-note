@@ -124,6 +124,45 @@ def identity(node):
     return text_key(text(node))
 
 
+def list_levels(nodes, depth=0, kind=""):
+    """Each item's depth and family, or None for a span with other blocks."""
+    result = []
+    for node in nodes:
+        if node.tag in LISTS:
+            nested = list_levels(children(node), depth + 1, node.tag)
+        elif node.tag == "li":
+            result.append((depth, kind))
+            nested = list_levels([child for child in node.children if child.tag in LISTS], depth, kind)
+        elif node.tag in LAYOUT and not text(node):
+            continue
+        else:
+            return None
+        if nested is None:
+            return None
+        result.extend(nested)
+    return result
+
+
+def list_children(original, desired):
+    """Keep the source's placement of sublists while aligning its items.
+
+    OneNote exports sublists either inside the preceding item or beside it.
+    The writer uses the latter. A presentation difference must not become a
+    deletion and reinsertion of unchanged descendants.
+    """
+    nested = any(item.tag == "li" and any(child.tag in LISTS for child in item.children)
+                 for item in original.children)
+    if not nested:
+        return children(desired)
+    result = []
+    for node in copy.deepcopy(children(desired)):
+        if node.tag in LISTS and result and result[-1].tag == "li":
+            result[-1].children.append(node)
+        else:
+            result.append(node)
+    return result
+
+
 def target_identifier(node):
     value = node.attrs.get("id", "")
     if node.tag in REPLACEABLE and value.startswith(node.tag + ":"):
@@ -194,6 +233,8 @@ class _Planner:
         for span in align(before, after, identity):
             old = before[span.before_start:span.before_end]
             new = after[span.after_start:span.after_end]
+            if self.relevel_list(old, new):
+                continue
             shared = min(len(old), len(new))
             pending = []
             for position, (original, desired) in enumerate(zip(old, new)):
@@ -225,6 +266,26 @@ class _Planner:
                 self.replacements.append({"target": target(original), "action": "replace", "content": empty})
             if pending or new[shared:]:
                 self.insert(pending + list(new[shared:]), before, span.before_end, container)
+
+    def relevel_list(self, old, new):
+        # Graph has no move operation. When an item's depth changes, replace
+        # only that changed span. Equal siblings outside it retain their IDs.
+        # Every item in the span must change depth or family. If even one
+        # stays at its level, recurse normally to preserve its identity.
+        if (not old or not new or [node.tag for node in old] == [node.tag for node in new]
+                or not any(node.tag in LISTS for node in old + new)):
+            return False
+        before, after = list_levels(old), list_levels(new)
+        if not before or not after or len(before) != len(after) or any(a == b for a, b in zip(before, after)):
+            return False
+        content = "".join(serialize(node) for node in new)
+        for node in old:
+            if node.tag in LAYOUT:
+                self.retain(node)
+                continue
+            self.replacements.append({"target": target(node), "action": "replace", "content": content})
+            content = "<div></div>"
+        return True
 
     def remove_break(self, node):
         """Record a blank line no Graph command can remove.
@@ -267,6 +328,11 @@ class _Planner:
         candidates = self.neighbours(before, index)
         command = None
         for node, position in candidates:
+            if node.tag in LISTS:
+                command = self.insert_at_layout_boundary(node, position, additions)
+                if command is not None:
+                    self.insertions.append(command)
+                    return
             identifier = target_identifier(node)
             if identifier:
                 command = {"target": identifier, "action": "insert", "position": position}
@@ -287,11 +353,11 @@ class _Planner:
         self.insertions.append(dict(command, content=content))
 
     def insert_at_layout_boundary(self, node, position, additions):
-        """A phone attachment may have no ID even with includeIDs=true.
+        """Insert at a layout boundary using the layout's own Graph target.
 
-        Its layout div supports adding first/last children by generated ID.
-        Use that operation only at the corresponding content boundary; the
-        original attachment and every other child stay intact.
+        A native outline can expose a synthetic list ID Graph cannot locate;
+        a phone attachment may have no ID at all. The containing div supports
+        adding first/last children without replacing any existing content.
         """
         parent = self.parents.get(id(node))
         while parent is not None and parent.tag in LAYOUT:
@@ -325,7 +391,7 @@ class _Planner:
             return
         if old.tag == new.tag and old.tag in LISTS:
             self.retain(old, subtree=False)
-            self.sequence(children(old), children(new), old)
+            self.sequence(children(old), list_children(old, new), old)
             return
         if old.tag == new.tag == "li" and any(child.tag in LISTS for child in old.children + new.children):
             self.nested_item(old, new)
@@ -348,7 +414,12 @@ class _Planner:
             return text(holder)
 
         if inline(old) != inline(new):
-            raise UnsupportedEdit("this list text has no separate target from its nested list; edit it in OneNote")
+            original = [child for child in children(old) if child.tag not in LISTS]
+            if len(original) != 1 or original[0].tag != "p" or not target_identifier(original[0]):
+                raise UnsupportedEdit("this list text has no separate target from its nested list; edit it in OneNote")
+            paragraph = Node("p", {key: value for key, value in original[0].attrs.items() if key != "id"})
+            paragraph.children = [child for child in new.children if child.tag not in LISTS]
+            self.update(original[0], paragraph)
         self.retain(old, subtree=False)
         self.sequence([child for child in old.children if child.tag in LISTS],
                       [child for child in new.children if child.tag in LISTS], old)

@@ -23,6 +23,7 @@ from .imagesize import local_path, width_of
 from .mdtext import escape_inline, escape_line_start, escape_table_cell, code_span, code_fence
 from .mdtext import escape_image_alt, escape_link_destination
 import audio
+import liststyles
 
 # Four non-breaking spaces per level: Markdown has no paragraph indent, and
 # this is the form the providers already translate into a real one.
@@ -82,7 +83,7 @@ def convert(html, base="", as_text=None):
     list item, table cell and rule is one, in document order. `kinds[i]`
     says what line `i` is — "text", "heading", "blank", "rule", "item",
     "code" (a fenced block, fences included), "table" (a row), "html" (a
-    nested table, kept as HTML) or "separator" (the blank between blocks)
+    nested table, kept as HTML), "list_html" (a styled list) or "separator" (the blank between blocks)
     — so the editor never parses the Markdown it was just handed
     (ui/MarkdownBlocks.js). `base` is the
     note's own directory — how a relative image is measured, the same way
@@ -290,6 +291,7 @@ class _Reader:
         """
         if indents is None:
             indents = []
+        first_block = self.next_block
         ordered = node.tag == "ol"
         index = dialect.px(node.attrs.get("start"), 1)
         parts = []
@@ -325,7 +327,7 @@ class _Reader:
                     kinds.extend(chunk.kinds[1:])
                     previous = chunk.kind
                     continue
-                if lines and chunk.kind not in ("item", "empty_item", "list"):
+                if lines and (chunk.kind not in ("item", "empty_item", "list") or previous == "list_html"):
                     lines.append("")
                     blocks.append(NO_BLOCK)
                     kinds.append("separator")
@@ -333,6 +335,13 @@ class _Reader:
                 blocks.extend(chunk.blocks)
                 kinds.extend(chunk.kinds)
                 previous = chunk.kind
+        style = liststyles.from_attributes(node.attrs, liststyles.default(ordered))
+        actual_indent = dialect.px(dialect.style_map(node.style).get("-qt-list-indent"), depth)
+        if (style != liststyles.default(ordered) or actual_indent != depth
+                or any(part.kind == "list_html" for _, part in parts)):
+            markdown = "\n".join(line.removeprefix(prefix) for line in lines)
+            markup = htmltables.list_markup(markdown, style, actual_indent if actual_indent != depth else 0)
+            return _Chunk("list_html", [prefix + markup], [first_block])
         return _Chunk("list", lines, blocks, kinds)
 
     def list_item_parts(self, item):

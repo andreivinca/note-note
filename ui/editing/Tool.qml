@@ -24,6 +24,8 @@ QtObject {
   // and order from toolbar settings.
   property list<Tool> options
   property bool isMenu: options.length > 0
+  // A split menu also executes its primary action from the main button.
+  property bool splitMenu: false
   property real previewScale: 1.0
   property bool previewBold: false
 

@@ -443,6 +443,11 @@ def _list_blocks(t):
     back as hard breaks) — and whose children are the rest of the item."""
     blocks = []
     ordered = t.get("attrs", {}).get("ordered", False)
+    style = t.get("attrs", {}).get("list_style", "")
+    if style and style != ("decimal" if ordered else "disc"):
+        raise Unkept("a custom list marker")
+    if t.get("attrs", {}).get("list_indent", 0):
+        raise Unkept("a list indented without a parent item")
     for item in t.get("children") or []:
         paragraphs, kids = [], []
         for c in item.get("children") or []:

@@ -1,25 +1,48 @@
 #include "textblocks.h"
 
+#include <QTextDocumentFragment>
 #include <QTextList>
 #include <QTextTable>
 
+#include <memory>
 #include <optional>
 
 namespace {
 
-enum class ListStyle { Checkbox, Bullet, Numbered };
+struct ListStyle {
+    QTextListFormat::Style marker;
+    bool checkbox = false;
+};
 
 // The names the editing tools know the styles by (ui/tools).
 std::optional<ListStyle> styleNamed(const QString &name)
 {
     if (name == QLatin1String("todo")) {
-        return ListStyle::Checkbox;
+        return ListStyle{QTextListFormat::ListDisc, true};
     }
-    if (name == QLatin1String("ul")) {
-        return ListStyle::Bullet;
+    if (name == QLatin1String("ul") || name == QLatin1String("disc")) {
+        return ListStyle{QTextListFormat::ListDisc};
     }
-    if (name == QLatin1String("ol")) {
-        return ListStyle::Numbered;
+    if (name == QLatin1String("circle")) {
+        return ListStyle{QTextListFormat::ListCircle};
+    }
+    if (name == QLatin1String("square")) {
+        return ListStyle{QTextListFormat::ListSquare};
+    }
+    if (name == QLatin1String("ol") || name == QLatin1String("decimal")) {
+        return ListStyle{QTextListFormat::ListDecimal};
+    }
+    if (name == QLatin1String("lower-alpha")) {
+        return ListStyle{QTextListFormat::ListLowerAlpha};
+    }
+    if (name == QLatin1String("upper-alpha")) {
+        return ListStyle{QTextListFormat::ListUpperAlpha};
+    }
+    if (name == QLatin1String("upper-roman")) {
+        return ListStyle{QTextListFormat::ListUpperRoman};
+    }
+    if (name == QLatin1String("lower-roman")) {
+        return ListStyle{QTextListFormat::ListLowerRoman};
     }
     return std::nullopt;
 }
@@ -36,6 +59,19 @@ bool isNumbered(QTextListFormat::Style style)
     default:
         return false;
     }
+}
+
+QTextListFormat::Style styleAtDepth(QTextListFormat::Style style, int depth)
+{
+    const QVector<QTextListFormat::Style> bullets = {
+        QTextListFormat::ListDisc, QTextListFormat::ListCircle, QTextListFormat::ListSquare
+    };
+    const QVector<QTextListFormat::Style> numbers = {
+        QTextListFormat::ListDecimal, QTextListFormat::ListLowerAlpha,
+        QTextListFormat::ListLowerRoman
+    };
+    const auto &cycle = isNumbered(style) ? numbers : bullets;
+    return cycle[(depth - 1) % cycle.size()];
 }
 
 void appendBlocks(QVector<QTextBlock> &blocks, QTextDocument *doc, int from, int through)
@@ -85,10 +121,10 @@ bool hasStyle(const QTextBlock &block, ListStyle style)
         return false;
     }
     const bool checkbox = block.blockFormat().marker() != QTextBlockFormat::MarkerType::NoMarker;
-    if (style == ListStyle::Checkbox) {
+    if (style.checkbox) {
         return checkbox;
     }
-    return !checkbox && isNumbered(list->format().style()) == (style == ListStyle::Numbered);
+    return !checkbox && list->format().style() == style.marker;
 }
 
 bool allHaveStyle(const QVector<QTextBlock> &blocks, ListStyle style)
@@ -130,12 +166,30 @@ QTextList *listOf(const QTextBlock &block, const QTextListFormat &format, ListSt
 QTextList *neighbouringList(const QTextBlock &block, const QTextBlock &neighbour,
                             const QTextListFormat &format, ListStyle style)
 {
-    return neighbour.isValid() && sameContainer(block, neighbour) ? listOf(neighbour, format, style) : nullptr;
+    const bool forward = neighbour.position() > block.position();
+    for (QTextBlock next = neighbour; next.isValid() && sameContainer(block, next);
+         next = forward ? next.next() : next.previous()) {
+        const QTextList *list = next.textList();
+        if (!list || list->format().indent() <= format.indent()) {
+            return listOf(next, format, style);
+        }
+    }
+    return nullptr;
 }
 
 void removeList(const QTextBlock &block)
 {
-    block.textList()->remove(block);
+    QTextList *list = block.textList();
+    const int index = list->itemNumber(block);
+    QVector<QTextBlock> following;
+    if (index > 0) {
+        for (int item = index + 1; item < list->count(); ++item) {
+            following.append(list->item(item));
+        }
+    }
+    QTextListFormat suffixFormat = list->format();
+    suffixFormat.setStart(suffixFormat.start() + index);
+    list->remove(block);
     QTextBlockFormat format = block.blockFormat();
     // QTextList::remove turns the list indent into a paragraph indent and
     // leaves the item's margins. An ordinary paragraph has neither: the
@@ -147,12 +201,20 @@ void removeList(const QTextBlock &block)
     format.setTopMargin(0);
     format.setBottomMargin(0);
     QTextCursor(block).setBlockFormat(format);
+    // Qt otherwise exports the freed paragraph inside the old list. Give
+    // the following items their own list, retaining their current numbering.
+    if (!following.isEmpty()) {
+        QTextList *suffix = QTextCursor(following.first()).createList(suffixFormat);
+        for (const QTextBlock &item : following) {
+            suffix->add(item);
+        }
+    }
 }
 
 QTextListFormat listFormat(const QTextBlock &block, ListStyle style)
 {
     QTextListFormat format;
-    format.setStyle(style == ListStyle::Numbered ? QTextListFormat::ListDecimal : QTextListFormat::ListDisc);
+    format.setStyle(style.marker);
     format.setIndent(block.textList() ? block.textList()->format().indent() : 1);
     return format;
 }
@@ -160,7 +222,7 @@ QTextListFormat listFormat(const QTextBlock &block, ListStyle style)
 // A checkbox keeps the state it has; any other style has no marker.
 QTextBlockFormat::MarkerType markerFor(const QTextBlock &block, ListStyle style)
 {
-    if (style != ListStyle::Checkbox) {
+    if (!style.checkbox) {
         return QTextBlockFormat::MarkerType::NoMarker;
     }
     const bool checked = block.blockFormat().marker() == QTextBlockFormat::MarkerType::Checked;
@@ -172,7 +234,13 @@ QTextBlockFormat::MarkerType markerFor(const QTextBlock &block, ListStyle style)
 void joinFollowing(QTextList *list, const QTextBlock &block, const QTextListFormat &format, ListStyle style)
 {
     for (QTextBlock next = block.next(); next.isValid(); next = next.next()) {
-        QTextList *following = neighbouringList(block, next, format, style);
+        if (!sameContainer(block, next) || !next.textList()) {
+            return;
+        }
+        if (next.textList()->format().indent() > format.indent()) {
+            continue;
+        }
+        QTextList *following = listOf(next, format, style);
         if (!following || following == list) {
             return;
         }
@@ -180,12 +248,17 @@ void joinFollowing(QTextList *list, const QTextBlock &block, const QTextListForm
     }
 }
 
-void applyList(const QTextBlock &block, ListStyle style)
+void applyList(const QTextBlock &block, ListStyle style, const QTextListFormat &format)
 {
-    const QTextListFormat format = listFormat(block, style);
+    const auto marker = markerFor(block, style);
+    const QTextList *previous = block.textList();
+    if (previous && (format.indent() < previous->format().indent()
+        || (format.indent() == previous->format().indent() && format.style() != previous->format().style()))) {
+        removeList(block);
+    }
     QTextBlockFormat paragraph = block.blockFormat();
     paragraph.setIndent(0);
-    paragraph.setMarker(markerFor(block, style));
+    paragraph.setMarker(marker);
     QTextCursor cursor(block);
     cursor.setBlockFormat(paragraph);
 
@@ -213,7 +286,7 @@ bool isEmptyItem(const QTextBlock &block)
 
 }
 
-QVariantMap TextBlocks::toggleList(int from, int to, const QString &styleName)
+QVariantMap TextBlocks::toggleList(int from, int to, const QString &styleName, bool toggle)
 {
     QTextDocument *doc = m_document ? m_document->textDocument() : nullptr;
     const std::optional<ListStyle> style = styleNamed(styleName);
@@ -225,7 +298,7 @@ QVariantMap TextBlocks::toggleList(int from, int to, const QString &styleName)
         return {};
     }
     // A selection that is the style already loses it; a mixed one adopts it.
-    const bool remove = allHaveStyle(blocks, *style);
+    const bool remove = toggle && allHaveStyle(blocks, *style);
     QTextCursor start(doc);
     start.setPosition(from);
     start.setKeepPositionOnInsert(true);
@@ -238,11 +311,96 @@ QVariantMap TextBlocks::toggleList(int from, int to, const QString &styleName)
         if (remove) {
             removeList(block);
         } else {
-            applyList(block, *style);
+            applyList(block, *style, listFormat(block, *style));
         }
     }
     transaction.endEditBlock();
     return {{"from", start.position()}, {"to", end.position()}};
+}
+
+bool TextBlocks::indentBlocks(int from, int to, int direction, bool cycleStyles)
+{
+    QTextDocument *doc = m_document ? m_document->textDocument() : nullptr;
+    if (!doc || from < 0 || from > to || to >= doc->characterCount()
+        || (direction != 1 && direction != -1)) {
+        return false;
+    }
+    const QVector<QTextBlock> blocks = selectedBlocks(doc, from, to);
+    bool hasList = false;
+    for (const QTextBlock &block : blocks) {
+        if (block.textList()) {
+            hasList = true;
+            break;
+        }
+    }
+    if (!hasList) {
+        return false;
+    }
+    QTextCursor transaction(doc);
+    transaction.beginEditBlock();
+    for (const QTextBlock &block : blocks) {
+        QTextList *list = block.textList();
+        if (!list) {
+            QTextBlockFormat format = block.blockFormat();
+            if (!NoteNoteDialect::isQuote(format)) {
+                format.setLeftMargin(qMax(0.0, format.leftMargin() + direction * NoteNoteDialect::INDENT_PX));
+                QTextCursor(block).setBlockFormat(format);
+            }
+            continue;
+        }
+        const int indent = list->format().indent() + direction;
+        if (indent < 1) {
+            removeList(block);
+            continue;
+        }
+        const bool checkbox = block.blockFormat().marker() != QTextBlockFormat::MarkerType::NoMarker;
+        ListStyle style{list->format().style(), checkbox};
+        if (cycleStyles && !checkbox) {
+            style.marker = styleAtDepth(style.marker, indent);
+        }
+        QTextListFormat format;
+        format.setStyle(style.marker);
+        format.setIndent(indent);
+        // Returning to a parent's level returns to its chosen marker, even
+        // when that level began with a style selected from the dropdown.
+        if (direction < 0) {
+            for (QTextBlock previous = block.previous(); previous.isValid() && sameContainer(block, previous);
+                 previous = previous.previous()) {
+                const QTextList *parent = previous.textList();
+                if (!parent || parent->format().indent() < indent) {
+                    break;
+                }
+                if (parent->format().indent() == indent) {
+                    const bool parentCheckbox = previous.blockFormat().marker() != QTextBlockFormat::MarkerType::NoMarker;
+                    if (parentCheckbox == checkbox && (checkbox || isNumbered(parent->format().style()) == isNumbered(style.marker))) {
+                        style.marker = parent->format().style();
+                        format.setStyle(style.marker);
+                    }
+                    break;
+                }
+            }
+        }
+        applyList(block, style, format);
+    }
+    transaction.endEditBlock();
+    return true;
+}
+
+QString TextBlocks::paragraphsForBlocks(int from, int to) const
+{
+    const QTextDocument *doc = m_document ? m_document->textDocument() : nullptr;
+    if (!doc || from < 0 || from > to || to >= doc->characterCount()) {
+        return {};
+    }
+    const std::unique_ptr<QTextDocument> projected(doc->clone());
+    for (const QTextBlock &block : selectedBlocks(projected.get(), from, to)) {
+        if (block.textList()) {
+            removeList(block);
+        }
+    }
+    QTextCursor selection(projected.get());
+    selection.select(QTextCursor::Document);
+    return QTextDocumentFragment(selection).toHtml();
 }
 
 bool TextBlocks::removeListAtStart(int position)

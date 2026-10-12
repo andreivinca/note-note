@@ -14,6 +14,7 @@ namespace NoteNoteDialect {
 // A quote is the pair of margins at or past this; an indent sets the left
 // one only.
 constexpr qreal QUOTE_PX = 40;
+constexpr qreal INDENT_PX = 36;
 // Prose line height, and the fixed distance beyond an image line's height.
 constexpr qreal LINE_HEIGHT_PCT = 130;
 constexpr qreal IMAGE_LINE_GAP_PX = 8;

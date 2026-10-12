@@ -93,6 +93,23 @@ CASES = {
         "columns, because Qt's Markdown writer used to fold it into two.\n"),
     "escapes": "a - b # c 1. d * e\n",
     "lists": "- bullet\n  - nested\n- second\n",
+    "circle bullets": '<ul style="list-style-type:circle"><li>One</li><li>Two</li></ul>\n',
+    "square bullets": '<ul style="list-style-type:square"><li>One</li><li>Two</li></ul>\n',
+    "lowercase numbering": '<ol style="list-style-type:lower-alpha"><li>One</li><li>Two</li></ol>\n',
+    "uppercase numbering": '<ol style="list-style-type:upper-alpha"><li>One</li><li>Two</li></ol>\n',
+    "Roman numbering": '<ol style="list-style-type:upper-roman"><li>One</li><li>Two</li></ol>\n',
+    "lowercase Roman numbering": '<ol style="list-style-type:lower-roman"><li>One</li><li>Two</li></ol>\n',
+    "Roman numbering starts at four": '<ol start="4" style="list-style-type:upper-roman"><li>Four</li><li>Five</li></ol>\n',
+    "indented first item": '<ul style="list-style-type:circle" data-list-indent="2"><li>First</li></ul>\n',
+    "nested marker styles": ('<ul><li><p>Parent</p><ul style="list-style-type:circle"><li><p>Child</p>'
+                             '<ul style="list-style-type:square"><li><p>Grandchild</p></li></ul></li></ul></li>'
+                             '<li><p>Last</p></li></ul>\n'),
+    "styled list inside a table": ('<table><tr><td><ol style="list-style-type:upper-roman"><li><p>One</p></li>'
+                                   '<li><p>Two</p></li></ol></td><td><p>Keep</p></td></tr></table>\n'),
+    "checkbox inside a styled list": ('<ul style="list-style-type:circle"><li>Parent'
+                                     '<ul><li class="task-list-item"><input class="task-list-item-checkbox" '
+                                     'type="checkbox" disabled checked/>Child</li></ul></li></ul>\n'),
+
     "shopping with nested item": (
         "Before\n\n- Coffee beans\n- Oat milk\n  - the barista one\n- Bread\n\nAfter\n"),
     "list ending with nested items": "Before\n\n- parent\n  - child\n    - grandchild\n\nAfter\n",

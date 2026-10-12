@@ -51,6 +51,10 @@ function isTable(map, i) {
   return kind === "table" || kind === "html"
 }
 
+function isStructured(map, i) {
+  return isTable(map, i) || (map.kinds || [])[i] === "list_html"
+}
+
 // Whether the note holds a nested table, which only the native inspector
 // can edit.
 function hasHtmlTable(map) {

@@ -89,9 +89,11 @@ OneNote client links. Older sections list one page's metadata more than once;
 each page cell joins the next distinct page. It requires complete membership, matching hierarchy and
 the order the provider holds when the write starts. A fresh `BaseId`/`ExpectedLatestId` guards
 concurrent changes. Only the section root's page-series sequence is submitted.
-The service is read back, then native Graph order is confirmed before the
-canonical cache and provider rows are published. Graph trails the service by
-seconds, so it is listed at most three times, after 1, 2 and 4 seconds.
+OneNote's answer to the write says whether it took the revision, and the
+order written is then published as the section's order, with no read-back and
+no listing after it. Graph lists a new order some seconds after the service
+takes it, so a refresh leaves a section whose pages were recorded in the last
+30 seconds.
 
 The UI keeps a pending drag visible across refreshes while saving the order
 in the background, and the section can be dragged again at once. The
@@ -108,6 +110,11 @@ triggers a section refresh, including when the server might have committed
 but its response was lost. An older write's failure leaves that to the newer write, whose own
 check finds what OneNote holds. No timeout or 5xx can replay the revision
 automatically. Explicit rejected key challenges may retry.
+
+Notes come first. Graph and the revision service share OneNote's one request
+budget, and a page order is written only while that budget has room beyond
+the share background work leaves for notes; otherwise it fails at once, with
+nothing written, and the rows return to OneNote's order.
 
 ## Verification on 2026-10-06
 

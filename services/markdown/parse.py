@@ -106,15 +106,21 @@ def parse(markdown):
 
 
 def _read_html_blocks(tokens):
-    for index, token in enumerate(tokens):
+    result = []
+    for token in tokens:
         if token["type"] == "block_html" and re.match(r"\s*<table(?:\s|>)", token.get("raw", ""), re.I):
-            tokens[index] = htmltables.parse_table(token["raw"])
+            token = htmltables.parse_table(token["raw"])
+        elif token["type"] == "block_html" and re.match(r"\s*<(?:ul|ol)(?:\s|>)", token.get("raw", ""), re.I):
+            result.extend(htmltables.parse_lists(token["raw"]))
+            continue
         elif token["type"] == "block_html":
             attrs = audio.from_markup(token.get("raw", ""))
             if attrs is not None:
-                tokens[index] = {"type": "audio", "attrs": attrs}
+                token = {"type": "audio", "attrs": attrs}
         elif token.get("children"):
             _read_html_blocks(token["children"])
+        result.append(token)
+    tokens[:] = result
 
 
 def walk_text(tokens):

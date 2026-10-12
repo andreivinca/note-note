@@ -1,14 +1,15 @@
-"""Structured table cells stored as semantic HTML inside Markdown.
+"""Rich tables and styled lists stored as semantic HTML inside Markdown.
 
 Pipe tables cannot hold lists or another table. Only those richer tables use this
-representation; normal tables retain their existing Markdown syntax. HTML
-is parsed into the same AST as Markdown, never passed through to the editor.
+representation; ordinary tables and lists retain their Markdown syntax.
+HTML is parsed into the same AST as Markdown, never passed through to the editor.
 """
 import html
 
 import audio
 import htmltree
 import textcolor
+import liststyles
 from mistune import HTMLRenderer
 from mistune.core import BlockState
 
@@ -33,6 +34,14 @@ def parse_table(source):
     if len(nodes) != 1 or nodes[0].tag != "table":
         raise ValueError("An HTML table must be a complete table block")
     return _table(nodes[0])
+
+
+def parse_lists(source):
+    nodes = [node for node in htmltree.parse(source).children
+             if node.tag is not None or (node.text or "").strip()]
+    if not nodes or any(node.tag not in {"ul", "ol"} for node in nodes):
+        raise ValueError("An HTML list must contain complete list blocks")
+    return _blocks(nodes)
 
 
 def _table(node):
@@ -128,18 +137,7 @@ def _blocks(nodes):
             else:
                 out.append({"type": "paragraph", "children": _inline(node.children)})
         elif tag in {"ul", "ol"}:
-            items = []
-            for child in node.children:
-                if child.tag != "li":
-                    continue
-                item = {"type": "list_item", "children": _blocks(child.children)}
-                checks = [entry for entry in _descendants(child) if entry.tag == "input"]
-                if checks:
-                    item.update(type="task_list_item", attrs={"checked": "checked" in checks[0].attrs})
-                items.append(item)
-            out.append({"type": "list", "tight": True,
-                        "attrs": {"ordered": tag == "ol", "start": int(node.attrs.get("start", "1"))},
-                        "children": items})
+            out.extend(_lists(node))
         elif tag == "blockquote":
             out.append({"type": "block_quote", "children": _blocks(node.children)})
         elif tag == "pre":
@@ -153,13 +151,54 @@ def _blocks(nodes):
     return out
 
 
-def _descendants(node):
+def _lists(node, depth=1):
+    ordered = node.tag == "ol"
+    default = liststyles.default(ordered)
+    inherited = liststyles.from_attributes(node.attrs, default)
+    indent = int(node.attrs.get("data-list-indent", "0"))
+    groups = []
     for child in node.children:
-        yield child
-        yield from _descendants(child)
+        if child.tag in {"ul", "ol"}:
+            nested = _lists(child, depth + 1)
+            if groups and groups[-1]["children"]:
+                groups[-1]["children"][-1]["children"].extend(nested)
+            else:
+                for token in nested:
+                    token["attrs"]["list_indent"] = max(depth + 1, indent + 1, token["attrs"].get("list_indent", 0))
+                groups.extend(nested)
+            continue
+        if child.tag != "li":
+            continue
+        style = liststyles.from_attributes(child.attrs, inherited)
+        attrs = {"ordered": ordered, "list_style": style, "list_indent": indent}
+        if not groups or groups[-1]["attrs"]["list_style"] != style:
+            attrs["start"] = int(node.attrs.get("start", "1")) if not groups else 1
+            groups.append({"type": "list", "tight": True, "attrs": attrs, "children": []})
+        item = {"type": "list_item", "children": _blocks(child.children)}
+        checks = list(_item_checkboxes(child))
+        if checks:
+            item.update(type="task_list_item", attrs={"checked": "checked" in checks[0].attrs})
+        groups[-1]["children"].append(item)
+    return groups
+
+
+def _item_checkboxes(node):
+    for child in node.children:
+        if child.tag == "input":
+            yield child
+        elif child.tag not in {"ul", "ol", "table"}:
+            yield from _item_checkboxes(child)
 
 
 class _Renderer(HTMLRenderer):
+    def list(self, text, ordered, start=None, depth=0, list_style="", list_indent=0):
+        tag = "ol" if ordered else "ul"
+        attrs = ' start="%d"' % start if ordered and start not in (None, 1) else ""
+        if list_style == liststyles.default(ordered):
+            list_style = ""
+        attrs += liststyles.attributes(list_style, list_indent)
+        return "<%s%s>%s</%s>" % (tag, attrs, text, tag)
+
     def table(self, text):
         return "<table>" + text + "</table>"
 
@@ -216,3 +255,20 @@ def table_markup(cells):
         contents = [renderer.render_tokens(parse(cell), BlockState()).replace("\n", "") or "<p></p>" for cell in row]
         rows_html.append("<tr>" + "".join("<td>" + text + "</td>" for text in contents) + "</tr>")
     return "<table>" + "".join(rows_html) + "</table>"
+
+
+def list_markup(markdown, style, indent=0):
+    """A list whose marker cannot be expressed in Markdown uses semantic HTML."""
+    from parse import parse
+    tokens = parse(markdown)
+    lists = [token for token in tokens if token["type"] == "list"]
+    if not lists:
+        raise ValueError("A styled list must contain list items")
+    for token in lists:
+        token["attrs"].update(list_style=style, list_indent=indent)
+    return markup(tokens)
+
+
+def markup(tokens):
+    """Canonical semantic HTML for already parsed document blocks."""
+    return _Renderer(allow_harmful_protocols=True).render_tokens(tokens, BlockState()).replace("\n", "")

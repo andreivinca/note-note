@@ -33,7 +33,7 @@ LaneProvider {
   // reading for, so they would come back as plain text — and a save holding
   // one is refused (onenote.py, keeps_formatting) rather than flattened.
   readonly property var tools: ["bold", "italic", "underline", "strikeout", "highlight", "textColor",
-                                "h1", "h2", "h3", "p", "ul", "ol", "todo", "indent", "outdent",
+                                "h1", "h2", "h3", "p", "ul", "ol", "listStyles", "todo", "indent", "outdent",
                                 "table", "link", "currentMonth", "nextMonth", "customMonth"]
   // This provider's own app registration: an Entra public client for
   // personal and work accounts, registered by the author, that every user

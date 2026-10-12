@@ -785,6 +785,7 @@ Item {
   // native helper there is nothing to bracket with and undo walks the
   // strokes again — the one degradation of the fallback.
   readonly property bool canColorText: !!nativeBlocks.item
+  readonly property bool canStyleLists: !!nativeBlocks.item
 
   function insertFormattedText(from, to, text, styles) {
     if (!nativeBlocks.item) {
@@ -822,7 +823,7 @@ Item {
 
   // Whether the native helper took the request. A host without it has the
   // Markdown way (EditorApi.toggleListStyle), which asks here first.
-  function toggleListStyle(style) {
+  function toggleListStyle(style, toggle) {
     if (!nativeBlocks.item) {
       return false
     }
@@ -831,7 +832,7 @@ Item {
     // The toggle is one undo step on its own; the bracket gives that step
     // the caret to come back to.
     atomic(function() {
-      selection = nativeBlocks.item.toggleList(area.selectionStart, area.selectionEnd, style)
+      selection = nativeBlocks.item.toggleList(area.selectionStart, area.selectionEnd, style, toggle !== false)
     })
     if (selection.from !== undefined) {
       area.select(backwards ? selection.to : selection.from, backwards ? selection.from : selection.to)
@@ -839,6 +840,21 @@ Item {
       root.edited()
     }
     return true
+  }
+
+  function indentBlocks(direction) {
+    if (!nativeBlocks.item) {
+      return false
+    }
+    var handled = false
+    atomic(function() {
+      handled = nativeBlocks.item.indentBlocks(area.selectionStart, area.selectionEnd, direction, editing.supports("listStyles"))
+    })
+    if (handled) {
+      updateContext()
+      root.edited()
+    }
+    return handled
   }
 
   readonly property string sep: "\u2029"
@@ -857,12 +873,17 @@ Item {
   // `asText` (optional) is a document block: the code block holding it
   // arrives already read as the paragraphs its lines would be (Markdown.qml)
   // — the code block tool toggling off.
-  function withMarkdown(edit, asText) {
+  function withMarkdown(edit, asText, paragraphs) {
     if (root.readOnly || root.plain || !root.markdown) {
       return
     }
     var context = root.editContext()
-    root.markdown.toMarkdown(documentHtml(), function(md, map) {
+    // Paragraph tools work on a projection, so partial styled lists retain
+    // their unselected items. The real document changes only after conversion
+    // succeeds and its captured editing context is still current.
+    var html = paragraphs && nativeBlocks.item
+      ? nativeBlocks.item.paragraphsForBlocks(area.selectionStart, area.selectionEnd) : documentHtml()
+    root.markdown.toMarkdown(html, function(md, map) {
       if (!root.contextCurrent(context) || !map.ok) {
         return  // a failed conversion changes nothing
       }
@@ -1064,6 +1085,7 @@ Item {
   // a TextEdit keeps one document for its life, whatever text it is given.
   Loader {
     id: nativeBlocks
+    objectName: "nativeTextBlocks"
     source: root.inspectorUrl
     onLoaded: {
       if (item.version !== Dialect.NATIVE_VERSION) {
@@ -2126,6 +2148,16 @@ Item {
             }
             if (root.plain) {
               return
+            }
+            if ((event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab)
+                && !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))) {
+              var tabBlock = root.blockInfoAt(area.cursorPosition)
+              if (tabBlock && tabBlock.kind === "list") {
+                var backwards = event.key === Qt.Key_Backtab || (event.modifiers & Qt.ShiftModifier)
+                root.tools.execute(backwards ? "outdent" : "indent")
+                event.accepted = true
+                return
+              }
             }
             if (event.key === Qt.Key_Backspace && event.modifiers === Qt.NoModifier
                 && (root.deleteListMarker() || root.deletePreviousTable())) {

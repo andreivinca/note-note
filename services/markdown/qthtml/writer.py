@@ -289,6 +289,15 @@ class _Renderer:
         tag = "ol" if token.get("attrs", {}).get("ordered") else "ul"
         start = token.get("attrs", {}).get("start", 1)
         attrs = ' start="%d"' % start if tag == "ol" and start != 1 else ""
+        style = token.get("attrs", {}).get("list_style", "")
+        list_indent = token.get("attrs", {}).get("list_indent", 0)
+        css = "list-style-type:%s;" % style if style else ""
+        if list_indent:
+            css += "-qt-list-indent:%d;" % list_indent
+            if list_indent > 1:
+                css += "margin-top:0px;margin-bottom:0px;"
+        if css:
+            attrs += ' style="%s"' % css
         return "<%s%s>%s</%s>" % (
             tag, attrs, "".join(self.item(i, indent, quote) for i in token.get("children") or []), tag)
 

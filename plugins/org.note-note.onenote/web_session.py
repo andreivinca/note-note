@@ -28,8 +28,6 @@ ENDPOINT = "https://onenote.officeapps.live.com/o/OneNote.ashx"
 EDITOR_ROLES = ("owner", "contributor")
 MAX_BODY = 16 * 1024 * 1024
 MAX_SECONDS = 120
-RATE_KEY = "onenote-web-order"
-RATE_WINDOWS = [(60, 40), (3600, 200)]
 
 
 class WebError(msgraph.GraphError):
@@ -168,9 +166,12 @@ class Transport:
                 raise WebError(message) from error
 
         # Only explicit 429 rejections replay. No timeout, 5xx or lost write
-        # response can cause the same revision to be submitted again.
-        return ratelimit.attempt_loop(RATE_KEY if url == ENDPOINT else None,
-                                     RATE_WINDOWS, once, attempts=2)
+        # response can cause the same revision to be submitted again. Every
+        # request counts against the provider's one budget, as its Graph
+        # requests do, and optional work leaves notes their share of it
+        # (msgraph.background_requests).
+        return ratelimit.attempt_loop(msgraph.settings.rate_key, msgraph.settings.rate_windows, once,
+                                      attempts=2, reserve=msgraph.settings.background_reserve)
 
 
 class Session(Transport):

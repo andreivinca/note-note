@@ -71,20 +71,63 @@ Rectangle {
         id: buttonSlot
         required property var modelData
         readonly property alias button: actionButton
+        readonly property bool split: modelData.splitMenu && menu.rows.length > 0
         visible: group.registry.isVisible(modelData)
-        implicitWidth: actionButton.implicitWidth
+        implicitWidth: actionButton.implicitWidth + (split ? dropdownButton.width : 0)
         implicitHeight: actionButton.implicitHeight
-        width: actionButton.width
+        width: actionButton.width + (split ? dropdownButton.width : 0)
         height: group.buttonHeight
+
+        Rectangle {
+          anchors.fill: parent
+          visible: buttonSlot.split
+          radius: actionButton.radius
+          color: actionButton.down || dropdownButton.down ? actionButton.pressedColor
+            : actionButton.hovered || dropdownButton.hovered ? actionButton.hoverColor
+            : actionButton.selected || menu.opened ? actionButton.selectedColor : "transparent"
+        }
+
+        AppUi.ChromeButton {
+          id: dropdownButton
+          objectName: "editingDropdown-" + buttonSlot.modelData.toolId
+          visible: buttonSlot.split
+          x: actionButton.width
+          width: Style.space(20)
+          height: group.buttonHeight
+          enabled: actionButton.enabled
+          background.visible: false
+          contentForeground: group.editor.foreground
+          iconText: "󰅀"
+          iconSize: Style.font.body
+          horizontalPadding: 0
+          tooltipText: group.panelOpen || menu.opened ? "" : buttonSlot.modelData.label + " styles"
+          Accessible.name: buttonSlot.modelData.label + " styles"
+          onClicked: {
+            if (menu.opened) {
+              menu.close()
+            } else {
+              menu.open()
+            }
+          }
+        }
+
+        Rectangle {
+          visible: buttonSlot.split
+          x: actionButton.width
+          y: (parent.height - height) / 2
+          width: Style.spacing.hairline
+          height: Style.space(16)
+          color: Util.alpha(group.editor.foreground, 0.18)
+        }
 
         AppUi.ChromeButton {
           id: actionButton
           readonly property var modelData: buttonSlot.modelData
-          readonly property bool labeledMenu: modelData.isMenu && modelData.toolbarLabelVisible
+          readonly property bool labeledMenu: modelData.isMenu && !modelData.splitMenu && modelData.toolbarLabelVisible
           // Popups follow their button as the tools scroll or the editor resizes.
           readonly property real toolbarX: group.toolbarOffsetX + group.x + toolsRow.x + buttonSlot.x + x
           objectName: "editingTool-" + modelData.toolId
-          enabled: group.editor.writable && (!modelData.isMenu || menu.rows.length > 0)
+          enabled: group.editor.writable && (!modelData.isMenu || modelData.splitMenu || menu.rows.length > 0)
           // Dropdowns and icon buttons share the same face geometry.
           anchors.verticalCenter: parent.verticalCenter
           anchors.alignWhenCentered: false
@@ -94,6 +137,7 @@ Rectangle {
           // Labeled menus have the same rounded face as selected tools.
           surfaceColor: group.surfaceColor
           backgroundColor: labeledMenu ? selectedColor : "transparent"
+          background.visible: !buttonSlot.split
           active: menu.opened || modelData.panelOpen
           selected: modelData.checked
           contentForeground: group.editor.foreground
@@ -104,7 +148,7 @@ Rectangle {
           iconSize: Style.font.icon
           horizontalPadding: labeledMenu ? Style.space(12) : Style.spacing.sm
           // Match the inset created by centering an icon in a square tool button.
-          leftPadding: iconText.length > 0 && (modelData.isMenu || modelData.panelPopup)
+          leftPadding: iconText.length > 0 && ((modelData.isMenu && !modelData.splitMenu) || modelData.panelPopup)
             ? Math.max(horizontalPadding + 1, (height - implicitIconWidth) / 2)
             : horizontalPadding + 1
           verticalPadding: Style.spacing.xxs
@@ -114,13 +158,13 @@ Rectangle {
             if (labeledMenu) {
               return modelData.label + " 󰅀"
             }
-            return modelData.isMenu || modelData.panelPopup ? "󰅀" : ""
+            return (modelData.isMenu && !modelData.splitMenu) || modelData.panelPopup ? "󰅀" : ""
           }
           opacity: enabled ? 1 : 0.45
           fontFamily: group.editor.fontFamily
           fontSize: Style.font.body
           onClicked: {
-            if (modelData.isMenu) {
+            if (modelData.isMenu && !modelData.splitMenu) {
               if (menu.opened) {
                 menu.close()
               } else {

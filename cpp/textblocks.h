@@ -62,7 +62,7 @@ class TextBlocks : public QObject
     // of another version at load.
     Q_PROPERTY(int version READ version CONSTANT)
     Q_PROPERTY(int contentRevision READ contentRevision NOTIFY contentChanged)
-    static constexpr int Version = 5;
+    static constexpr int Version = 6;
 
 public:
     Q_INVOKABLE int insertFormattedText(int from, int to, const QString &text, const QVariantMap &styles);
@@ -76,7 +76,11 @@ public:
     // Mixed selections adopt the style; a uniform selection toggles it off.
     // List membership never crosses a table cell. Return the selection adjusted
     // for empty items' rendering fillers. The operation is one undo step.
-    Q_INVOKABLE QVariantMap toggleList(int from, int to, const QString &style);
+    Q_INVOKABLE QVariantMap toggleList(int from, int to, const QString &style, bool toggle = true);
+    Q_INVOKABLE bool indentBlocks(int from, int to, int direction, bool cycleStyles = true);
+    // A read-only projection for paragraph tools: selected list items become
+    // paragraphs in a clone, while unselected list structure is retained.
+    Q_INVOKABLE QString paragraphsForBlocks(int from, int to) const;
     // Backspace at the start of an item removes its marker and list indent
     // together, without deleting text or crossing a table-cell boundary.
     Q_INVOKABLE bool removeListAtStart(int position);

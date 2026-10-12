@@ -55,6 +55,13 @@ lines through the same revision service ([blank lines](onenote-blank-lines.md)):
 exact joins to OneNote's elements, refusals, the page cell join and one
 conditional revision.
 
+`plugins/org.note-note.onenote/list_edits_selftest.py` checks native list moves,
+preserved item and text identities, detached historical containers, duplicate
+parents, deep indentation, all marker styles, rich-text runs and stale native
+text. Its read fixtures include indentation omitted by Graph. The Graph merge
+fixture remains a DOM model; it does not substitute for these native ownership
+checks or live save-and-reload verification on disposable pages.
+
 The QML fixture sends actual pointer drags through the shared sidebar,
 including future tree/subtree groups, scope boundaries,
 Escape cancellation and edge scrolling. It then lists a notes tree it builds

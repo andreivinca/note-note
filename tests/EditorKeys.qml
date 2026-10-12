@@ -2452,6 +2452,206 @@ Window {
     return { todo: "- [ ] ", ul: "- ", ol: "1. " }[id]
   }
 
+  function listFormatAt(text) {
+    var position = editor.plainText().indexOf(text)
+    var inspector = keys.findChild(editor, "nativeTextBlocks").item
+    return inspector.blocks().find(function(block) {
+      return block.position <= position && block.end >= position
+    })
+  }
+
+  function listIndentCycle(id, styles) {
+    load({ source: listPrefix(id) + "Parent\n" + listPrefix(id) + "Target\n" })
+    editor.setCursorPosition(editor.plainText().indexOf("Target") + 2)
+    var body = keys.findChild(editor, "noteBody")
+    var position = editor.cursorPosition()
+    var original = editor.documentHtml()
+    var previousX = body.positionToRectangle(position).x
+    for (var depth = 2; depth <= 9; depth++) {
+      keys.keyClick(Qt.Key_Tab)
+      var format = listFormatAt("Target")
+      require(format.listIndent === depth && format.listStyle === styles[(depth - 1) % styles.length],
+              "wrong marker/depth at " + depth + ": " + JSON.stringify(format))
+      require(editor.cursorPosition() === position, "Tab moved the caret within the item")
+      var x = body.positionToRectangle(position).x
+      require(x > previousX, "Tab did not indent the item visually")
+      previousX = x
+    }
+    var nested = editor.documentHtml()
+    editor.undo()
+    require(listFormatAt("Target").listIndent === 8, "indent did not undo once")
+    editor.redo()
+    require(editor.documentHtml() === nested, "indent did not redo")
+    var saved = savedMarkdown()
+    load({ source: saved })
+    require(listFormatAt("Target").listIndent === 9, "save/reload lost deep indentation")
+    require(savedMarkdown() === saved, "deep list changed on reload")
+    editor.setCursorPosition(position)
+    for (var level = 8; level >= 1; level--) {
+      keys.keyClick(Qt.Key_Backtab, Qt.ShiftModifier)
+      require(listFormatAt("Target").listIndent === level, "Shift+Tab did not outdent to " + level)
+    }
+    require(editor.documentHtml() === original, "outdent did not restore the original list")
+    keys.keyClick(Qt.Key_Backtab, Qt.ShiftModifier)
+    require(!listFormatAt("Target").list, "outdent at the first level did not leave the list")
+  }
+
+  function listStyleChoices() {
+    var choices = [
+      { id: "bulletDisc", menu: "ul", style: -1 },
+      { id: "bulletCircle", menu: "ul", style: -2 },
+      { id: "bulletSquare", menu: "ul", style: -3 },
+      { id: "numberDecimal", menu: "ol", style: -4 },
+      { id: "numberLowerAlpha", menu: "ol", style: -5 },
+      { id: "numberUpperAlpha", menu: "ol", style: -6 },
+      { id: "numberUpperRoman", menu: "ol", style: -8 },
+      { id: "numberLowerRoman", menu: "ol", style: -7 }
+    ]
+    for (var choice of choices) {
+      load({ source: "Target\n\nKeep\n" })
+      editor.setCursorPosition(2)
+      var arrow = keys.findChild(editor, "editingDropdown-" + choice.menu)
+      require(arrow && arrow.visible && arrow.width < arrow.height, "missing compact split arrow")
+      keys.mouseClick(arrow)
+      var button = keys.findChild(editor, "editingTool-" + choice.menu)
+      var popup = Array.from(button.data).find(function(object) {
+        return object.objectName === "editingPopup-" + choice.menu
+      })
+      keys.tryVerify(function() { return popup && popup.opened }, 1000)
+      require(!listFormatAt("Target").list, "opening the menu changed the note")
+      var row = keys.findChild(popup.contentItem, "editingMenu-" + choice.id)
+      require(row && row.visible, "missing style choice " + choice.id)
+      keys.waitForRendering(row)
+      var preview = Platform.env("NOTE_NOTE_LIST_SCREENSHOT")
+      if (preview) {
+        var captured = false
+        test.contentItem.grabToImage(function(result) {
+          result.saveToFile(preview + "-" + choice.id + ".png")
+          captured = true
+        })
+        keys.tryVerify(function() { return captured }, 3000)
+      }
+      keys.mouseClick(row, row.width / 2, row.height / 2)
+      keys.tryVerify(function() { return listFormatAt("Target").listStyle === choice.style }, 1000)
+      require(listFormatAt("Target").listStyle === choice.style,
+              "style choice did not apply " + choice.id + ": " + JSON.stringify(listFormatAt("Target")))
+      require(!listFormatAt("Keep").list, "style choice changed another paragraph")
+      var styled = editor.documentHtml()
+      editor.undo()
+      require(!listFormatAt("Target").list, "style choice did not undo")
+      editor.redo()
+      require(editor.documentHtml() === styled, "style choice did not redo")
+      var saved = savedMarkdown()
+      load({ source: saved })
+      require(listFormatAt("Target").listStyle === choice.style && savedMarkdown() === saved,
+              "style did not survive save/reload: " + choice.id)
+    }
+  }
+
+  function listStyleSelectionAndTables() {
+    load({ source: "1. First\n2. Second\n3. Third\n" })
+    editor.setCursorPosition(editor.plainText().indexOf("Second"))
+    require(editor.tools.execute("numberUpperRoman"), "Roman style was unavailable")
+    var middle = savedMarkdown()
+    load({ source: middle })
+    require(listFormatAt("First").listIndent === 1 && listFormatAt("Second").listIndent === 1
+            && listFormatAt("Third").listIndent === 1, "styling a middle item nested its neighbours")
+    require(listFormatAt("First").listStyle === -4 && listFormatAt("Second").listStyle === -8
+            && listFormatAt("Third").listStyle === -4, "styling a middle item changed its neighbours")
+    require(savedMarkdown() === middle, "mixed marker styles changed on reload")
+
+    load({ source: "1. First\n2. Second\n3. Third\n" })
+    var body = keys.findChild(editor, "noteBody")
+    body.select(0, editor.plainText().indexOf("Third"))
+    require(editor.tools.execute("numberUpperRoman"), "Roman style was unavailable")
+    require(listFormatAt("First").listStyle === -8 && listFormatAt("Second").listNumber === 2,
+            "selection did not form one Roman list")
+    require(listFormatAt("Third").listStyle === -4, "exclusive selection end changed the third item")
+    editor.setCursorPosition(editor.plainText().indexOf("Second"))
+    keys.keyClick(Qt.Key_Tab)
+    require(listFormatAt("Second").listStyle === -5, "Roman list did not nest into lowercase letters")
+    keys.keyClick(Qt.Key_Backtab, Qt.ShiftModifier)
+    require(listFormatAt("Second").listStyle === -8 && listFormatAt("Second").listNumber === 2,
+            "outdent did not resume the parent's Roman numbering")
+
+    load({ source: '<table><tr><td><ul><li>Parent</li><li>Target</li></ul></td><td><p>Keep</p></td></tr></table>\n' })
+    editor.setCursorPosition(editor.plainText().indexOf("Target") + 1)
+    keys.keyClick(Qt.Key_Tab)
+    require(listFormatAt("Target").listIndent === 2 && listFormatAt("Target").listStyle === -2,
+            "Tab did not nest the list inside its table cell")
+    require(!listFormatAt("Keep").list && cells() === 2, "Tab changed a neighbouring table cell")
+    var saved = savedMarkdown()
+    load({ source: saved })
+    require(savedMarkdown() === saved && listFormatAt("Target").listStyle === -2,
+            "table-cell marker did not survive save/reload")
+    editor.setCursorPosition(editor.plainText().indexOf("Target"))
+    editor.readOnly = true
+    var original = editor.documentHtml()
+    keys.keyClick(Qt.Key_Tab)
+    require(editor.documentHtml() === original, "Tab changed a read-only list")
+    editor.readOnly = false
+  }
+
+  function styledListTyping() {
+    for (var choice of [{ id: "bulletSquare", style: -3 }, { id: "numberUpperRoman", style: -8 }]) {
+      load({ source: "First\n" })
+      editor.setCursorPosition(5)
+      require(editor.tools.execute(choice.id), "list style was unavailable")
+      keys.keyClick(Qt.Key_Return)
+      typeText("Second")
+      require(listFormatAt("Second").listStyle === choice.style, "Enter lost the chosen list style")
+      if (choice.style === -8) {
+        require(listFormatAt("Second").listNumber === 2, "Enter did not continue Roman numbering")
+      }
+      keys.keyClick(Qt.Key_Tab)
+      require(listFormatAt("Second").listIndent === 2, "Tab at the end of the document missed its list")
+      keys.keyClick(Qt.Key_Backtab, Qt.ShiftModifier)
+      require(listFormatAt("Second").listStyle === choice.style, "outdent lost the parent's chosen style")
+      keys.keyClick(Qt.Key_Return)
+      keys.keyClick(Qt.Key_Tab)
+      var empty = editor.blockInfoAt(editor.cursorPosition())
+      require(empty && empty.kind === "list" && empty.empty, "Tab lost the empty list item")
+      typeText("Third")
+      require(listFormatAt("Third").listIndent === 2, "Tab did not indent an empty item")
+      var saved = savedMarkdown()
+      load({ source: saved })
+      require(savedMarkdown() === saved, "typed list did not survive save/reload")
+    }
+    load({ source: "- First\n\nAfter\n" })
+    editor.setCursorPosition(5)
+    keys.keyClick(Qt.Key_Tab)
+    require(listFormatAt("First").listIndent === 2 && listFormatAt("First").listStyle === -2,
+            "Tab at a paragraph boundary missed the first list item")
+    require(!listFormatAt("After").list, "Tab affected the following paragraph")
+    var indented = savedMarkdown()
+    load({ source: indented })
+    require(listFormatAt("First").listIndent === 2 && savedMarkdown() === indented,
+            "an indented first item lost its depth on reload")
+  }
+
+  function styledListBlockTools() {
+    var body = keys.findChild(editor, "noteBody")
+    for (var id of ["quote", "codeblock"]) {
+      load({ source: '<ol style="list-style-type:upper-roman"><li>Keep</li><li>Target</li><li>Last</li></ol>\n' })
+      body.select(editor.plainText().indexOf("Target") + 1, editor.plainText().indexOf("Last"))
+      var original = editor.documentHtml()
+      clickEditingTool(id)
+      keys.tryVerify(function() { return editor.documentHtml() !== original }, 3000)
+      var target = editor.plainText().indexOf("Target")
+      require(editor.blockInfoAt(target).kind === (id === "quote" ? "quote" : "code"),
+              id + " did not transform the selected styled-list item")
+      require(listFormatAt("Keep").listStyle === -8 && listFormatAt("Last").listStyle === -8,
+              id + " changed an unselected list item")
+      var saved = savedMarkdown()
+      editor.undo()
+      require(editor.documentHtml() === original, id + " did not undo in one step")
+      editor.redo()
+      require(savedMarkdown() === saved, id + " did not redo")
+      load({ source: saved })
+      require(savedMarkdown() === saved, id + " changed the list on reload")
+    }
+  }
+
   function listToolShortcut(id) {
     var key = { todo: Qt.Key_1, ul: Qt.Key_Period, ol: Qt.Key_Slash }[id]
     load({ source: "Target\n" })
@@ -3112,7 +3312,14 @@ Window {
   function listCases() {
     var checks = [listToolTargeting, listToolSelections, listToolTables, listToolTyping, listToolBoundaries,
                   listToolBackspace, listToolShortcut, listToolWithoutHelper]
-    var scenarios = []
+    var scenarios = [
+      { name: "split list buttons offer every marker and preserve it on reload", run: listStyleChoices },
+      { name: "Tab cycles bullets and Shift+Tab restores their levels", run: function() { listIndentCycle("ul", [-1, -2, -3]) } },
+      { name: "Tab cycles numbering and Shift+Tab restores their levels", run: function() { listIndentCycle("ol", [-4, -5, -7]) } },
+      { name: "list styles respect selections, numbering, table cells and read-only notes", run: listStyleSelectionAndTables },
+      { name: "styled lists continue on Enter and indent at empty and boundary positions", run: styledListTyping },
+      { name: "block tools transform selected styled-list items and preserve their neighbours", run: styledListBlockTools }
+    ]
     ;["todo", "ul", "ol"].forEach(function(id) {
       checks.forEach(function(check) {
         scenarios.push({ name: id + " " + check.name, run: function() { check(id) } })

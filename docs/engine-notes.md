@@ -616,6 +616,9 @@ documentation disagrees with the service in three places.
   unchanged element IDs and attributes before writing. Bare blank lines do
   not disable granular updates. An unsupported edit or failed simulation
   preserves the draft and reports an error; there is no page rebuild fallback.
+  List nesting and bullet/number family changes replace only the affected
+  span when every item in it changes level or family. Items that remain at
+  their level use the ordinary recursive diff, preserving their identities.
 - A div can only be replaced by its **generated id**, never by its `data-id`
   (that one works for `insert`/`append`). Generated ids change on every write,
   so they must be read back with `?includeIDs=true` before each patch.

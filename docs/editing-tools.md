@@ -99,7 +99,7 @@ pressed straight after the caret moves is judged on where the caret is now.
 | Caret in | Hidden | Still offered |
 | --- | --- | --- |
 | A code block | Heading, bold, italic, underline, strikethrough, text color, highlight, inline code, link, lists, indent, outdent, quote | Code block, which takes the block off; horizontal rule, table and calendar tools, which land after the block |
-| A table cell | Heading, indent, outdent, quote, code block | Inline formatting, lists, link, row and column actions; table and calendar tools, which insert inside the cell; horizontal rule, which lands after the table |
+| A table cell | Heading, quote, code block; indent and outdent on ordinary paragraphs | Inline formatting, lists (including indent/outdent), link, row and column actions; table and calendar tools, which insert inside the cell; horizontal rule, which lands after the table |
 | A list item | Heading | Everything else |
 | Anywhere else | Row and column actions | Everything else |
 
@@ -123,12 +123,38 @@ ending at the start of another paragraph leaves that paragraph untouched. Mixed
 selections adopt the requested style; clicking again removes the markers. Existing
 checked states survive when applying checkboxes to a mixed selection.
 
+Bullets and numbered lists have split buttons: the main button toggles the
+default marker, while the arrow opens the styles. Bullets offer **●**, **○** and
+**◾**; numbering offers **1, 2, 3**, **a, b, c**, **A, B, C**, **I, II, III** and
+**i, ii, iii**. Choosing a menu option applies it even when it is already selected.
+
+**Tab** indents list items and **Shift+Tab** outdents them. The indent/outdent
+tools do the same. Bullet levels repeat **● → ○ → ◾**; numbered levels repeat
+**1 → a → i**. Returning to an existing parent level restores its chosen style
+and continues its numbering. Outdenting at the first level leaves the list.
+Checkboxes keep their check states when indented.
+
 The native helper edits list membership directly, preserves the selection and
 groups each action into one undo step. Enter continues a list; Enter on an empty
 item leaves it in the same cell or paragraph. Backspace at the start of an item
 removes its marker and list indentation together, preserving its text and table
-cell. Lists inside tables are stored as
-semantic HTML in Markdown so their markers and check states survive saving.
+cell. Styled lists and lists inside tables are stored as semantic HTML in
+Markdown so their markers, nesting and check states survive saving. An indented
+first item stores its depth with `data-list-indent` when it has no parent.
+OneNote saves list structure through its native revision service: indenting,
+outdenting and splitting lists reparent the existing items together with their
+children. Graph's generated list IDs can describe virtual containers, so they
+are not used as native ownership or assumed to be valid PATCH targets. Native
+indentation and group boundaries also restore levels omitted by Graph's HTML
+export. The save checks the page revision, validates the resulting hierarchy,
+and verifies the returned content before accepting the draft. Unrelated Graph
+edits run against the confirmed list revision.
+Quote and Code block can replace selected list items while keeping the
+unselected items' styles.
+
+The extra styles require the native helper and the provider's `listStyles`
+capability. Local files and OneNote support them; Notion keeps ordinary bullets
+and decimal numbering when nesting.
 Shell installations without the optional helper retain the Markdown-based list
 actions outside tables.
 
@@ -331,6 +357,7 @@ Qt Quick's own controls.
 | `available` | Reactive context condition, such as `editor.inTable`. Controls both presentation and execution; execution reads the caret's context again first. |
 | `shortcutKey`, `shortcutModifiers` | Optional default key and modifiers. The central registry resolves conflicts and user overrides; `shortcutLabel` (read-only), tooltips, and help show its effective binding. |
 | `isMenu` | This entry opens a menu; automatically true when `options` are provided. |
+| `splitMenu` | Give a menu an executable primary button and a separate dropdown arrow. Its primary action can have a shortcut; the arrow hides when no choices are available. |
 | `options` | Fixed executable `Tool` choices owned by this file, as in `Heading.qml`. They retain individual action IDs and capabilities but move together in the toolbar. Bind their `editor` and availability to the owning tool. |
 | `previewScale`, `previewBold` | Optional menu-label styling relative to the chrome text size, used by headings. |
 | `panelPopup` | Render the tool panel as a dropdown anchored to its toolbar button. |
@@ -393,9 +420,11 @@ an action's content, rules and UI belong in its tool file.
 | `insertTable(markdown)` | Insert table content at the caret inside a cell, or as a normal snippet outside tables. |
 | `transformBlocks(transform, options)` | Transform selected Markdown blocks. The callback receives `{ indent, prefix, content, isList }` and returns a line. `options.list` manages paragraph separators when toggling lists; `unchangedMessage` supplies optional feedback. |
 | `toggleListStyle(style)` | Toggle `todo`, `ul` or `ol` on actual document blocks, including table cells, preserving selections and undo. |
+| `canStyleLists`, `setListStyle(style)` | Apply `disc`, `circle`, `square`, `decimal`, `lower-alpha`, `upper-alpha`, `lower-roman` or `upper-roman` without toggling off. Requires native support and `listStyles`. |
+| `indentBlocks(direction)` | Indent (`1`) or outdent (`-1`) selected list items natively, including table cells. Returns false for ordinary paragraphs so the tool can use its paragraph operation. |
 | `tableContext()`, `changeTable(operation, index, count)` | Read the innermost table's row/column and dimensions, and insert/remove rows or columns as one undo transaction. Operations are `insertRows`, `removeRows`, `insertColumns`, `removeColumns`. |
 | `transformTable(transform)` | Plain-table fallback when the native helper is absent. Callback arguments are `(rows, row, column)`; row 1 is the Markdown separator row. Return `false` to leave the document unchanged. |
-| `withMarkdown(callback, asText)` | Read Markdown lines and the line/block map, rejecting stale or failed conversions. `asText` optionally reads a code block as prose. |
+| `withMarkdown(callback, asText, paragraphs)` | Read Markdown lines and the line/block map, rejecting stale or failed conversions. `asText` optionally reads a code block as prose. `paragraphs` projects selected list items as paragraphs without changing the live document, for block restyling. |
 | `replaceDocument(markdown, caret, then)` | Render and replace the document in one undo step; optional `then` runs inside that transaction. |
 | `cursorPosition()`, `blockAt(position)`, `blockInfoAt(position)`, `caretLine(map)`, `lineAt(map, position)`, `blockEndLine(lines, line)`, `lastBlockThrough(map, line)`, `selectBlock(block)` | Position and block mapping, used by code-block insertion. |
 | `capture()`, `current(context)` | Capture and validate the note, document revision and selection around delayed UI work. |

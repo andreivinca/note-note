@@ -57,12 +57,15 @@ def line(number, text, children=()):
 def page_state(lines, outline=(20, 22, 24, 26)):
     """A page cell: its own metadata, and an outline of the given lines."""
     objects = [obj(10, 0x6000C, 123, "keep", revisions.CHILDREN, braced(*outline)),
-               obj(5, revisions.PAGE_METADATA, revisions.ENTITY_GUID, CLIENT)]
+               obj(5, revisions.PAGE_METADATA, revisions.ENTITY_GUID, CLIENT),
+               obj(2, 0x60037, blank_lines.CONTENT, braced(3)),
+               obj(3, 0x6000B, revisions.CHILDREN, braced(10))]
     for number, text, *children in lines:
         objects += line(number, text, *children)
     return {"LatestRevisionId": "latest|1", "ClientKnowledge": "known",
             "RevisionList": [{"Id": "latest|1", "BaseId": web.NIL,
-                              "RootObjectDescriptors": [{"RootId": "metadata-root|2", "ObjectId": ref(5)}],
+                              "RootObjectDescriptors": [{"RootId": "metadata-root|2", "ObjectId": ref(5)},
+                                                        {"RootId": revisions.CONTENT_ROOT, "ObjectId": ref(2)}],
                               "ObjectGroups": [{"Objects": objects}]}]}
 
 
@@ -126,6 +129,18 @@ class JoinTests(unittest.TestCase):
         # A list's ID names the element it hangs under.
         run = BlankLines(graph_id(21), graph_id(26, "ul"), 2, (0, 1))
         parents = blank_lines.updated_parents(blank_lines.Page(page_state(LINES)), (run,))
+        self.assertEqual(children(parents[0]), [ref(20), ref(26)])
+
+    def test_native_list_groups_can_bound_blank_lines(self):
+        state = page_state(LINES + [(60, "First list"), (62, "Second list")])
+        objects = state["RevisionList"][0]["ObjectGroups"][0]["Objects"]
+        for index, value in enumerate(objects):
+            if value["ObjectId"] in (ref(20), ref(26)):
+                number = 20 if value["ObjectId"] == ref(20) else 26
+                child = 60 if number == 20 else 62
+                objects[index] = obj(number, 0x60019, revisions.CHILDREN, braced(child))
+        run = BlankLines(graph_id(20, "ol"), graph_id(26, "ol"), 2, (0, 1))
+        parents = blank_lines.updated_parents(blank_lines.Page(state), (run,))
         self.assertEqual(children(parents[0]), [ref(20), ref(26)])
 
     def test_runs_in_one_parent_are_written_as_one_object(self):

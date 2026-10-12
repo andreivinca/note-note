@@ -63,17 +63,13 @@ class SectionOrder:
 
 
 def reorder(session, pages, expected, wanted):
-    """One conditional revision write, followed by a section-state readback."""
+    """One revision write, conditional on the section state read just before
+    it. The service's answer says whether it took the revision, so the
+    section is not read back after it."""
     state = session.read_section()
     order = SectionOrder(state, pages)
     root = order.arranged_root(expected, wanted)
     if expected == wanted:
         return pages
     session.write_section(state, root)
-    arranged = order.arranged_pages(pages, wanted)
-    # Read from the service that accepted the revision. Graph can lag behind
-    # it; the provider's next inventory refresh still uses native Graph order.
-    confirmed = SectionOrder(session.read_section(), arranged)
-    if confirmed.parents != wanted:
-        raise WebError("The saved order could not be confirmed; refresh the section")
-    return arranged
+    return order.arranged_pages(pages, wanted)
