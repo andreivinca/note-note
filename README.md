@@ -100,8 +100,9 @@ cmake --install build
 ```
 
 The app then appears as **Note Note** in your launcher. A second launch
-activates the running window. Closing waits for accepted saves; a failed
-save keeps the window and draft available to retry.
+activates the running window. Closing puts the window away at once; saves
+already under way finish in the background before the app exits, and one
+that fails then is lost.
 
 The standalone app follows your system colors: Omarchy themes, KDE color
 roles, or Qt desktop integration and GNOME/desktop portal preferences.

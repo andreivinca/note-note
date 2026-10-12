@@ -37,12 +37,14 @@ Cancellation settles the callback once and stops its child. Native child
 processes are reaped asynchronously without blocking the UI.
 
 An Omarchy dismiss hides the workspace while accepted writes drain in the
-shell. A native close first flushes the editor, stops watchers and new reads,
-and waits for conversions, writes, provider changes and state persistence.
-Changes that could not be written reopen the workspace with a question:
-closing anyway loses them. Successful
-drain emits `readyToClose`; only then does the launcher quit. OneNote content
-indexing stops during native shutdown.
+shell. A native close does the same in its own process, and is final: the
+window goes at once, and the process flushes the editor, stops watchers and
+new reads, waits for conversions, writes, provider changes and state
+persistence to answer, and exits whatever they answered. A write that fails
+meanwhile is let go, unannounced. Another launch while the process drains
+brings the window back and ends the close. The drain ends in `readyToClose`;
+from then on a launch waits for the process to exit and starts on its own.
+OneNote content indexing stops during native shutdown.
 Closing drains accepted mutations rather than background listings or reads;
 providers expose `writeBusy` separately from activity used for settings changes.
 Remaining provider processes stop after writes finish, before the host exits.

@@ -135,33 +135,27 @@ Window {
       verify(loaded.body.indexOf("appended") >= 0)
 
       // Make the destination unwritable after loading it. The real writer
-      // must fail, and the close must preserve the in-memory draft.
+      // must fail, and the close must go regardless, once the write has
+      // answered: the workspace stays away and the text is let go.
       provider.watch(false)
       var file = provider.fileOf(path)
       var blocked = request({ command: ["python3", "-c",
         "import os,sys,json; p=sys.argv[1]; os.rename(p,p+'.held'); os.mkdir(p); print(json.dumps({'ok':True}))", file] })
       verify(blocked.ok)
       editor.focusEditor()
-      typeText(" kept after failure")
+      typeText(" lost on close")
       workspace.requestClose()
       verify(workspace.closing)
+      verify(!workspace.opened)
       verify(!testWindow.closedSafely)
-      tryVerify(function() {
-        return !workspace.closing
-      }, 5000)
-      verify(workspace.dirty)
-      verify(workspace.opened)
-      verify(editor.plainText().indexOf("kept after failure") >= 0)
-      verify(!testWindow.closedSafely)
-      var restored = request({ command: ["python3", "-c",
-        "import os,sys,json; p=sys.argv[1]; os.rmdir(p); os.rename(p+'.held',p); print(json.dumps({'ok':True}))", file] })
-      verify(restored.ok)
-      workspace.requestClose()
       tryVerify(function() {
         return testWindow.closedSafely
       }, 5000)
-      verify(!workspace.dirty)
+      verify(!workspace.opened)
       verify(!workspace.saveInFlight(path))
+      var restored = request({ command: ["python3", "-c",
+        "import os,sys,json; p=sys.argv[1]; os.rmdir(p); os.rename(p+'.held',p); print(json.dumps({'ok':True}))", file] })
+      verify(restored.ok)
     }
 
   }

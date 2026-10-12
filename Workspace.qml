@@ -31,9 +31,10 @@ Item {
   id: root
   property bool supportsOverlay: false
   property Item contentHost: root
+  // A close under way: the UI is already closed, and the host exits once
+  // every accepted write has answered (finishClose). Opening ends it.
   property bool closing: false
   property bool initialized: false
-  property string closeError: ""
   readonly property string statePath: Platform.stateDir + "/note-note.json"
   readonly property alias configPath: settingsStore.path
   property bool opened: false
@@ -254,9 +255,6 @@ Item {
   // A name being asked for (`prompt`, `rename`): { message, placeholder,
   // text, confirmText, run(name) }, the field opening on `text`.
   property var promptPending: null
-  // Why a close stopped — changes that could not be written — asked as
-  // whether to close anyway and lose them; "" when nothing is asked.
-  property string closeWarning: ""
   property string missedSaveNotice: ""
   // ── state ───────────────────────────────────────────────────────────
   // Asked for by anyone whose state moved — a provider through
@@ -290,10 +288,12 @@ Item {
   // ── shell contract ──────────────────────────────────────────────────
   function open(payloadJson) {
     root.opened = true
+    // A close still writing in the background ends here: the workspace is
+    // wanted again, so the process stays.
+    root.closing = false
     root.deleteConfirmOpen = false
     root.rowActionPending = null
     root.promptPending = null
-    root.closeWarning = ""
     root.page = ""
     root.pauseQueues(false)
     // A save that failed while nobody was looking is reported now, once.
@@ -346,23 +346,22 @@ Item {
     root.pauseQueues(true)
   }
 
-  // A standalone process must not exit while a conversion or accepted
-  // mutation still owns a note. Changes that could not be written ask first:
-  // closing anyway loses them (closeWarning).
+  // A close is final. The UI closes at once (`opened`); the process stays
+  // until every conversion and accepted write has answered, and then the
+  // host exits (readyToClose), whatever they answered: a write that fails
+  // meanwhile is let go, unannounced. Only opening the workspace again, on
+  // another launch, ends the close (open).
   function requestClose() {
     commandPalette.requestClose()
     if (root.closing) {
       return
     }
-    root.closeError = ""
-    root.closeWarning = ""
     root.flushSave()
     root.opened = false
     session.cancelLoad()
     root.stopWatching()
     root.pauseQueues(true)
     root.saveState()
-    root.showStatus("Saving before closing…")
     // Last, once the flush and the state write are under way: the close
     // finishes the moment they settle, which may be now.
     root.closing = true
@@ -373,27 +372,8 @@ Item {
     if (!root.closing || !root.writesSettled || lifecycle.busy) {
       return
     }
-    var failure = session.failureFor(root.providers.map(function(provider) {
-      return provider.id
-    })) || root.closeError
-    if (failure || session.dirty) {
-      root.closing = false
-      root.open("{}")
-      root.closeWarning = failure || "The note still has unsaved changes"
-      return
-    }
     root.closing = false
     root.readyToClose()
-  }
-
-  function closeAnyway() {
-    root.closeWarning = ""
-    root.readyToClose()
-  }
-
-  function cancelClose() {
-    root.closeWarning = ""
-    editor.focusEditor()
   }
 
   function dismiss() {
@@ -884,7 +864,8 @@ Item {
   function retireProvider(provider) {
     root.cancelQueuedFor(provider)
     // Its writes die with it, so their callbacks never come: a group left
-    // pending would stay locked for good.
+    // pending would never settle, and its order would stay projected over
+    // the rows of the provider that takes its place.
     Object.keys(root.pendingReorders).forEach(function(key) {
       if (root.pendingReorders[key].provider === provider) {
         root.setPendingReorder(key, null)
@@ -931,10 +912,13 @@ Item {
   // A drag's result, handed to the group's provider to persist. Until it
   // answers, the order is a pending projection over the provider's rows
   // (projectReorders), and every publication of it goes through
-  // rebuildRows, which is what keeps the list's scroll position.
+  // rebuildRows, which is what keeps the list's scroll position. A drag
+  // while an order is still saving is taken the same way: its order is the
+  // one on screen from then on, and the provider is handed it as well,
+  // to save after the other.
   function reorderItems(group, ids) {
     var provider = group ? root.providerById(group.provider) : null
-    if (!provider || root.filterText || root.closing || root.pendingReorders[Ordering.key(group)]) {
+    if (!provider || root.filterText || root.closing) {
       return
     }
     if (!Ordering.apply(root.rows, group, ids) || JSON.stringify(Ordering.ids(root.rows, group)) === JSON.stringify(ids)) {
@@ -956,6 +940,8 @@ Item {
       finished = true
       // Retiring the provider settles its requests (retireProvider), and a
       // newer request may hold the group by now: neither is this one's.
+      // The newer order is the one that is saved last, so its answer, not
+      // this one's, says how the group ends — a failure here included.
       if (root.pendingReorders[key] !== request) {
         return
       }
@@ -2177,9 +2163,6 @@ Item {
     if (root.rowActionPending) {
       return rowActionConfirm.handleKey(event)
     }
-    if (root.closeWarning) {
-      return closeConfirm.handleKey(event)
-    }
     // The name field has the keys it uses; no shortcut runs under it.
     if (root.promptPending) {
       return false
@@ -2526,10 +2509,6 @@ Item {
   Files.FileStore {
     id: files
     onFailed: function(message) {
-      if (root.closing) {
-        root.closeError = message
-      }
-
       root.reportSave(message)
     }
   }
@@ -2585,7 +2564,6 @@ Item {
     id: workspaceActions
     host: root
     blocked: session.locked || lifecycle.busy || root.deleteConfirmOpen || root.rowActionPending !== null
-      || root.closeWarning !== ""
       || root.promptPending !== null || editor.tools.panelOpen
   }
 
@@ -2748,7 +2726,6 @@ Item {
           currentPath: root.currentPath
           treeCursor: root.treeCursor
           filtering: root.filterText.length > 0
-          pendingReorders: root.pendingReorders
           searchBusy: root.searchBusy
           searchStatus: root.revision >= 0 ? root.activeSearchStatus() : ""
           sections: root.tabs
@@ -3075,24 +3052,6 @@ Item {
       cornerRadius: Style.cornerRadius
       onCanceled: root.cancelRowAction()
       onConfirmed: root.confirmRowAction()
-    }
-
-    ConfirmDialog {
-      id: closeConfirm
-      anchors.fill: parent
-      opened: root.closeWarning !== ""
-      z: 10
-      message: root.closeWarning + "\n\nClosing now loses these changes."
-      confirmText: "Close anyway"
-      background: root.background
-      foreground: root.foreground
-      scrim: root.scrim
-      selectedBackground: root.selectedBackground
-      selectedText: root.selectedText
-      fontFamily: root.interfaceFont
-      cornerRadius: Style.cornerRadius
-      onCanceled: root.cancelClose()
-      onConfirmed: root.closeAnyway()
     }
 
     PromptDialog {

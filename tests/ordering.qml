@@ -60,7 +60,6 @@ Window {
     }
 
     function publish(rows) {
-      list.pendingReorders = ({})
       list.filtering = false
       list.model = Sidebar.build([{ id: "custom", canReorder: false,
         sections: [{ key: "tab", rows: rows }] }], "custom/tab", "", {}).rows
@@ -209,13 +208,6 @@ Window {
       drag("a", "c")
       check(window.commits === 1 && paths(list.visualRows()) === "section-a,a,b,section-b,c,d",
             "dropping on another group cannot move a note between sections")
-
-      list.pendingReorders = ({})
-      var pending = ({})
-      pending[Ordering.key(list.model[1].reorder)] = true
-      list.pendingReorders = pending
-      drag("a", "b")
-      check(window.commits === 1, "a pending group refuses another drag")
 
       publish([item("tree", "first", 0, "sections", true), item("note", "child-a", 1, "first"),
                item("note", "child-b", 1, "first"), item("tree", "second", 0, "sections", true),

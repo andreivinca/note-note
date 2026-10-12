@@ -175,8 +175,14 @@ unique permutation (`isPermutation(current, ids)` in
 `services/notes/ordering.js`) and current remote membership before writing; update the
 provider's canonical rows before reporting success. Accepted mutations belong
 in the write queue and contribute to `writeBusy`, including while queued.
-The UI projects the pending order across refreshes, disables another drag in
-that group, and returns to canonical rows with a status message on failure.
+The UI projects the pending order across refreshes and returns to canonical
+rows with a status message on failure. A drag while a group's order is
+saving is allowed: it calls `reorder` again with the whole new order, which
+is shown from then on, and only the newest call's answer settles the group
+or is reported. Give a group's writes one queue key, so they run in turn,
+and have each read the provider's state when it starts rather than when it
+was asked for: the write before it may have changed it. With mode `replace`,
+a newer order replaces a write not yet started, whose callback answers `{}`.
 Drags never reorder search results. Escape cancels; viewport edges scroll.
 
 For compatibility, `canReorder: true` and a note row with neither `reorder`

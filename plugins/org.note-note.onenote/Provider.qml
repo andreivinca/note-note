@@ -86,7 +86,7 @@ LaneProvider {
   property var pendingDeletes: ({}) // page id -> hidden row and its original order
   property var creatingSections: ({}) // stand-in id -> section listed before OneNote has made it
   property var deletingSections: ({}) // section id -> true while its delete runs, the section hidden
-  property var pageOrderWrites: ({})
+  property var pageOrderWrites: ({}) // section id -> the newest order asked for it, until its write answers
   property var pageOrderRecovery: ({})
   property int nextDraft: 0
   property var expanded: []      // notebook/section ids the user opened
@@ -196,6 +196,16 @@ LaneProvider {
   function sectionPages(sectionId) {
     return root.pages.filter(function(page) {
       return page.sectionId === sectionId
+    })
+  }
+
+  // What a section's page order arranges: its parent pages, each carrying
+  // its subpages.
+  function parentPageIds(sectionId) {
+    return root.sectionPages(sectionId).filter(function(page) {
+      return page.level === 0
+    }).map(function(page) {
+      return page.id
     })
   }
 
@@ -731,42 +741,56 @@ LaneProvider {
     return root.runProcess(searchRunner, args, payload, callback)
   }
 
+  // A drop is taken however soon it follows the last: a section's order
+  // writes run one at a time, and a newer order replaces one still waiting,
+  // since it holds all of it. A write is checked against the order known
+  // when it starts, the one the write before it left. Only the newest
+  // order's failure re-reads the section: an older write's leaves it to
+  // the newer one, whose own check finds what OneNote holds.
   function reorder(scope, paths, callback) {
     var sectionId = scope.indexOf("pages:") === 0 ? scope.substring(6) : ""
     var section = root.sectionAt(sectionId)
-    if (!section || !root.rq || !root.pageOrderingAvailable(section) || root.pageOrderWrites[sectionId]) {
+    if (!section || !root.rq || !root.pageOrderingAvailable(section)) {
       callback({ error: "The complete section and page ordering permission must be available before reordering" })
       return
     }
-    var expected = root.sectionPages(sectionId).filter(function(page) {
-      return page.level === 0
-    }).map(function(page) {
-      return page.id
-    })
     var wanted = paths.map(function(path) {
       return root.idOf(path)
     })
-    if (!Ordering.isPermutation(expected, wanted)) {
+    if (!Ordering.isPermutation(root.parentPageIds(sectionId), wanted)) {
       callback({ error: "The pages changed — try reordering again" })
       return
     }
-    root.pageOrderWrites = root.withEntry(root.pageOrderWrites, sectionId, true)
-    return root.rq.enqueue({ key: "page-order:" + sectionId, mode: "append", priority: 0,
+    root.pageOrderWrites = root.withEntry(root.pageOrderWrites, sectionId, wanted)
+    return root.rq.enqueue({ key: "page-order:" + sectionId, mode: "replace", priority: 0,
                              owner: root, flush: true, label: "page order" },
       function(ctx) {
+        var expected = root.parentPageIds(sectionId)
+        if (!Ordering.isPermutation(expected, wanted)) {
+          ctx.done({ error: "The pages changed — try reordering again" })
+          return
+        }
         root.runScript(["reorder-pages", "-"], JSON.stringify({ sectionId: sectionId,
                        expected: expected, order: wanted }), ctx)
       },
-      function(result) {
-        root.pageOrderWrites = root.withoutEntry(root.pageOrderWrites, sectionId)
+      function(result, info) {
+        if (!result && info.superseded) {
+          // The newer order holds all of this one and answers for it.
+          callback({})
+          return
+        }
+        var newest = root.pageOrderWrites[sectionId] === wanted
+        if (newest) {
+          root.pageOrderWrites = root.withoutEntry(root.pageOrderWrites, sectionId)
+        }
         var answer = result || { error: "The order was not saved — the request was cancelled" }
-        if (answer.error) {
+        if (!answer.error) {
+          root.applyInventory(answer)
+        } else if (newest) {
           // The response might have been lost after a successful revision.
           // Refresh canonical Graph order rather than retrying the write.
           root.pageOrderRecovery = root.withEntry(root.pageOrderRecovery, sectionId, true)
           pageInventory.request(sectionId, true, true)
-        } else {
-          root.applyInventory(answer)
         }
         root.rebuild()
         callback(answer)

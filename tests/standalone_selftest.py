@@ -91,6 +91,51 @@ QtObject {
                 first.communicate()
 
 
+def check_launch_while_leaving(launcher, work, env):
+    """A launch while the running instance is on its way out is not shown
+    there: it waits for that instance to exit, then runs on its own."""
+    resources = work / "leaving-resources"
+    host = resources / "hosts/standalone"
+    host.mkdir(parents=True)
+    (resources / "Workspace.qml").write_text("// Resource directory marker for this launcher test.\n")
+    (host / "Main.qml").write_text('''import QtQuick
+import NoteNote.Native
+QtObject {
+  property var connection: Connections {
+    target: Desktop
+    function onActivationRequested() {
+      console.error("<<<ACTIVATED>>>")
+    }
+  }
+  // Leaves at once, as a workspace whose writes have settled does, and
+  // lingers a moment before its process exits.
+  property var linger: Timer {
+    interval: 1500
+    running: true
+    onTriggered: Qt.quit()
+  }
+  Component.onCompleted: {
+    Desktop.leave()
+    console.error("<<<READY>>>")
+  }
+}
+''')
+    command = [*launcher, "--data-dir", str(resources)]
+    with subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as first:
+        try:
+            wait_for_marker(first.stderr, "<<<READY>>>")
+            second = subprocess.run(command, env=env, capture_output=True, text=True, timeout=20)
+            output, errors = first.communicate(timeout=5)
+            if second.returncode or first.returncode or "<<<ACTIVATED>>>" in errors \
+                    or "<<<READY>>>" not in second.stderr:
+                raise RuntimeError("a launch while the instance was leaving did not run on its own: "
+                                   + output + errors + second.stderr)
+        finally:
+            if first.poll() is None:
+                first.kill()
+                first.communicate()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", nargs="?", type=Path, default=ROOT / "build/note-note")
@@ -156,8 +201,9 @@ def main():
         if failed or diagnostics:
             print(output)
             return 1
-        if "kept after failure" not in note.read_text():
-            print("FAIL: the final close did not commit the draft")
+        text = note.read_text()
+        if "appended" not in text or "lost on close" in text:
+            print("FAIL: a close must keep what was saved and let go of a write that failed")
             return 1
         state = work / "state/notenote/note-note.json"
         if not state.is_file() or state.stat().st_mode & 0o077:
@@ -220,10 +266,12 @@ def main():
                 print("FAIL: provider disposal overwrote the saved session")
                 return 1
             check_activation([str(binary)], work, env)
+            check_launch_while_leaving([str(binary)], work, env)
         except (OSError, subprocess.SubprocessError, RuntimeError) as error:
             print("FAIL: window close or instance activation:", error)
             return 1
-        print("PASS: native process, clipboard, workspace, external provider, launcher, activation and shutdown checks")
+        print("PASS: native process, clipboard, workspace, external provider, launcher, activation,"
+              " a launch while leaving, and shutdown checks")
         return 0
 
 

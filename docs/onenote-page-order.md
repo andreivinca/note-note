@@ -82,17 +82,21 @@ latest section revision. It follows that revision's ancestry, resolves only
 live page-series references, and joins page metadata GUIDs to Graph's public
 OneNote client links. Older sections list one page's metadata more than once;
 each page cell joins the next distinct page. It requires complete membership, matching hierarchy and
-the starting order the UI saw. A fresh `BaseId`/`ExpectedLatestId` guards
+the order the provider holds when the write starts. A fresh `BaseId`/`ExpectedLatestId` guards
 concurrent changes. Only the section root's page-series sequence is submitted.
 The service is read back, then native Graph order is confirmed before the
 canonical cache and provider rows are published. Graph trails the service by
 seconds, so it is listed at most three times, after 1, 2 and 4 seconds.
 
 The UI keeps a pending drag visible across refreshes while saving the order
-in the background. Another drag in that group waits for completion. Failures
-restore canonical rows and trigger a section refresh, including when the
-server might have committed but its response was lost. No timeout or 5xx can
-replay the revision automatically. Explicit rejected key challenges may retry.
+in the background, and the section can be dragged again at once. The
+provider writes a section's orders one at a time: a newer order replaces one
+still waiting, and each write starts from the order the one before it left.
+The newest order's failure restores canonical rows and triggers a section
+refresh, including when the server might have committed but its response
+was lost. An older write's failure leaves that to the newer write, whose own
+check finds what OneNote holds. No timeout or 5xx can replay the revision
+automatically. Explicit rejected key challenges may retry.
 
 ## Verification on 2026-10-06
 

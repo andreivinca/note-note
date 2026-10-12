@@ -979,8 +979,8 @@ restored after it was stale whenever a load or a save conflict finished in
 between, and left an editable note read-only, or a note under review
 writable. The conflict review is the session's own and stands in the editor
 apart from notices and provider views. The workspace clears those whenever it
-opens, also when a close stops over a conflicted draft to ask; clearing the
-review with them left its note read-only with no way to answer it.
+opens; clearing the review with them left its note read-only with no way to
+answer it.
 
 Notion text is split into bounded rich-text entries, then recombined by style
 when read back. Outgoing requests are validated before the first mutation;
@@ -1014,3 +1014,27 @@ for a moment after its folder changes. External tools import `Tool` from
 `NoteNote.Extensions`; the calendar, like the built-in providers, uses relative
 imports, so it keeps working in Omarchy without the native helper that module
 needs there. See [editing tools](editing-tools.md#tools-in-a-package).
+
+## 2026-10-12: a close is final
+
+The standalone window used to stay up, saying "Saving before closing…", until
+every accepted write had answered, and a failed one brought a question over
+it: close anyway, or keep the window. A OneNote page order takes seconds to
+confirm, so a close looked stuck, and a second close was ignored.
+
+*Considered:* handing the writes still out to a separate background process.
+The writes are the providers': their lanes, their callbacks and the state an
+answer updates. That process would have to run the providers, which is the
+application itself without its window, and every queued write would need a
+way across to it.
+
+*Chosen:* the application's own process is the background process. A close
+puts the window away at once, as the Omarchy host's windows follow `opened`,
+stops watchers and new reads, and the process exits once every accepted write
+has answered, whatever it answered: a write that fails meanwhile is let go
+without a word, and the window does not come back for it. Another launch
+meanwhile is someone wanting the window, so the running process shows it
+again and the close ends. Once the process has decided to exit, a launch is
+not shown there: the activation socket answers only when it showed the
+window, so a launch it did not answer waits for the process to go and starts
+on its own.

@@ -63,8 +63,6 @@ ShellRoot {
           && source.sections[0].rows[0].path === "ordering:a")
     app.rebuildRows()
     check("inventory refresh preserves an in-flight order", app.rows[0].path === "ordering:b")
-    app.reorderItems(group, ["a", "b"])
-    check("host admits only one pending write per group", calls.length === 1)
     complete({ error: "write failed" })
     check("failed reorder returns to canonical rows and reports the error", app.rows[0].path === "ordering:a"
           && Object.keys(app.pendingReorders).length === 0 && app.statusText.indexOf("write failed") >= 0)
@@ -72,10 +70,28 @@ ShellRoot {
     check("reorder callback settles once", app.rows[0].path === "ordering:a")
     app.reorderItems(group, ["b", "b"])
     check("host rejects duplicate and partial order requests", calls.length === 1)
+    // A drag while an order is saving: its order is sent as well and holds
+    // the group, which only its own answer settles.
     app.reorderItems(group, ["b", "a"])
+    var older = complete
+    app.reorderItems(group, ["a", "b"])
+    check("a drag while an order is saving sends the newer order as well", calls.length === 3
+          && calls[2].ids.join(",") === "a,b" && app.rows[0].path === "ordering:a")
+    older({ error: "older write failed" })
+    check("an older order's failure neither settles the group nor is reported",
+          Object.keys(app.pendingReorders).length === 1 && app.statusText.indexOf("older write failed") < 0)
+    complete({})
+    app.reorderItems(group, ["b", "a"])
+    older = complete
+    app.reorderItems(group, ["a", "b"])
+    source.sections[0].rows.reverse()
+    older({})
+    app.rebuildRows()
+    check("an older order's success leaves the newer order on screen", app.rows[0].path === "ordering:a"
+          && Object.keys(app.pendingReorders).length === 1)
     source.sections[0].rows.reverse()
     complete({})
-    check("successful reorder publishes provider canonical order", app.rows[0].path === "ordering:b"
+    check("successful reorder publishes provider canonical order", app.rows[0].path === "ordering:a"
           && Object.keys(app.pendingReorders).length === 0)
     var legacyCalls = []
     var legacy = { id: "legacy", name: "Legacy", canReorder: true, sections: [{ key: "notes", rows: [
@@ -109,11 +125,12 @@ ShellRoot {
     app.rebuildRows()
   }
   // Review finding #13 through the workspace itself: hiding it and
-  // summoning it again, and a close it refuses for the conflicted draft,
-  // clear the notices — and leave the session's review over its note. It
-  // starts once the workspace has loaded its providers (hostConflict, below)
-  // and follows the close as it settles, never waiting in a nested event
-  // loop, which is no place to quit from (report).
+  // summoning it again, and a close over the conflicted draft, clear the
+  // notices — and leave the session's review over its note. The close does
+  // not stop for the draft: it goes, and the workspace stays away. It starts
+  // once the workspace has loaded its providers (hostConflict, below) and
+  // follows the close as it settles, never waiting in a nested event loop,
+  // which is no place to quit from (report).
   function hostConflictCases() {
     var app = test.appHost
     var saves = []
@@ -138,25 +155,14 @@ ShellRoot {
     app.dismiss()
     app.open("{}")
     check("hiding and summoning the workspace leaves the review and the read-only note", reviewed(), app.debugState())
-    var refused = function() {
-      if (app.closing) {
-        return
-      }
-      app.closingChanged.disconnect(refused)
-      // Once the refusal has reopened the workspace.
+    var closed = function() {
+      app.readyToClose.disconnect(closed)
+      // Once the close has settled.
       Qt.callLater(function() {
-        check("a close stopped for the conflicted draft leaves the review over the note", app.opened && reviewed(),
-              app.debugState())
-        check("the stopped close asks whether to close anyway and lose the changes",
-              app.closeWarning.indexOf("A note has unsaved changes") === 0, app.closeWarning)
-        var quits = 0
-        var quit = function() {
-          quits++
-        }
-        app.readyToClose.connect(quit)
-        app.closeAnyway()
-        app.readyToClose.disconnect(quit)
-        check("closing anyway closes", quits === 1 && app.closeWarning === "")
+        check("a close goes over the conflicted draft without asking, and the workspace stays away",
+              !app.opened && !app.closing, app.debugState())
+        app.open("{}")
+        check("opening the workspace again finds the review over the note", reviewed(), app.debugState())
         app.selectPath("conflicted:b")
         check("another note opens editable, out from under the review", !state().conflict && !state().readOnly)
         app.selectPath("conflicted:a")
@@ -166,10 +172,10 @@ ShellRoot {
         check("deleting the conflicted note puts its review away", !state().conflict && app.currentPath === "")
         app.providers = []
         test.hostRowActionCases()
-        test.processes--
+        test.hostCloseCases()
       })
     }
-    app.closingChanged.connect(refused)
+    app.readyToClose.connect(closed)
     app.requestClose()
   }
   // A row's action through the workspace: a rename asks for the new name in
@@ -226,6 +232,63 @@ ShellRoot {
     check("and the workspace is free for the next action", actions.length === 1)
     actions.shift().callback({})
     app.providers = []
+  }
+  // A close puts the workspace away at once and waits for the writes still
+  // out: opening it again meanwhile ends the close, and a write that fails
+  // does not stop it. Follows the row action cases, and lets the run report
+  // once it is done.
+  function hostCloseCases() {
+    var app = test.appHost
+    var closer = closingProviderFactory.createObject(test)
+    var quits = 0
+    var quit = function() {
+      quits++
+    }
+    // The second close: the order it waits for fails, and it goes anyway.
+    var closed = function() {
+      app.readyToClose.disconnect(closed)
+      // Once the close has settled.
+      Qt.callLater(function() {
+        check("an order that fails while closing does not stop it: the process goes, the workspace stays away",
+              quits === 1 && !app.opened && !app.closing, app.debugState())
+        app.readyToClose.disconnect(quit)
+        app.providers = []
+        closer.destroy()
+        test.processes--
+      })
+    }
+    // The first close, ended by opening the workspace: once its writes have
+    // answered, which would have finished it, the process is still wanted.
+    var settled = function() {
+      if (!app.writesSettled) {
+        return
+      }
+      app.writesSettledChanged.disconnect(settled)
+      Qt.callLater(function() {
+        check("a close that was ended does not let the process go once its writes settle", quits === 0 && app.opened)
+        app.readyToClose.connect(closed)
+        app.reorderItems(group, ["b", "a"])
+        app.requestClose()
+        closer.settle({ error: "the order was lost" })
+        closer.writeBusy = false
+      })
+    }
+    app.readyToClose.connect(quit)
+    app.providers = [closer]
+    app.open("{}")
+    app.activeSection = "closer/s"
+    app.filterText = ""
+    app.rebuildRows()
+    var group = app.rows[0].reorder
+    app.reorderItems(group, ["b", "a"])
+    app.requestClose()
+    check("a close puts the workspace away at once while an order is still being written",
+          app.closing && !app.opened && quits === 0)
+    app.open("{}")
+    check("opening the workspace again ends the close", app.opened && !app.closing)
+    app.writesSettledChanged.connect(settled)
+    closer.writeBusy = false
+    closer.settle({})
   }
   function hostSearchCases() {
     var app = test.appHost
@@ -1349,6 +1412,38 @@ ShellRoot {
     }
     function cancelOwner(owner) {}
   }
+  // A provider whose order is written only when the test answers it.
+  Component {
+    id: closingProviderFactory
+    QtObject {
+      property string id: "closer"
+      property string name: "Closer"
+      property bool writeBusy: false
+      property var settle: null
+      property var sections: [{ key: "s", name: "Notes", rows: [
+        { kind: "note", path: "closer:a", title: "A", reorder: { scope: "group", id: "a" } },
+        { kind: "note", path: "closer:b", title: "B", reorder: { scope: "group", id: "b" } }] }]
+      function reorder(scope, ids, callback) {
+        writeBusy = true
+        settle = callback
+      }
+      function refresh() {}
+      function saveState() {
+        return {}
+      }
+    }
+  }
+  // A lane that keeps what it is handed, for a test to start and answer in
+  // its own order.
+  QtObject {
+    id: orderLane
+    property var jobs: []
+    function enqueue(options, start, settled) {
+      orderLane.jobs.push({ options: options, start: start, settled: settled })
+      return { cancel: function() {}, promote: function() {} }
+    }
+    function cancelOwner(owner) {}
+  }
   Component { id: oneNoteFactory; OneNote.Provider {} }
   Component {
     id: creatingOneNoteFactory
@@ -1593,6 +1688,69 @@ ShellRoot {
     check("notebooks OneDrive gave a GUID ID are personal and expose reorder capabilities",
           orderingSource.pageOrderingNotebook(guidBook) && !orderingSource.pageOrderingNotebook(guidBook.slice(0, -1)))
     orderingSource.destroy()
+    // A drop is taken however soon it follows the last: a section's writes
+    // run one at a time, a newer order replaces one still waiting, and each
+    // is checked against the order the write before it left.
+    var writer = creatingOneNoteFactory.createObject(test, { ms: oneNoteAccount })
+    writer.rq = orderLane
+    writer.onNotebooks = [{ id: orderingBook, name: "Book", userRole: "Owner" }]
+    writer.onSections = [{ id: orderingSection, name: "Section", notebookId: orderingBook }]
+    var parents = function(ids) {
+      return ids.map(function(id) {
+        return { id: id, sectionId: orderingSection, title: id.toUpperCase(), clientId: id, level: 0 }
+      })
+    }
+    writer.pages = parents(["a", "b", "c"])
+    orderLane.jobs = []
+    var answers = []
+    var drop = function(name, ids) {
+      writer.reorder("pages:" + orderingSection, ids.map(function(id) {
+        return writer.pathOf(id)
+      }), function(result) {
+        answers.push(name + ":" + (result.error || "saved"))
+      })
+    }
+    var run = function(job) {
+      job.start({ done: function(result) {
+        job.settled(result, { superseded: false, cancelled: false })
+      } })
+    }
+    drop("first", ["b", "a", "c"])
+    var first = orderLane.jobs.shift()
+    run(first)
+    var written = JSON.parse(writer.commands[0].payload)
+    check("a OneNote page order is a write keyed to its section, which a newer order can replace",
+          first.options.key === "page-order:" + orderingSection && first.options.mode === "replace"
+          && first.options.flush === true)
+    check("a page order write is checked against the order OneNote is known to hold",
+          written.expected.join(",") === "a,b,c" && written.order.join(",") === "b,a,c")
+    drop("second", ["c", "b", "a"])
+    check("a drop while the section's order is saving is taken, not refused",
+          answers.length === 0 && orderLane.jobs.length === 1)
+    drop("third", ["c", "a", "b"])
+    orderLane.jobs.shift().settled(null, { superseded: true, cancelled: false })
+    check("an order replaced while it waited answers as saved: the newer one holds all of it",
+          answers.join(",") === "second:saved")
+    writer.commands[0].context.done({ sections: writer.onSections, pages: parents(["b", "a", "c"]),
+                                      pendingSections: [], pageListSerial: 1 })
+    run(orderLane.jobs.shift())
+    written = JSON.parse(writer.commands[1].payload)
+    check("a queued page order write is checked against the order the write before it left",
+          answers.join(",") === "second:saved,first:saved"
+          && written.expected.join(",") === "b,a,c" && written.order.join(",") === "c,a,b")
+    drop("fourth", ["a", "c", "b"])
+    writer.commands[1].context.done({ error: "the answer was lost" })
+    check("an older write's failure leaves the section to the newer write behind it",
+          answers[answers.length - 1] === "third:the answer was lost" && !writer.pageOrderRecovery[orderingSection]
+          && writer.pageOrderingAvailable(writer.onSections[0]))
+    writer.pages = parents(["b", "a", "c", "d"])
+    run(orderLane.jobs.shift())
+    check("a write whose pages changed while it waited is refused, and the newest one's failure re-reads the section",
+          writer.commands.length === 2 && answers[answers.length - 1] === "fourth:The pages changed — try reordering again"
+          && writer.pageOrderRecovery[orderingSection]
+          && orderLane.jobs.some(function(job) { return job.options.key === "pages:" + orderingSection }))
+    orderLane.jobs = []
+    writer.destroy()
     var creations = []
     var creationHost = {
       currentPath: "local:/notes/Other/note.md", treeCursor: "",

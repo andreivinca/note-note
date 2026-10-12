@@ -37,6 +37,20 @@ void describeApplication()
     QCoreApplication::setApplicationVersion(QStringLiteral(NOTE_NOTE_VERSION));
 }
 
+namespace {
+
+// Asks the instance already running to show its window, and says whether it
+// did: it answers once it has, and one on its way out answers nothing.
+bool activateRunningInstance(const QString &path)
+{
+    QLocalSocket client;
+    client.connectToServer(path);
+    return client.waitForConnected(2000) && client.waitForReadyRead(2000)
+        && client.read(1) == QByteArrayLiteral("1");
+}
+
+}
+
 int runNoteNote(QGuiApplication &app, const Launch &launch)
 {
     QGuiApplication::setDesktopFileName(QStringLiteral("io.github.andreivinca.note-note"));
@@ -54,13 +68,16 @@ int runNoteNote(QGuiApplication &app, const Launch &launch)
     QLockFile instanceLock(instancePath + QStringLiteral(".lock"));
     if (launch.singleInstance) {
         if (!instanceLock.tryLock()) {
-            QLocalSocket client;
-            client.connectToServer(instancePath);
-            if (!client.waitForConnected(2000)) {
+            // Another instance runs, and shows its window. One on its way out
+            // does not: this launch waits for it to exit, and the lock with
+            // it, and then runs itself.
+            if (activateRunningInstance(instancePath)) {
+                return 0;
+            }
+            if (!instanceLock.tryLock(10000)) {
                 qCritical("The running Note Note instance could not be reached.");
                 return 1;
             }
-            return 0;
         }
         QLocalServer::removeServer(instancePath);
         server.setSocketOptions(QLocalServer::UserAccessOption);
@@ -71,10 +88,14 @@ int runNoteNote(QGuiApplication &app, const Launch &launch)
         QObject::connect(&server, &QLocalServer::newConnection, &runtime, [&server, &runtime]() {
             while (server.hasPendingConnections()) {
                 QLocalSocket *connection = server.nextPendingConnection();
+                // The answer the launch waits for: its window is shown.
+                if (runtime.activate()) {
+                    connection->write("1");
+                    connection->flush();
+                }
                 connection->disconnectFromServer();
                 connection->deleteLater();
             }
-            runtime.activate();
         });
     }
 
@@ -91,6 +112,9 @@ int runNoteNote(QGuiApplication &app, const Launch &launch)
     }, Qt::QueuedConnection);
     engine.load(QUrl::fromLocalFile(QFileInfo(launch.entry).absoluteFilePath()));
     const int result = app.exec();
+    // A launch from here on finds no socket and waits for the lock, which
+    // goes with this process.
+    server.close();
     qDeleteAll(engine.rootObjects());
     // Only cancelled transports are reparented to the application. Reap any
     // final acknowledgements after the UI event loop has already stopped.

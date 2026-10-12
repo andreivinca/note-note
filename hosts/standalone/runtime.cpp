@@ -73,7 +73,16 @@ QVariantMap DesktopRuntime::clipboard(const QString &format) const
         {QStringLiteral("data"), QString::fromLatin1(bytes.toBase64())}};
 }
 
-void DesktopRuntime::activate()
+void DesktopRuntime::leave()
 {
+    m_leaving = true;
+}
+
+bool DesktopRuntime::activate()
+{
+    if (m_leaving) {
+        return false;
+    }
     emit activationRequested();
+    return true;
 }

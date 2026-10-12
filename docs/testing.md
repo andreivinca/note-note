@@ -26,9 +26,13 @@ Qt Quick Controls both receive the detected palette.
 
 The suite also checks native clipboard MIME/text/image handling, process stdin,
 Unicode, cancellation and limits, the production launcher, a portable
-external provider, local saves and shutdown after a failed write. It also
-checks that a slow OneNote read cannot hold the window open after an accepted
-write completes, using synthetic processes without an account. Run
+external provider, local saves and a close that goes although a write
+failed. It also checks that a close puts the window away at once, that
+another launch while its write is still out brings the window back and ends
+the close, and that the process exits once an accepted write completes while
+a slow OneNote read still runs, using synthetic processes without an
+account. A launch while the running instance is leaving waits for it to exit
+and starts on its own. Run
 `python3 tests/standalone_selftest.py --host` to send the close through
 Hyprland's actual window-close dispatcher on Wayland.
 
@@ -52,15 +56,16 @@ exact joins to OneNote's elements, refusals, the page cell join and one
 conditional revision.
 
 The QML fixture sends actual pointer drags through the shared sidebar,
-including future tree/subtree groups, scope boundaries, pending writes,
+including future tree/subtree groups, scope boundaries,
 Escape cancellation and edge scrolling. It then lists a notes tree it builds
 through the local provider, with notebooks named `constructor`, `toString`
 and `__proto__`: their saved orders are read, rewritten and read back, and an
 unreadable one is reported by name — such names once found the properties
 every JavaScript object has, and a `.order` in one left the sidebar empty.
 The transition suite checks
-optimistic projection, refreshes, callbacks, rollback, legacy compatibility
-and OneNote's permission/hierarchy declarations. The Python suite checks
+optimistic projection, refreshes, callbacks, drags while an order is saving,
+rollback, legacy compatibility, OneNote's permission/hierarchy declarations
+and its queued page order writes. The Python suite checks
 native Graph metadata, public identity joins, revision ancestry, conditional
 writes, subpage preservation and credential boundaries. These tests use no
 real tokens. The separate live app-credential round trip and its limitations
@@ -303,7 +308,8 @@ Conflict-panel checks use the real editor loader and click every action,
 including replacing an already-open conflict with fresh data. The review
 outlasts the notices cleared over it, keeping its choices, and reopens with
 its note. Through the whole workspace, in the native harness, it survives
-hiding and summoning the window and a close refused for the conflicted draft.
+hiding and summoning the window and a close that goes over the conflicted
+draft without asking.
 Pointer events check link previews in the view bar, directly opening editable
 and read-only links, selecting link text without opening it, and clearing the
 preview when the pointer leaves or the note changes. These checks capture

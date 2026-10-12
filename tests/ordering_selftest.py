@@ -49,7 +49,7 @@ def main():
         if result.returncode or "<<<ORDERING_DONE>>>" not in output or any(error in output for error in errors):
             print(output[-12000:])
             return 1
-        print("PASS provider-defined groups, subtree drags, pending writes, filtered results"
+        print("PASS provider-defined groups, subtree drags, filtered results"
               " and local orders under any notebook name")
     return 0
 

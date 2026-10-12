@@ -46,7 +46,9 @@ community marketplace at <https://omarchyplugins.com>.
 ## Non-goals
 
 - **Not an offline sync engine.** A save the app accepts finishes or fails
-  out loud, even if the window closes meanwhile. OneNote fetches the current
+  out loud, even if the window is hidden meanwhile. Closing the app is final:
+  saves under way finish in the background before it exits, and one that
+  fails then is lost without a word. OneNote fetches the current
   page before saving and uses the shared Python three-way merge library.
   Overlapping edits pause saving for review, and its staged drafts survive
   restarting the shell. Other providers can opt into the same library.

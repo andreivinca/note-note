@@ -25,7 +25,6 @@ Item {
   // the main list goes empty — not merely invisible, or every match would be
   // built twice, once with drag areas and buttons nobody can see.
   property var model: []
-  property var pendingReorders: ({})
   property var dragSlot: null
   property bool movingDrag: false
   onModelChanged: root.cancelDrag()
@@ -380,7 +379,6 @@ Item {
             readonly property int indent: (modelData.level || 0)
               * (Style.font.icon + Style.space(2) + Style.spacing.md - Style.spacing.sm)
             readonly property bool draggable: !!modelData.reorder
-              && !root.pendingReorders[Ordering.key(modelData.reorder)]
             readonly property real itemHeight: isNote ? root.rowHeight : Style.spacing.controlHeight + root.rowGap
             // Where this row sits on screen while a drag shuffles the order.
             readonly property int visualIndex: slot.DelegateModel.itemsIndex

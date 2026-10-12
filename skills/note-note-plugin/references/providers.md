@@ -297,13 +297,18 @@ descendants: true }` on each reorderable row and implement
 regardless of row kind or notebook-tab presentation. `descendants` carries
 following rows with greater `level` as a block; omit it for individual rows.
 Set `reorder: null` when the inventory or permission does not allow ordering.
-The host requires a complete unique permutation, preserves other groups,
-projects pending order across refreshes, and disables another drag in that
-group. Escape cancels and viewport edges scroll. Search results are fixed.
+The host requires a complete unique permutation, preserves other groups and
+projects pending order across refreshes. A drag while an order is saving
+calls `reorder` again with the whole new order; only the newest call's
+answer settles the group or is reported. Escape cancels and viewport edges
+scroll. Search results are fixed.
 Validate current backend membership before writing (`isPermutation(current,
 ids)` from `services/notes/ordering.js`), commit canonical rows, then call
-back exactly once with `{}` or `{ error }`. Track queued writes in
-`writeBusy`. Future tree/section ordering uses the same UI and hook.
+back exactly once with `{}` or `{ error }`. Write a group's orders in turn
+under one queue key, each reading the provider's state when it starts,
+which the write before it may have changed; with mode `replace`, a newer
+order replaces one not yet started, which answers `{}`. Track queued writes
+in `writeBusy`. Future tree/section ordering uses the same UI and hook.
 Legacy `canReorder` and `setOrder()` remain compatible but lack save callbacks;
 an explicit `reorder`, `null` included, overrides them.
 

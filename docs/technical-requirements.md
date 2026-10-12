@@ -140,7 +140,8 @@ shared temp directory (see [security.md](security.md)).
 
 - Ordinary reads, polls and watchers pause while hidden; accepted writes
   and OneNote content indexing can continue in the shell. Native shutdown
-  stops indexing and waits for accepted writes before exiting.
+  puts the window away at once, stops indexing and waits for accepted writes
+  to answer before exiting.
 - Local changes are detected by **one** `inotifywait` process, started on
   open and killed on close (~4 MB RSS, idle at 0 % CPU), debounced 400 ms, and
   ignoring our own writes.

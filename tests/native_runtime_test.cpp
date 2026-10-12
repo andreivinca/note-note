@@ -12,6 +12,22 @@ class NativeRuntimeTest : public QObject
     Q_OBJECT
 
 private slots:
+    // Another launch is shown the window until the application leaves; from
+    // then on it is told nothing was shown, and runs on its own.
+    void activation()
+    {
+        DesktopRuntime runtime;
+        int shown = 0;
+        QObject::connect(&runtime, &DesktopRuntime::activationRequested, &runtime, [&shown]() {
+            shown++;
+        });
+        QVERIFY(runtime.activate());
+        QCOMPARE(shown, 1);
+        runtime.leave();
+        QVERIFY(!runtime.activate());
+        QCOMPARE(shown, 1);
+    }
+
     void textAndHtml()
     {
         DesktopRuntime runtime;
