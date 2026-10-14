@@ -179,7 +179,7 @@ shared temp directory (see [security.md](security.md)).
 | Notion response | 4 MiB; 30 s per attempt for the whole answer, error bodies included |
 | Provider payload | 8 MiB of UTF-8, counted in bytes, on stdin or in a file |
 | Provider JSON files | Microsoft token 64 KiB, account config 1 MiB, Sticky Notes listing cache 32 MiB, rate state 256 KiB, any other 8 MiB — larger reads as absent |
-| OneNote requests | key `graph-onenote`: 100/min and 350/hr (Microsoft allows 120 and 400 per app+user), one budget for Graph and OneNote's web revision service; a page order starts only while it holds more than the 20 per window kept for notes |
+| OneNote requests | key `graph-onenote`: 100/min and 350/hr (Microsoft allows 120 and 400 per app+user) for the OneNote API alone; its OneDrive requests on `graph-onenote-drive` and OneNote's web revision service on `onenote-web`, each with the same windows; a page order starts only while each budget it spends from holds more than the 20 per window kept for notes |
 | Sticky Notes requests | key `graph-mail`: 240/min — politeness; mailbox limits are far higher |
 | Notion requests | key `notion`: 3/s, Notion's published average |
 | Concurrent requests | 4 per rate key across every process (Microsoft allows 5 per app+user) |

@@ -28,6 +28,11 @@ ENDPOINT = "https://onenote.officeapps.live.com/o/OneNote.ashx"
 EDITOR_ROLES = ("owner", "contributor")
 MAX_BODY = 16 * 1024 * 1024
 MAX_SECONDS = 120
+# The service is not OneNote's Graph API and counts against none of Graph's
+# limits. Microsoft publishes none of its own, so it is held to the OneNote
+# API's: the same windows as onenote.py's budget, kept apart from it.
+RATE_KEY = "onenote-web"
+RATE_WINDOWS = [(60, 100), (3600, 350)]
 
 
 class WebError(msgraph.GraphError):
@@ -167,10 +172,9 @@ class Transport:
 
         # Only explicit 429 rejections replay. No timeout, 5xx or lost write
         # response can cause the same revision to be submitted again. Every
-        # request counts against the provider's one budget, as its Graph
-        # requests do, and optional work leaves notes their share of it
-        # (msgraph.background_requests).
-        return ratelimit.attempt_loop(msgraph.settings.rate_key, msgraph.settings.rate_windows, once,
+        # request counts against the service's own budget, and optional work
+        # leaves notes their share of it (msgraph.background_requests).
+        return ratelimit.attempt_loop(RATE_KEY, RATE_WINDOWS, once,
                                       attempts=2, reserve=msgraph.settings.background_reserve)
 
 

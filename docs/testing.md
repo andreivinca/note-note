@@ -657,7 +657,8 @@ Rules when a real account is involved:
 With the shell running, and the OneNote tab open:
 
 1. `onenote.py list` twice in a row — the second is paced, and
-   `$RATE/graph-onenote.json` has a stamp per request.
+   `$RATE/graph-onenote.json` has a stamp per OneNote API request (a shared
+   notebook's OneDrive lookups stamp `$RATE/graph-onenote-drive.json`).
 2. Write a `cooldownUntil` as above, then `onenote.py page <id>`: structured
    throttled JSON, no network touched, under a second.
 3. In the app, type through the debounce: **one** save sequence per settle,

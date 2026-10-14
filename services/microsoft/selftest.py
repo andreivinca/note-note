@@ -547,13 +547,21 @@ def test_the_entry_point_answers_for_the_library(verbose):
     failures += check("with the error and its kind", answered(printed) == {"error": "boom", "kind": "transient"},
                       "%r" % (printed.getvalue(),))
     before = msgraph.settings.rate_key
+    drive = msgraph.GRAPH + "/drives/d/items/d%21s/preview"
+    shared = msgraph.GRAPH + "/shares/u!abc/driveItem"
     try:
         msgraph.configure("graph-test", [(60, 1)], optional_scopes="Files.Read")
-        failures += check("configure names the budget", msgraph.rate_key_for(ME) == "graph-test"
-                          and msgraph.settings.rate_windows == [(60, 1)]
+        failures += check("configure names the budget", msgraph.budget_for(ME) == ("graph-test", [(60, 1)])
                           and msgraph.settings.optional_scopes == "Files.Read")
+        failures += check("without a files budget OneDrive counts against the provider's own",
+                          msgraph.budget_for(drive) == ("graph-test", [(60, 1)]))
+        msgraph.configure("graph-test", [(60, 1)], files_rate_key="graph-test-drive", files_rate_windows=[(60, 2)])
+        failures += check("OneDrive requests count against the files budget",
+                          msgraph.budget_for(drive) == msgraph.budget_for(shared) == ("graph-test-drive", [(60, 2)]))
+        failures += check("other Graph requests keep the provider's own budget",
+                          msgraph.budget_for(ME) == ("graph-test", [(60, 1)]))
         failures += check("the sign-in endpoints stay unpaced",
-                          msgraph.rate_key_for(msgraph.token_url("common")) is None)
+                          msgraph.budget_for(msgraph.token_url("common")) == (None, []))
     finally:
         msgraph.configure(before, [], optional_scopes="")
     print("the library raises; the entry point answers")

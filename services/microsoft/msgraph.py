@@ -76,11 +76,16 @@ class Settings:
     The pacing: sticky.py and onenote.py each name their own key, so a
     throttle on one never parks the other (docs/providers.md, the
     rate-key table); left unset, nothing is paced at all, which is what an
-    unaware caller gets. The scopes: each provider asks for its own, the
-    required ones on every refresh and the optional ones only once granted.
+    unaware caller gets. A provider that calls OneDrive as well names a
+    files key for it, since Microsoft limits OneDrive apart from the
+    service the provider's own key is for (`budget_for`). The scopes: each
+    provider asks for its own, the required ones on every refresh and the
+    optional ones only once granted.
     """
     rate_key: str = None
     rate_windows: list = field(default_factory=list)
+    files_rate_key: str = None
+    files_rate_windows: list = field(default_factory=list)
     scopes: str = os.environ.get("NOTE_NOTE_MS_SCOPES", "offline_access User.Read")
     optional_scopes: str = os.environ.get("NOTE_NOTE_MS_OPTIONAL_SCOPES", "")
     background_reserve: int = 0
@@ -100,10 +105,13 @@ def background_requests(reserve=20):
         settings.background_reserve = previous
 
 
-def configure(rate_key, rate_windows, scopes=None, optional_scopes=None):
+def configure(rate_key, rate_windows, scopes=None, optional_scopes=None,
+              files_rate_key=None, files_rate_windows=()):
     """Called once by the provider script, before its first request."""
     settings.rate_key = rate_key
     settings.rate_windows = list(rate_windows)
+    settings.files_rate_key = files_rate_key
+    settings.files_rate_windows = list(files_rate_windows)
     if scopes is not None:
         settings.scopes = scopes
     if optional_scopes is not None:
@@ -128,6 +136,9 @@ MAX_BODY = 8 * 1024 * 1024
 
 GRAPH_ORIGIN = "https://graph.microsoft.com/"
 GRAPH_HOST = "graph.microsoft.com"
+# The Graph paths that address OneDrive, which Microsoft limits on its own:
+# https://learn.microsoft.com/graph/throttling-limits
+DRIVE_PATHS = ("/v1.0/drives/", "/v1.0/shares/", "/v1.0/me/drive/")
 
 # Every request this module sends — Graph's, and the sign-in endpoints',
 # whose form bodies carry refresh tokens and device codes — goes through this
@@ -165,14 +176,23 @@ def graph_url(url):
     return url
 
 
-def rate_key_for(url):
-    """The key a URL is paced against, or None for one that must not be.
+def budget_for(url):
+    """The rate key and windows a URL is paced against, or (None, []) for
+    one that must not be.
 
-    Only Graph counts against a provider's budget. The sign-in endpoints are
-    deliberately unpaced: a token refresh that waited behind a Graph cooldown
-    would turn "OneNote is busy" into "you are signed out".
+    Only Graph counts against a provider's budgets: a OneDrive request
+    against its files key when it names one, any other against its own.
+    The sign-in endpoints are deliberately unpaced: a token refresh that
+    waited behind a Graph cooldown would turn "OneNote is busy" into "you
+    are signed out".
     """
-    return settings.rate_key if (settings.rate_key and url.startswith(GRAPH_ORIGIN)) else None
+    if not url.startswith(GRAPH_ORIGIN):
+        return None, []
+    if settings.files_rate_key and urllib.parse.urlsplit(url).path.startswith(DRIVE_PATHS):
+        return settings.files_rate_key, settings.files_rate_windows
+    if settings.rate_key:
+        return settings.rate_key, settings.rate_windows
+    return None, []
 
 
 def wait_asked_by(error):
@@ -246,7 +266,7 @@ def request(method, url, body=None, headers=None, max_bytes=MAX_BODY,
     req = urllib.request.Request(url, data=body, method=method, headers=headers or {})
     if req.has_header("Authorization") and not graph_url(url):
         raise GraphError("refused to send the sign-in to an address outside Microsoft Graph")
-    rate_key = rate_key_for(url)
+    rate_key, rate_windows = budget_for(url)
 
     def once():
         deadline = time.monotonic() + timeout
@@ -276,7 +296,7 @@ def request(method, url, body=None, headers=None, max_bytes=MAX_BODY,
         except urllib.error.URLError as error:
             raise GraphError("network error: %s" % error.reason) from error
 
-    return ratelimit.attempt_loop(rate_key, settings.rate_windows, once,
+    return ratelimit.attempt_loop(rate_key, rate_windows, once,
                                  reserve=settings.background_reserve if rate_key else 0)
 
 

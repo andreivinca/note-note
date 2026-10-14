@@ -113,10 +113,11 @@ but its response was lost. An older write's failure leaves that to the newer wri
 check finds what OneNote holds. No timeout or 5xx can replay the revision
 automatically. Explicit rejected key challenges may retry.
 
-Notes come first. Graph and the revision service share OneNote's one request
-budget, and a page order is written only while that budget has room beyond
-the share background work leaves for notes; otherwise it fails at once, with
-nothing written, and the rows return to OneNote's order.
+Notes come first. A page order spends from three budgets, each paced on its
+own key: OneNote's Graph API (`graph-onenote`), OneDrive (`graph-onenote-drive`)
+and the revision service (`onenote-web`). It is written only while each of
+them has room beyond the share background work leaves for notes; otherwise it
+fails at once, with nothing written, and the rows return to OneNote's order.
 
 ## Verification on 2026-10-06
 

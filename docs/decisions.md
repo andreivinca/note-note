@@ -346,6 +346,20 @@ own, and Microsoft counts per app and user, so the keys match the budgets
 Microsoft actually keeps; the benefit is that one throttled backend never
 becomes three broken ones.
 
+### A rate key per service a provider calls, not one per provider
+
+*Considered:* one budget for everything OneNote sends — its Graph API,
+OneDrive and the web revision service — so list editing and page order could
+never spend requests notes need. *Rejected:* Microsoft's 400/hr limit is the
+OneNote API's alone (notebooks, sections, pages and their resources); OneDrive's
+drive items have limits of their own, and the revision service is not Graph.
+Counted together, OneNote paused itself long before Microsoft would have: a
+list indent spent 15 of the 350 and 3 of Microsoft's 400. *Chosen:*
+`graph-onenote` for the OneNote API, `graph-onenote-drive` for its OneDrive
+requests and `onenote-web` for the revision service, which publishes no limit
+and is held to OneNote's windows. Page order still waits for notes, in every
+budget it spends from.
+
 ### Admission by rolling count, not by a gap between requests
 
 *Considered:* the obvious pacer — sleep so that requests are never closer

@@ -52,13 +52,16 @@ import list_edits  # noqa: E402
 # parks OneNote and leaves Sticky Notes listing. Microsoft's delegated OneNote
 # limits are 120 requests/minute *and* 400/hour per app+user (and 5 concurrent,
 # which lib/ratelimit.py caps at 4); these windows stay under both with room
-# for the other things the account may be doing.
+# for the other things the account may be doing. They are OneNote's API
+# limits alone: its OneDrive requests (a section's file, its preview, a
+# shared notebook) count against OneDrive's own, and are paced apart.
 # Optional consent stays out of the required refresh scopes, including when
 # an older, still-loaded UI supplies the previous combined scope list.
 msgraph.configure("graph-onenote", [(60, 100), (3600, 350)],
                   scopes=" ".join(scope for scope in msgraph.settings.scopes.split()
                                   if scope not in ("Files.Read", "Files.ReadWrite")),
-                  optional_scopes="Files.Read Files.ReadWrite")
+                  optional_scopes="Files.Read Files.ReadWrite",
+                  files_rate_key="graph-onenote-drive", files_rate_windows=[(60, 100), (3600, 350)])
 
 ONENOTE_CACHE = os.path.join(CACHE_DIR, "note-note-onenote.json")
 # The custom section order the last pass established (cmd_section_order):
@@ -2099,11 +2102,15 @@ def cmd_reorder_pages(payload_path):
             or not all(isinstance(value, str) for value in expected + wanted)
             or len(set(expected)) != len(expected) or set(expected) != set(wanted)):
         fail("invalid page reorder request")
-    # A page order comes after notes: it starts only while OneNote's one
-    # request budget has room beyond the share background work leaves for
-    # notes, and fails rather than wait for it. Once started it runs to its
-    # end, so a write is never cut off between the reads around it.
-    if ratelimit.background_delay(msgraph.settings.rate_key, msgraph.settings.rate_windows) > 0:
+    # A page order comes after notes: it starts only while every budget it
+    # spends from - OneNote's, OneDrive's and the revision service's - has
+    # room beyond the share background work leaves for notes, and fails
+    # rather than wait for it. Once started it runs to its end, so a write
+    # is never cut off between the reads around it.
+    budgets = ((msgraph.settings.rate_key, msgraph.settings.rate_windows),
+               (msgraph.settings.files_rate_key, msgraph.settings.files_rate_windows),
+               (web_session.RATE_KEY, web_session.RATE_WINDOWS))
+    if any(ratelimit.background_delay(key, windows) > 0 for key, windows in budgets):
         fail("The order was not saved — OneNote's requests are kept for notes right now")
     require_revision_access(section_id, "Page ordering is available only in personal notebooks you can edit",
                             "Sign in to OneNote again to allow page ordering")

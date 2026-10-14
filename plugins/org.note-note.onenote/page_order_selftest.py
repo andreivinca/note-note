@@ -252,18 +252,17 @@ class TransportTests(unittest.TestCase):
                     self.session.request("POST", web.ENDPOINT, mutation=True)
         self.assertNotIn("private", str(caught.exception))
 
-    def test_the_revision_service_counts_against_the_providers_one_budget(self):
-        """Graph and the revision service are one budget: every request is
-        admitted under the provider's rate key, and background work leaves
-        notes their share of it."""
-        with patch.object(web.ratelimit, "attempt_loop", return_value=(200, b"", {})) as admit, \
-                patch.object(web.msgraph.settings, "rate_key", "budget"), \
-                patch.object(web.msgraph.settings, "rate_windows", [(60, 100)]):
+    def test_the_revision_service_counts_against_its_own_budget(self):
+        """The revision service is not OneNote's Graph API: every request is
+        admitted under its own rate key, never the provider's, and background
+        work leaves notes their share of it."""
+        with patch.object(web.ratelimit, "attempt_loop", return_value=(200, b"", {})) as admit:
             self.session.request("POST", web.ENDPOINT)
             with web.msgraph.background_requests():
                 self.session.request("GET", "https://my.microsoftpersonalcontent.com/personal/preview")
         self.assertEqual([(call.args[:2], call.kwargs["reserve"]) for call in admit.call_args_list],
-                         [(("budget", [(60, 100)]), 0), (("budget", [(60, 100)]), 20)])
+                         [(("onenote-web", web.RATE_WINDOWS), 0), (("onenote-web", web.RATE_WINDOWS), 20)])
+        self.assertNotEqual(web.RATE_KEY, onenote.msgraph.settings.rate_key)
 
     def test_broken_response_to_a_write_is_an_uncertain_outcome(self):
         for error in (http.client.IncompleteRead(b"partial"), http.client.BadStatusLine("garbage")):
@@ -315,22 +314,27 @@ class CommandTests(unittest.TestCase):
             self.assertGreater(saved.call_args.args[0]["pageListSerial"], 1)
 
     def test_an_order_without_room_beyond_what_notes_keep_fails_before_any_request(self):
-        """Page order comes after notes in OneNote's one budget: when only
-        the share kept for notes is left, the order fails at once."""
+        """Page order comes after notes in every budget it spends from:
+        when only the share kept for notes is left in any one of them, the
+        order fails at once."""
         _, pages = fixture()
-        cache = {"sections": [{"id": "s"}], "pages": pages, "pageListSerial": 1}
-        output = io.StringIO()
-        with contextlib.ExitStack() as stack:
-            collect, _, saved, budget = self.command(stack, cache, pages, [], budget_wait=30)
-            stack.enter_context(contextlib.redirect_stdout(output))
-            with self.assertRaises(SystemExit):
-                onenote.cmd_reorder_pages("-")
-        result = json.loads(output.getvalue())
-        self.assertEqual(result["error"], "The order was not saved — OneNote's requests are kept for notes right now")
-        self.assertNotIn("kind", result)
-        budget.assert_called_once_with(onenote.msgraph.settings.rate_key, onenote.msgraph.settings.rate_windows)
-        collect.assert_not_called()
-        saved.assert_not_called()
+        settings = onenote.msgraph.settings
+        for full in (settings.rate_key, settings.files_rate_key, web.RATE_KEY):
+            cache = {"sections": [{"id": "s"}], "pages": pages, "pageListSerial": 1}
+            output = io.StringIO()
+            with self.subTest(budget=full), contextlib.ExitStack() as stack:
+                collect, _, saved, budget = self.command(stack, cache, pages, [])
+                budget.side_effect = lambda key, windows: 30 if key == full else 0
+                stack.enter_context(contextlib.redirect_stdout(output))
+                with self.assertRaises(SystemExit):
+                    onenote.cmd_reorder_pages("-")
+                result = json.loads(output.getvalue())
+                self.assertEqual(result["error"],
+                                 "The order was not saved — OneNote's requests are kept for notes right now")
+                self.assertNotIn("kind", result)
+                collect.assert_not_called()
+                saved.assert_not_called()
+        self.assertEqual(len({settings.rate_key, settings.files_rate_key, web.RATE_KEY}), 3)
 
     def test_a_written_order_is_recorded_without_listing_the_section_again(self):
         """OneNote's answer to the write is the confirmation: the order is
