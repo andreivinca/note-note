@@ -55,6 +55,11 @@ lines through the same revision service ([blank lines](onenote-blank-lines.md)):
 exact joins to OneNote's elements, refusals, the page cell join and one
 conditional revision.
 
+`plugins/org.note-note.onenote/changes_selftest.py` covers the changed sections
+OneDrive reports ([OneNote changes](onenote-changes.md)): which sections are
+tracked, a new or expired cursor, pages kept for the next round, cursors that
+are not a Graph drive delta, and rounds that pause or fail.
+
 `plugins/org.note-note.onenote/list_edits_selftest.py` checks native list moves,
 preserved item and text identities, detached historical containers, duplicate
 parents, deep indentation, all marker styles, rich-text runs and stale native

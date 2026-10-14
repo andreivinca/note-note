@@ -2493,6 +2493,47 @@ ShellRoot {
     source.destroy()
   }
 
+  // The minute's poll asks OneDrive which sections changed, and checks the
+  // open page and lists its section only while that section changed, or
+  // while OneDrive cannot say.
+  function oneNotePollCases() {
+    var source = creatingOneNoteFactory.createObject(test, { ms: oneNoteAccount })
+    source.onSections = [{ id: "s", name: "Section", notebookId: "n", notebook: "Notebook" }]
+    source.pages = [{ id: "a", sectionId: "s", title: "A" }]
+    source.rq = mergeLane
+    mergeLane.jobs.shift().settled({ sections: source.onSections, pages: source.pages, inventoryComplete: true })
+    var round = function(answer) {
+      source.poll("onenote:a")
+      source.poll("onenote:a")
+      source.poll("onenote:a")
+      var asked = mergeLane.jobs.shift()
+      asked.settled(answer)
+      var keys = mergeLane.jobs.map(function(job) { return job.options.key })
+      while (mergeLane.jobs.length) {
+        mergeLane.jobs.shift().settled(null)
+      }
+      return { asked: asked.options.key, keys: keys }
+    }
+    var changed = round({ tracked: ["s"], changed: ["s"] })
+    check("the poll asks OneDrive which sections changed", changed.asked === "changes")
+    check("a section OneDrive reports changed has its page checked and its pages listed",
+          changed.keys.join() === "check:onenote:a,pages:s")
+    check("a section that just changed is checked again while Graph catches up",
+          round({ tracked: ["s"], changed: [] }).keys.join() === "check:onenote:a,pages:s")
+    source.changedSections = { s: Date.now() - source.changeSettleMs - 1 }
+    check("a quiet tracked section costs OneNote nothing", round({ tracked: ["s"], changed: [] }).keys.length === 0)
+    check("a section OneDrive does not track is checked as before",
+          round({ tracked: [], changed: [] }).keys.join() === "check:onenote:a,pages:s")
+    source.pollTick = 0
+    check("a failed round leaves the page checked as before",
+          round({ error: "OneDrive did not list the changed files" }).keys.join() === "check:onenote:a,pages:s")
+    check("a deferred round leaves the page checked as before",
+          round({ deferred: true, retryAfter: 30 }).keys.join() === "check:onenote:a,pages:s")
+    check("a cancelled round checks nothing", round(null).keys.length === 0)
+    source.rq = null
+    source.destroy()
+  }
+
   // The cases about notes, which NOTE_NOTE_TEST_NOTES_ONLY runs alone.
   function noteCases() {
     unsavedTitleCases()
@@ -2506,6 +2547,7 @@ ShellRoot {
     oneNoteCreationCases()
     oneNoteDeletionCases()
     oneNoteAccountChangeCases()
+    oneNotePollCases()
   }
 
   Component.onCompleted: {

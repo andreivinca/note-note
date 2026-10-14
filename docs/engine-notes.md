@@ -676,7 +676,10 @@ the answer — and *cheaply* is load-bearing: the OneNote poll used to re-list
 every expanded section every minute, up to 11 requests a minute, which is 660
 an hour against a budget of 400. Polling alone could exhaust the account. It
 now checks the open page and the section that page is in, and leaves the rest
-to the periodic listing above.
+to the periodic listing above. And only while that section changed: OneDrive's
+delta, an official Graph API, says which section files changed in one request
+on OneDrive's budget, so a quiet minute costs OneNote nothing
+([OneNote changes](onenote-changes.md)).
 
 ---
 

@@ -9,6 +9,8 @@
   onenote.py list-step <file|->       -> one page-list response for {"sectionId", "interactive"?}
   onenote.py reorder-pages <file|->   -> save {"sectionId", "expected", "order"} and return the inventory holding it
   onenote.py page <id> [--check]        -> {"title","body"(markdown),"editable","view"}
+  onenote.py changes                    -> {"tracked":[sectionId],"changed":[sectionId]}: the sections
+                                           OneDrive says changed since the last call
   onenote.py recording <src> <title>    -> {"url"}: a recording's playable file, fetched to play it
   onenote.py update <id> <file>         -> reads {"title","body","view","resolution"?}
   onenote.py create <sectionId> <file>  -> {"ok":true,"page":{...}}
@@ -47,6 +49,7 @@ import web_session  # noqa: E402
 import blank_lines  # noqa: E402
 import list_indents  # noqa: E402
 import list_edits  # noqa: E402
+import section_changes  # noqa: E402
 
 # OneNote's own Graph budget, shared with no other provider: a throttle here
 # parks OneNote and leaves Sticky Notes listing. Microsoft's delegated OneNote
@@ -72,6 +75,8 @@ ONENOTE_AUDIO_DIR = os.path.join(CACHE_DIR, "note-note-onenote-audio")
 # The list levels the last reads restored from OneNote's native objects,
 # with the Graph HTML each was read for (read_list_levels).
 ONENOTE_LEVELS = os.path.join(CACHE_DIR, "note-note-onenote-levels.json")
+# Where OneDrive's record of changed section files continues (cmd_changes).
+ONENOTE_CHANGES = os.path.join(CACHE_DIR, "note-note-onenote-changes.json")
 MAX_REMEMBERED_LEVELS = 4   # pages: the page check reads the open one
 # This provider's limits: what it will read from Graph and keep around.
 MAX_SECTIONS = 500
@@ -403,13 +408,40 @@ def cmd_search(payload):
     out({"paths": ["onenote:" + page_id for page_id in result["ids"]], "status": result["status"]})
 
 
-def has_section_order_scope():
-    """Inspect existing consent without refreshing or changing the sign-in."""
+def files_read_granted():
+    """Whether the sign-in may read OneDrive, which the section order and
+    the changed sections come from. Inspects existing consent without
+    refreshing or changing the sign-in."""
     try:
         token = msgraph.signed_in(msgraph.config()[0]) or {}
         return bool({"Files.Read", "Files.ReadWrite"}.intersection(token.get("scope", "").split()))
     except Exception:
         return False
+
+
+def cmd_changes():
+    """Which sections' files changed since the last round, from OneDrive
+    (section_changes.py): {"tracked": [ids], "changed": [ids]}. A section
+    not tracked - in a notebook shared with the account, or without OneDrive
+    consent - is polled as before. A round is optional work: it leaves notes
+    their share of the budget, a pause answers deferred, and a failure is
+    not run again, since the next minute's round is its retry."""
+    cache = load_listing() or {}
+    tracked = section_changes.tracked(cache.get("notebooks", []), cache.get("sections", []))
+    if not tracked or not files_read_granted():
+        out({"tracked": [], "changed": []})
+        return
+    saved = msgraph.load_for_session(ONENOTE_CHANGES, {})
+    try:
+        with msgraph.background_requests():
+            changed, cursor = section_changes.read(graph, saved.get("cursor"), tracked)
+    except (ratelimit.Deferred, ratelimit.Throttled) as paused:
+        out({"deferred": True, "retryAfter": paused.retry_after})
+        return
+    except msgraph.GraphError as error:
+        fail(str(error))
+    msgraph.save_for_session(ONENOTE_CHANGES, {"cursor": cursor})
+    out({"tracked": tracked, "changed": changed})
 
 
 def name_key(section):
@@ -439,7 +471,7 @@ def alphabetical_sections(sections):
 def order_matches(order):
     """Whether the order file was written under the present policy and consent."""
     return (isinstance(order, dict) and order.get("version") == SECTION_ORDER_VERSION
-            and order.get("scope") == has_section_order_scope())
+            and order.get("scope") == files_read_granted())
 
 
 def remembered_order(sections, order):
@@ -467,7 +499,7 @@ def ordered_sections(sections, cache, token):
     warning = ["Custom section order unavailable; sections sorted alphabetically"]
     if not sections:
         return fallback, {}, []
-    if not has_section_order_scope():
+    if not files_read_granted():
         return fallback, {}, warning
     try:
         # HIGH-RISK WORKAROUND: keep even imports inside the failure boundary.
@@ -920,7 +952,7 @@ def cmd_section_order():
     as they stand now, in that order: a listing that landed meanwhile keeps
     its newer sections, waiting after the placed ones."""
     sections = (load_listing() or {}).get("sections", [])
-    scope = has_section_order_scope()
+    scope = files_read_granted()
     # This token has already worked for normal notes. Optional metadata uses
     # the snapshot as-is; it cannot refresh or invalidate the account.
     token = access_token() if sections and scope else ""
@@ -2170,6 +2202,8 @@ def main(argv):
         cmd_onenote_pages(argv[2:])
     elif cmd == "page" and len(argv) >= 3:
         cmd_onenote_page(argv[2], "--check" in argv[3:])
+    elif cmd == "changes":
+        cmd_changes()
     elif cmd == "recording" and len(argv) >= 4:
         cmd_onenote_recording(argv[2], argv[3])
     elif cmd == "update" and len(argv) >= 4:
@@ -2194,14 +2228,14 @@ def main(argv):
         search_index.Index(CACHE_DIR, argv[2]).clear()
         out({"ok": True})
     elif cmd == "clear-cache":
-        for path in (ONENOTE_CACHE, ONENOTE_ORDER):
+        for path in (ONENOTE_CACHE, ONENOTE_ORDER, ONENOTE_CHANGES):
             try:
                 os.remove(path)
             except OSError:
                 pass
         out({"ok": True})
     else:
-        fail("usage: onenote.py list [--cached|--max-age S|--force]|section-order|reorder-pages <file|->|page <id>|recording <src> <title>|update <id> <file>|create <sectionId> <file>|delete <id>|create-section <notebookId> <file>|rename-section <sectionId> <file>|delete-section <sectionId>|clear-cache", 2)
+        fail("usage: onenote.py list [--cached|--max-age S|--force]|section-order|reorder-pages <file|->|page <id>|changes|recording <src> <title>|update <id> <file>|create <sectionId> <file>|delete <id>|create-section <notebookId> <file>|rename-section <sectionId> <file>|delete-section <sectionId>|clear-cache", 2)
 
 
 def run(argv):

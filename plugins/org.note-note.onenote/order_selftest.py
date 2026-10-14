@@ -369,7 +369,7 @@ class OrderingTests(unittest.TestCase):
 
 class BoundaryTests(unittest.TestCase):
     def test_missing_scope_never_invokes_workaround(self):
-        with patch.object(onenote, "has_section_order_scope", return_value=False), patch.object(order, "Remote") as remote:
+        with patch.object(onenote, "files_read_granted", return_value=False), patch.object(order, "Remote") as remote:
             result, saved, warnings = onenote.ordered_sections(list(reversed(sections())), {}, "token")
         remote.assert_not_called()
         self.assertEqual(result, alphabetical())
@@ -382,7 +382,7 @@ class BoundaryTests(unittest.TestCase):
             if name == "section_order":
                 raise ImportError("secret-url")
             return original_import(name, *args, **kwargs)
-        with patch.object(onenote, "has_section_order_scope", return_value=True):
+        with patch.object(onenote, "files_read_granted", return_value=True):
             with patch.object(builtins, "__import__", side_effect=missing):
                 result, _, warnings = onenote.ordered_sections(sections(), {}, "token")
             self.assertEqual(result, alphabetical())
@@ -395,7 +395,7 @@ class BoundaryTests(unittest.TestCase):
     def test_invalid_optional_result_cannot_change_graph_membership(self):
         for result in [sections()[:-1], sections() + sections()[:1],
                        [dict(section, name="changed") for section in sections()]]:
-            with patch.object(onenote, "has_section_order_scope", return_value=True), patch.object(order, "Remote"):
+            with patch.object(onenote, "files_read_granted", return_value=True), patch.object(order, "Remote"):
                 with patch.object(order, "arrange", return_value=(result, {}, [])):
                     arranged, _, warnings = onenote.ordered_sections(sections(), {}, "token")
             self.assertEqual(arranged, alphabetical())
@@ -424,7 +424,7 @@ class BoundaryTests(unittest.TestCase):
         printed = io.StringIO()
         files = self.files()
         with contextlib.ExitStack() as stack:
-            stack.enter_context(patch.object(onenote, "has_section_order_scope", return_value=True))
+            stack.enter_context(patch.object(onenote, "files_read_granted", return_value=True))
             self.on_disk(stack, files)
             stack.enter_context(patch.object(onenote, "access_token", return_value="token"))
             stack.enter_context(patch.object(onenote, "graph", return_value=(200, {"value": [
@@ -449,7 +449,7 @@ class BoundaryTests(unittest.TestCase):
         files = self.files({"sections": list(reversed(sections())), "pages": [], "fetched": time.time()})
         printed = io.StringIO()
         with contextlib.ExitStack() as stack:
-            stack.enter_context(patch.object(onenote, "has_section_order_scope", return_value=True))
+            stack.enter_context(patch.object(onenote, "files_read_granted", return_value=True))
             self.on_disk(stack, files)
             stack.enter_context(patch.object(onenote, "access_token", return_value="token"))
             stack.enter_context(patch.object(order, "Remote", side_effect=lambda token: Remote()))
@@ -475,7 +475,7 @@ class BoundaryTests(unittest.TestCase):
         files = self.files({"sections": list(reversed(sections())), "pages": []})
         printed = io.StringIO()
         with contextlib.ExitStack() as stack:
-            stack.enter_context(patch.object(onenote, "has_section_order_scope", return_value=True))
+            stack.enter_context(patch.object(onenote, "files_read_granted", return_value=True))
             self.on_disk(stack, files)
             stack.enter_context(patch.object(onenote, "access_token", return_value="token"))
             stack.enter_context(patch.object(order, "arrange", side_effect=RuntimeError("secret-url")))
@@ -491,7 +491,7 @@ class BoundaryTests(unittest.TestCase):
         placed = [{"id": "p2", "name": "Zed", "notebookId": BOOK}, {"id": "p1", "name": "Mid", "notebookId": BOOK}]
         new = {"id": "n", "name": "Alpha", "notebookId": BOOK}
         order_file = {"version": onenote.SECTION_ORDER_VERSION, "scope": True, "positions": {"p1": 0, "p2": 1}}
-        with patch.object(onenote, "has_section_order_scope", return_value=True):
+        with patch.object(onenote, "files_read_granted", return_value=True):
             result = onenote.remembered_order([new] + placed, order_file)
         self.assertEqual([section["id"] for section in result], ["p1", "p2", "n"])
 
@@ -504,7 +504,7 @@ class BoundaryTests(unittest.TestCase):
             printed = io.StringIO()
             with contextlib.ExitStack() as stack:
                 self.on_disk(stack, files)
-                stack.enter_context(patch.object(onenote, "has_section_order_scope", return_value=scope))
+                stack.enter_context(patch.object(onenote, "files_read_granted", return_value=scope))
                 stack.enter_context(contextlib.redirect_stdout(printed))
                 onenote.cmd_onenote_list(True)
             reply = json.loads(printed.getvalue())
@@ -515,7 +515,7 @@ class BoundaryTests(unittest.TestCase):
         def broken(*args):
             onenote.fail("secret-url")
         printed = io.StringIO()
-        with patch.object(onenote, "has_section_order_scope", return_value=True), patch.object(order, "Remote"):
+        with patch.object(onenote, "files_read_granted", return_value=True), patch.object(order, "Remote"):
             with patch.object(order, "arrange", side_effect=broken), contextlib.redirect_stdout(printed):
                 result, _, warnings = onenote.ordered_sections(sections(), {}, "token")
         self.assertEqual(result, alphabetical())

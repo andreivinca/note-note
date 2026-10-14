@@ -1095,6 +1095,8 @@ LaneProvider {
       root.listingError = ""
       root.searchInventoryReady = false
       root.searchInventoryComplete = false
+      root.trackedSections = ({})
+      root.changedSections = ({})
       root.onSections = []
       root.onNotebooks = []
       root.clearListedPages()
@@ -1519,16 +1521,26 @@ LaneProvider {
       })
   }
 
-  // Polling, on a diet. Every third tick (so once a minute) this asks for
-  // the open page and lists the section it is in: two requests while the
-  // page is unchanged and the section holds at most a hundred pages. A page
-  // that did change also costs its list levels and the images not cached
-  // yet (onenote.py, read_page). It used to re-list *every* expanded
-  // section — up to eleven requests a minute, which is 660 an hour against
-  // a budget of 400, so polling alone could exhaust the account. Other
-  // sections come back with the periodic listing (which now fetches only
-  // what changed) or their menu's Refresh (sectionMenu).
+  // Polling, on a diet. Every third tick (so once a minute) this asks
+  // OneDrive which section files changed (onenote.py, changes): one request
+  // for every notebook the account owns, and none of OneNote's budget. Only
+  // while the open page's section changed does it ask for the page and list
+  // the section: two requests while the page is unchanged and the section
+  // holds at most a hundred pages. A page that did change also costs its
+  // list levels and the images not cached yet (onenote.py, read_page). A
+  // section OneDrive does not track, in a notebook shared with the account,
+  // is asked for every minute. It used to re-list *every* expanded section —
+  // up to eleven requests a minute, which is 660 an hour against a budget of
+  // 400, so polling alone could exhaust the account. Other sections come
+  // back with the periodic listing (which now fetches only what changed) or
+  // their menu's Refresh (sectionMenu).
   property int pollTick: 0
+  property var trackedSections: ({})  // section id -> true: OneDrive reports its changes
+  property var changedSections: ({})  // section id -> when OneDrive last reported its file changed (ms)
+  // Graph shows a change up to about a minute and a half after OneDrive
+  // reports it (docs/onenote-changes.md), so a section is checked for this
+  // long after its last change.
+  readonly property int changeSettleMs: 150000
   function poll(currentPath) {
     if (!root.ready || !root.rq) {
       return
@@ -1549,23 +1561,58 @@ LaneProvider {
       return
     }
     var mine = currentPath && currentPath.indexOf(root.id + ":") === 0
-    if (mine && (root.pendingPages[root.idOf(currentPath)] || root.pendingDeletes[root.idOf(currentPath)])) {
+    if (!mine || root.pendingPages[root.idOf(currentPath)] || root.pendingDeletes[root.idOf(currentPath)]) {
       return
     }
-    if (mine) {
-      root.rq.enqueue({ key: "check:" + currentPath, mode: "dedupe", priority: 1, owner: root, label: "check" },
-        function(ctx) { root.runScript(["page", root.idOf(currentPath), "--check"], "", ctx) },
-        function(r) {
-          if (r && !r.error && !r.deferred) {
-            root.applyCheck(currentPath, r)
-          }
-        })
-    }
-    var page = mine ? root.pageAt(currentPath) : null
-    if (!page || !page.sectionId) {
+    root.rq.enqueue({ key: "changes", mode: "dedupe", priority: 1, owner: root, label: "changes" },
+      function(ctx) { root.runScript(["changes"], "", ctx) },
+      function(r) {
+        if (!r) {
+          return
+        }
+        root.noteChanges(r)
+        var page = root.pageAt(currentPath)
+        if (!page || root.sectionChanging(page.sectionId)) {
+          root.checkPage(currentPath, page)
+        }
+      })
+  }
+
+  // An error, a pause or an answer without its two lists leaves every
+  // section untracked until the next answer: each is polled as before.
+  function noteChanges(r) {
+    if (r.error || r.deferred || !Array.isArray(r.tracked) || !Array.isArray(r.changed)) {
+      root.trackedSections = ({})
       return
     }
-    pageInventory.request(page.sectionId, false, true)
+    var tracked = {}
+    for (var i = 0; i < r.tracked.length; i++) {
+      tracked[r.tracked[i]] = true
+    }
+    var changed = Object.assign({}, root.changedSections)
+    var now = Date.now()
+    for (var j = 0; j < r.changed.length; j++) {
+      changed[r.changed[j]] = now
+    }
+    root.trackedSections = tracked
+    root.changedSections = changed
+  }
+
+  function sectionChanging(sectionId) {
+    return !root.trackedSections[sectionId] || Date.now() - (root.changedSections[sectionId] || 0) < root.changeSettleMs
+  }
+
+  function checkPage(path, page) {
+    root.rq.enqueue({ key: "check:" + path, mode: "dedupe", priority: 1, owner: root, label: "check" },
+      function(ctx) { root.runScript(["page", root.idOf(path), "--check"], "", ctx) },
+      function(r) {
+        if (r && !r.error && !r.deferred) {
+          root.applyCheck(path, r)
+        }
+      })
+    if (page && page.sectionId) {
+      pageInventory.request(page.sectionId, false, true)
+    }
   }
 
   // Graph does not reliably bump a page's lastModifiedDateTime, so the open

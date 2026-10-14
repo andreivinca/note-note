@@ -636,7 +636,7 @@ service on its own. Pick your own key; these are the built-ins'.
 | key | used by | windows |
 |---|---|---|
 | `graph-onenote` | `onenote.py`'s OneNote API requests, images included | (60s, 100) and (3600s, 350) — Microsoft allows 120/min and 400/hr per app+user |
-| `graph-onenote-drive` | `onenote.py`'s OneDrive requests: a section's file and its preview, a shared notebook's item (`msgraph.budget_for` routes them by path) | (60s, 100) and (3600s, 350) — OneDrive's own limits apply, not OneNote's |
+| `graph-onenote-drive` | `onenote.py`'s OneDrive requests: a section's file and its preview, a shared notebook's item, the changed sections ([OneNote changes](onenote-changes.md)); `msgraph.budget_for` routes them by path | (60s, 100) and (3600s, 350) — OneDrive's own limits apply, not OneNote's |
 | `onenote-web` | OneNote's web revision service (`web_session.py`): list levels and edits, blank lines, page order | (60s, 100) and (3600s, 350) — Microsoft publishes no limit, so it is held to OneNote's |
 | `graph-onenote-section-order` | optional OneDrive metadata | (60s, 30) and (3600s, 180); throttles fall back to alphabetical sections without parking the normal note lane |
 | `graph-mail` | `sticky.py` | (60s, 240) — politeness; mailbox limits are far higher |

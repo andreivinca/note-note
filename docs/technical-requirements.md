@@ -147,8 +147,10 @@ shared temp directory (see [security.md](security.md)).
   ignoring our own writes.
 - Online providers get a `poll(currentPath)` every **20 s** while visible and
   must do the cheapest possible check: Sticky Notes one listing request;
-  OneNote the open page and that page's section only, every third tick, plus a
-  whole-account listing every fifteenth; Notion one search, every third tick.
+  OneNote, every third tick, OneDrive's changed sections, then the open page
+  and that page's section only while that section changed or is not tracked
+  ([OneNote changes](onenote-changes.md)), plus a whole-account listing every
+  fifteenth; Notion one search, every third tick.
 - OneNote also fetches page content before each save. The shared Python
   `notemerge` library merges against the editor's saved baseline and stages a
   private recovery draft before that fetch. Conflict choices are revalidated

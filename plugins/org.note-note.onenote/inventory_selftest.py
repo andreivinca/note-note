@@ -310,7 +310,7 @@ class InventoryTests(unittest.TestCase):
         with contextlib.ExitStack() as stack:
             stack.enter_context(patch.object(onenote, "load_listing", return_value=cache))
             stack.enter_context(patch.object(onenote, "load_order", return_value={}))
-            stack.enter_context(patch.object(onenote, "has_section_order_scope", return_value=False))
+            stack.enter_context(patch.object(onenote, "files_read_granted", return_value=False))
             stack.enter_context(patch.object(onenote, "access_token", return_value="test-token"))
             stack.enter_context(patch.object(onenote, "graph", side_effect=graph))
             stack.enter_context(patch.object(onenote, "http", side_effect=pages))
