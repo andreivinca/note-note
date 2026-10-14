@@ -123,11 +123,11 @@ Rectangle {
         AppUi.ChromeButton {
           id: actionButton
           readonly property var modelData: buttonSlot.modelData
-          readonly property bool labeledMenu: modelData.isMenu && !modelData.splitMenu && modelData.toolbarLabelVisible
+          readonly property bool labeledMenu: modelData.isMenu && modelData.toolbarLabelVisible
           // Popups follow their button as the tools scroll or the editor resizes.
           readonly property real toolbarX: group.toolbarOffsetX + group.x + toolsRow.x + buttonSlot.x + x
           objectName: "editingTool-" + modelData.toolId
-          enabled: group.editor.writable && (!modelData.isMenu || modelData.splitMenu || menu.rows.length > 0)
+          enabled: group.editor.writable && (!modelData.isMenu || menu.rows.length > 0)
           // Dropdowns and icon buttons share the same face geometry.
           anchors.verticalCenter: parent.verticalCenter
           anchors.alignWhenCentered: false
@@ -148,7 +148,7 @@ Rectangle {
           iconSize: Style.font.icon
           horizontalPadding: labeledMenu ? Style.space(12) : Style.spacing.sm
           // Match the inset created by centering an icon in a square tool button.
-          leftPadding: iconText.length > 0 && ((modelData.isMenu && !modelData.splitMenu) || modelData.panelPopup)
+          leftPadding: iconText.length > 0 && (modelData.isMenu || modelData.panelPopup)
             ? Math.max(horizontalPadding + 1, (height - implicitIconWidth) / 2)
             : horizontalPadding + 1
           verticalPadding: Style.spacing.xxs
@@ -158,13 +158,13 @@ Rectangle {
             if (labeledMenu) {
               return modelData.label + " 󰅀"
             }
-            return (modelData.isMenu && !modelData.splitMenu) || modelData.panelPopup ? "󰅀" : ""
+            return modelData.isMenu || modelData.panelPopup ? "󰅀" : ""
           }
           opacity: enabled ? 1 : 0.45
           fontFamily: group.editor.fontFamily
           fontSize: Style.font.body
           onClicked: {
-            if (modelData.isMenu && !modelData.splitMenu) {
+            if (modelData.isMenu) {
               if (menu.opened) {
                 menu.close()
               } else {

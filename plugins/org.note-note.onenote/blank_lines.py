@@ -10,11 +10,12 @@ written, against the page revision just read. See docs/onenote-blank-lines.md.
 import re
 import uuid
 
-from revision_objects import (CHILDREN, CONTENT_ROOT, PAGE_METADATA, Section, latest_objects, page_guid, properties,
+from revision_objects import (CHILDREN, CONTENT_ROOT, PAGE_METADATA, latest_objects, page_guid, properties,
                               references, with_children)
 from web_session import WebError
 
 ELEMENT = 0x6000D
+GROUP = 0x60019      # elements indented together under one parent
 RICH_TEXT = 0x6000E
 CONTENT = 0x24001C1F
 TEXT = 0x1C001C22
@@ -72,7 +73,7 @@ class Page:
         if not match:
             raise WebError("OneNote returned an unexpected element ID")
         reference = "%s|%d" % (uuid.UUID(match[1]), int(match[2]))
-        if self.objects.get(reference, {}).get("ClassId") in {ELEMENT, 0x60019}:
+        if self.objects.get(reference, {}).get("ClassId") in {ELEMENT, GROUP}:
             return reference
         if reference not in self.owners:
             raise WebError(CHANGED)
@@ -116,14 +117,10 @@ def updated_parents(page, runs):
             for parent, elements in removed.items()]
 
 
-def remove(session, client_id, runs):
-    """One conditional page revision, confirmed by reading the page back."""
-    cell = Section(session.read_section()).cell(client_id)
-    state = session.read(cell)
-    page = Page(state)
-    if page.identity() != client_id:
-        raise WebError("The page's revisions could not be verified; refresh the section")
-    parents = updated_parents(page, runs)
+def remove(session, cell, state, runs):
+    """One revision of the page `state` read from `cell`, conditional on it,
+    confirmed by reading the page back."""
+    parents = updated_parents(Page(state), runs)
     session.write(cell, state, parents)
     confirmed = Page(session.read(cell))
     for parent in parents:

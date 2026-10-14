@@ -231,7 +231,9 @@ class Converter:
             self.read_only()
         return ""
 
-    def block(self, node, depth=0):
+    def block(self, node, indent=""):
+        """Write a block. `indent` is where list lines start: the column of
+        the text of the item a sublist hangs under, as Markdown reads it."""
         t = node.tag
         if t not in ("p", "cite", None):
             self.last = None
@@ -246,7 +248,7 @@ class Converter:
             if t == "div" and self.lines and self.lines[-1] != "":
                 self.lines.append("")
             for c in node.children:
-                self.block(c, depth)
+                self.block(c, indent)
             return
         if t == "img":
             # OneNote keeps an image as a sibling of the paragraphs, not
@@ -263,7 +265,7 @@ class Converter:
         if t == "p" or t == "cite":
             text = self.inline(node).strip()
             if t == "p" and not text and any(c.tag == "br" for c in node.children):
-                self.block(Node("br"), depth)
+                self.block(Node("br"), indent)
                 return
             prefix = self.para_prefix(node) if t == "p" else "*"
             if t == "p":
@@ -297,22 +299,24 @@ class Converter:
             if self.has_list_styles(node):
                 if self.lines and self.lines[-1] != "":
                     self.lines.append("")
-                self.lines.extend([htmltables.markup(self.styled_lists(node)), ""])
+                self.lines.extend([htmltables.markup(htmltables.lists(node, self.styled_item)), ""])
                 self.last = None
                 return
             start = node.attrs.get("start", "1") if t == "ol" else "1"
             n = int(start) - 1 if re.fullmatch(r"-?\d+", start) else 0
+            item = indent
             for c in node.children:
                 if c.tag == "li":
                     n += 1
-                    self.list_item(c, t, n, depth)
+                    item = self.list_item(c, t, n, indent)
                 elif c.tag == "br":
                     pass
                 elif c.tag in ("ul", "ol"):
-                    self.block(c, depth + 1)
+                    # Graph places a sublist beside its item; it hangs under that item's text.
+                    self.block(c, item)
                 else:
-                    self.block(c, depth)
-            if depth == 0:
+                    self.block(c, indent)
+            if not indent:
                 self.lines.append("")
             return
         if t == "li":
@@ -320,9 +324,9 @@ class Converter:
             if style:
                 container = Node("ol" if style in liststyles.NUMBERS else "ul")
                 container.children = [node]
-                self.block(container, depth)
+                self.block(container, indent)
                 return
-            self.list_item(node, "ul", 1, depth)
+            self.list_item(node, "ul", 1, indent)
             return
         if t == "table":
             self.table(node)
@@ -353,9 +357,10 @@ class Converter:
             return
         # unknown container: descend
         for c in node.children:
-            self.block(c, depth)
+            self.block(c, indent)
 
-    def list_item(self, node, kind, n, depth):
+    def list_item(self, node, kind, n, indent):
+        """Write an item at `indent`. Returns where its sublists start: under its text."""
         inline_nodes, sublists = [], []
         for c in node.children:
             (sublists if c.tag in ("ul", "ol") else inline_nodes).append(c)
@@ -364,9 +369,11 @@ class Converter:
         checkbox = text.startswith(("[ ] ", "[x] "))
         if not checkbox and inline_nodes and inline_nodes[0].tag is None:
             text = escape_line_start(text)
-        self.lines.append("  " * depth + marker + text.replace("\n", " "))
+        self.lines.append(indent + marker + text.replace("\n", " "))
+        content = indent + " " * len(marker)
         for s in sublists:
-            self.block(s, depth + 1)
+            self.block(s, content)
+        return content
 
     def list_inline(self, node):
         # Native list items can carry tags and formatting on the li itself;
@@ -389,40 +396,19 @@ class Converter:
                 return True
         return any(self.has_list_styles(child) for child in node.children)
 
-    def styled_lists(self, node, depth=1):
-        """Graph puts marker styles on items and sublists beside items."""
-        ordered = node.tag == "ol"
-        inherited = liststyles.from_attributes(node.attrs, liststyles.default(ordered))
-        groups = []
-        for child in node.children:
-            if child.tag in ("ul", "ol"):
-                nested = self.styled_lists(child, depth + 1)
-                if groups and groups[-1]["children"]:
-                    groups[-1]["children"][-1]["children"].extend(nested)
-                else:
-                    for token in nested:
-                        token["attrs"]["list_indent"] = max(depth + 1, token["attrs"].get("list_indent", 0))
-                    groups.extend(nested)
-                continue
-            if child.tag != "li":
-                continue
-            style = liststyles.from_attributes(child.attrs, inherited)
-            if not groups or groups[-1]["attrs"]["list_style"] != style:
-                start = int(node.attrs.get("start", "1")) if not groups else 1
-                groups.append({"type": "list", "tight": True,
-                               "attrs": {"ordered": ordered, "start": start, "list_style": style},
-                               "children": []})
-            text = self.list_inline(child)
-            item = {"type": "list_item"}
-            if text.startswith(("[ ] ", "[x] ")):
-                item.update(type="task_list_item", attrs={"checked": text.startswith("[x]")})
-                text = text[4:]
-            item["children"] = _parse(escape_line_start(text.replace("\n", " ")))
-            for nested in child.children:
-                if nested.tag in ("ul", "ol"):
-                    item["children"].extend(self.styled_lists(nested, depth + 1))
-            groups[-1]["children"].append(item)
-        return groups
+    def styled_item(self, node, depth):
+        """A Graph list item, for htmltables.lists: Graph puts marker styles
+        and note tags on items, and its sublists inside or beside them."""
+        text = self.list_inline(node)
+        item = {"type": "list_item"}
+        if text.startswith(("[ ] ", "[x] ")):
+            item.update(type="task_list_item", attrs={"checked": text.startswith("[x]")})
+            text = text[4:]
+        item["children"] = _parse(escape_line_start(text.replace("\n", " ")))
+        for nested in node.children:
+            if nested.tag in ("ul", "ol"):
+                item["children"].extend(htmltables.lists(nested, self.styled_item, depth + 1))
+        return item
 
     def table(self, node):
         tasks = any("to-do" in child.attrs.get("data-tag", "") for child in _find_all(node, "p"))

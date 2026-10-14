@@ -66,14 +66,19 @@ ONENOTE_CACHE = os.path.join(CACHE_DIR, "note-note-onenote.json")
 ONENOTE_ORDER = os.path.join(CACHE_DIR, "note-note-onenote-order.json")
 ONENOTE_IMG_DIR = os.path.join(CACHE_DIR, "note-note-onenote-img")
 ONENOTE_AUDIO_DIR = os.path.join(CACHE_DIR, "note-note-onenote-audio")
+# The list levels the last reads restored from OneNote's native objects,
+# with the Graph HTML each was read for (read_list_levels).
+ONENOTE_LEVELS = os.path.join(CACHE_DIR, "note-note-onenote-levels.json")
+MAX_REMEMBERED_LEVELS = 4   # pages: the page check reads the open one
 # This provider's limits: what it will read from Graph and keep around.
 MAX_SECTIONS = 500
 INVENTORY_VERSION = 2
 PAGE_METADATA_VERSION = 1
-# Seconds after a section's pages are recorded, by a listing or by a page
-# order this app wrote, before a refresh lists them again. Graph shows a
-# written order some seconds after OneNote takes it, and a listing any
-# sooner could bring the old order back.
+# Seconds after this app wrote a section's page order before any refresh
+# lists the section again. Graph shows a written order a few seconds after
+# OneNote takes it, and a listing any sooner could bring the old order back;
+# the provider offers no Refresh for the section until then
+# (sectionOrderSettlesAt).
 RELIST_AFTER = 30
 READ_ONLY_REASON = "This notebook is shared with you as read-only."
 MAX_PAGES = 3000
@@ -181,6 +186,26 @@ def require_revision_access(section_id, not_writable, not_granted):
         fail(not_writable)
     if not web_session.write_granted():
         fail(not_granted)
+
+
+def open_page_revision(page_id):
+    """The page's cell in OneNote's web revision service, just read:
+    (session, cell, state). The cell is joined by the page's OneNote client
+    ID, from the listing or else from Graph, and must hold that page. Only
+    for an account the service lets in (require_revision_access)."""
+    client_id = cached_resource("pages", page_id).get("clientId")
+    if not client_id:
+        status, metadata = graph("GET", resource_url("pages", page_id) + "?$select=id,links")
+        client_id = revision_objects.client_guid(metadata) if status == 200 and isinstance(metadata, dict) else None
+    if not client_id:
+        raise web_session.WebError("OneNote did not identify the page")
+    section = cached_resource("sections", cached_resource("pages", page_id).get("sectionId"))
+    session = web_session.Session.for_section(section, graph)
+    cell = revision_objects.Section(session.read_section()).cell(client_id)
+    state = session.read(cell)
+    if blank_lines.Page(state).identity() != client_id:
+        raise web_session.WebError("The page's revisions could not be verified; refresh the section")
+    return session, cell, state
 
 
 def resource_url(collection, resource_id):
@@ -517,18 +542,27 @@ class Listing:
         # an interrupted run knows its own tail.
         return not isinstance(was, dict) or was.get("modified") != sct.get("modified", "")
 
-    def record(self, sct, pages):
+    def record(self, sct, pages, ordered=False):
+        """`ordered`: the pages are in an order this app just wrote, which
+        Graph may not list yet (order_settling)."""
         self.by_section[sct["id"]] = pages
-        self.seen[sct["id"]] = {"modified": sct.get("modified", ""), "at": time.time(),
-                                "metadata": PAGE_METADATA_VERSION}
+        seen = {"modified": sct.get("modified", ""), "metadata": PAGE_METADATA_VERSION}
+        if ordered:
+            seen["ordered"] = time.time()
+        self.seen[sct["id"]] = seen
         self.progress.pop(sct["id"], None)
 
-    def recent(self, section_id):
-        """Whether the section's pages were recorded in the last
-        RELIST_AFTER seconds, which a refresh leaves as they are."""
+    def order_settling(self, section_id):
+        """Whether this app wrote the section's page order in the last
+        RELIST_AFTER seconds, which Graph may not list yet."""
         was = self.seen.get(section_id)
-        at = was.get("at") if isinstance(was, dict) else None
-        return isinstance(at, (int, float)) and time.time() - at < RELIST_AFTER
+        ordered = was.get("ordered") if isinstance(was, dict) else None
+        return isinstance(ordered, (int, float)) and time.time() - ordered < RELIST_AFTER
+
+    def orders_settling(self):
+        """When Graph should list each order this app wrote moments ago
+        (epoch seconds); its section is not listed again before then."""
+        return {sid: self.seen[sid]["ordered"] + RELIST_AFTER for sid in self.seen if self.order_settling(sid)}
 
     def outdated(self):
         """Sections listed in full, but before the page metadata listings
@@ -597,6 +631,13 @@ class Listing:
                 if self.stale(section, False) and self.page_limit(section["id"]) > 0
                 and not self.progress.get(section["id"], {}).get("limited")]
 
+    def partial(self):
+        """Sections whose pages are listed only in part: a first listing
+        under way, or one cut at the page limit. A section listed again keeps
+        its whole earlier list meanwhile (retain_pages)."""
+        return [section["id"] for section in self.sections
+                if section["id"] in self.progress and section["id"] not in self.seen]
+
     def retain_pages(self, section_id, pages):
         """Publish partial titles without treating absent pages as deletions."""
         updated = {page["id"]: page for page in pages}
@@ -612,8 +653,10 @@ class Listing:
         return {"sections": remembered_order(self.sections, load_order()), "notebooks": self.notebooks,
                 "pages": self.pages(), "inventoryReady": True,
                 "inventoryComplete": self.complete(),
-                "pendingSections": pending, "outdatedSections": self.outdated(),
+                "pendingSections": pending, "partialSections": self.partial(),
+                "outdatedSections": self.outdated(),
                 "sectionRetryAt": retries,
+                "sectionOrderSettlesAt": self.orders_settling(),
                 "pageListSerial": self.serial,
                 "listingWarnings": self.warnings}
 
@@ -792,7 +835,9 @@ def cmd_list_step(payload):
         if section is None:
             out(listing.answer())
             return
-        if data.get("refresh") is True and not listing.recent(sid):
+        # No refresh lists a section before Graph can show the order this
+        # app just wrote there.
+        if data.get("refresh") is True and not listing.order_settling(sid):
             listing.seen.pop(sid, None)
             listing.progress.pop(sid, None)
             listing.revision = uuid.uuid4().hex
@@ -1358,25 +1403,33 @@ def restore_list_indents(page_id, source):
     section_id = cached_resource("pages", page_id).get("sectionId")
     if not web_session.writable_notebook(notebook_record("sections", section_id)) or not web_session.write_granted():
         return source, ""
-    client_id = cached_resource("pages", page_id).get("clientId")
-    if not client_id:
-        status, metadata = graph("GET", resource_url("pages", page_id) + "?$select=id,links")
-        client_id = revision_objects.client_guid(metadata) if status == 200 and isinstance(metadata, dict) else None
-    if not client_id:
-        raise web_session.WebError("OneNote did not identify the page to read its list indentation")
-    session = web_session.Session.for_section(cached_resource("sections", section_id), graph)
-    cell = revision_objects.Section(session.read_section()).cell(client_id)
-    state = session.read(cell)
-    page = blank_lines.Page(state)
-    if page.identity() != client_id:
-        raise web_session.WebError("The page's list indentation could not be verified; refresh the section")
-    return list_indents.restore(source, page.objects), state["LatestRevisionId"]
+    _, _, state = open_page_revision(page_id)
+    return list_indents.restore(source, blank_lines.Page(state).objects), state["LatestRevisionId"]
 
 
-def read_page(page_id):
-    """The page as a note. Its images are fetched into the cache. Its
-    recordings are not: each is named by its Graph resource and fetched when
-    someone plays it (cmd_onenote_recording)."""
+def read_list_levels(page_id, source, reuse):
+    """`source` with its native list levels restored, and the revision they
+    were read from. With `reuse`, the levels the last read restored serve
+    while Graph's HTML is the same, so the page check, every minute, costs
+    no revision read. A load and a save read them again."""
+    digest, key = fingerprint(source), fingerprint(page_id)
+    remembered = load_json(ONENOTE_LEVELS, {})
+    last = remembered.get(key) or {}
+    if reuse and last.get("graph") == digest:
+        return last["html"], last["revision"]
+    html, revision = restore_list_indents(page_id, source)
+    if revision:
+        remembered.pop(key, None)
+        remembered[key] = {"graph": digest, "html": html, "revision": revision}
+        save_private(ONENOTE_LEVELS, dict(list(remembered.items())[-MAX_REMEMBERED_LEVELS:]))
+    return html, revision
+
+
+def read_page(page_id, check=False):
+    """The page as a note, its HTML, and the native revision its list levels
+    were read from ("" when none were). Its images are fetched into the
+    cache. Its recordings are not: each is named by its Graph resource and
+    fetched when someone plays it (cmd_onenote_recording)."""
     _image_budget.start()
     ticket = search_ticket(page_id)
     url = page_content_url(page_id) + "?includeIDs=true"
@@ -1386,22 +1439,30 @@ def read_page(page_id):
             fail(graph_err(json.loads(html), status))
         except ValueError:
             fail("Graph error %s" % status)
-    html, list_revision = restore_list_indents(page_id, html)
+    unread = ""
+    try:
+        html, revision = read_list_levels(page_id, html, reuse=check)
+    except web_session.WebError as error:
+        # Graph's HTML omits skipped list levels: a save planned against it
+        # could flatten them, so the page opens without being editable.
+        revision, unread = "", str(error)
     resolve_pending_uploads(page_id, html)
     # Graph's resources are the truth here: no upload alias applies.
     identity = RecordingIdentity()
     result = onenote_md.html_to_markdown(html, cached_image, recording_resource,
         lambda src, local, title, identifier: identity.resolve(local, identifier))
-    result["_list_revision"] = list_revision
     if any(not recording["local"] for recording in result["recordings"]):
         result["reason"] = "A recording on this page has no OneNote resource, so the page is read-only."
     remember_images(page_id, result["images"], result["editable"])
     remember_recordings(result["recordings"])
     remember_search(page_id, html, ticket)
+    if unread:
+        result["editable"] = False
+        result["reason"] = "OneNote did not return this page's list levels (%s), so it is read-only for now." % unread
     if resource_read_only("pages", page_id):
         result["editable"] = False
         result["reason"] = READ_ONLY_REASON
-    return result, html
+    return result, html, revision
 
 
 def cmd_onenote_page(page_id, check=False):
@@ -1414,7 +1475,7 @@ def cmd_onenote_page(page_id, check=False):
                 out(dict(recovered, editable=not read_only, markdown=True,
                          reason=READ_ONLY_REASON if read_only else ""))
                 return
-        remote, html = read_page(page_id)
+        remote = read_page(page_id, check)[0]
         if check:
             journal.check_remote(remote)
         result = normalize_note(remote) if check else journal.open(remote)
@@ -1637,13 +1698,8 @@ def remove_blank_lines(page_id, runs):
                             "OneNote's API cannot remove blank lines between paragraphs in this notebook; "
                             "remove them in OneNote — your draft was kept",
                             "Sign in to OneNote again to let Note Note remove blank lines — your draft was kept")
-    status, metadata = graph("GET", resource_url("pages", page_id) + "?$select=id,links")
-    client_id = revision_objects.client_guid(metadata) if status == 200 and isinstance(metadata, dict) else None
-    if not client_id:
-        fail("OneNote did not identify this page to remove its blank lines — your draft was kept")
     try:
-        session = web_session.Session.for_section(cached_resource("sections", section_id), graph)
-        blank_lines.remove(session, client_id, runs)
+        blank_lines.remove(*open_page_revision(page_id), runs)
     except web_session.WebError as error:
         fail("Could not remove the blank lines: %s — your draft was kept" % error)
 
@@ -1654,21 +1710,11 @@ def write_lists(page_id, current, desired, expected_revision=""):
     require_revision_access(section_id,
                             "This notebook does not expose native list editing — your draft was kept",
                             "Sign in to OneNote again to allow native list editing — your draft was kept")
-    client_id = cached_resource("pages", page_id).get("clientId")
-    if not client_id:
-        status, metadata = graph("GET", resource_url("pages", page_id) + "?$select=id,links")
-        client_id = revision_objects.client_guid(metadata) if status == 200 and isinstance(metadata, dict) else None
-    if not client_id:
-        fail("OneNote did not identify the page for its list changes — your draft was kept")
     try:
-        session = web_session.Session.for_section(cached_resource("sections", section_id), graph)
-        cell = revision_objects.Section(session.read_section()).cell(client_id)
-        state = session.read(cell)
+        session, cell, state = open_page_revision(page_id)
         if expected_revision and state["LatestRevisionId"] != expected_revision:
             raise web_session.WebError("The page changed while planning its list save; reload the note")
         page = list_edits.ListPage(state)
-        if page.identity() != client_id:
-            raise web_session.WebError("The page identity changed; refresh the section")
         status, fresh = graph_raw("GET", page_content_url(page_id) + "?includeIDs=true")
         if status != 200:
             raise web_session.WebError("OneNote did not return the page before its list save")
@@ -1677,86 +1723,87 @@ def write_lists(page_id, current, desired, expected_revision=""):
             raise web_session.WebError("The page changed while planning its list save; reload the note")
         updates = list_edits.plan(current, desired, page)
         session.write(cell, state, updates)
-        confirmed = list_edits.ListPage(session.read(cell))
+        written = list_edits.ListPage(session.read(cell))
         for obj in updates:
-            saved = confirmed.objects.get(obj["ObjectId"], {})
-            if not list_edits.confirmed(obj, saved):
+            if not list_edits.confirmed(obj, written.objects.get(obj["ObjectId"], {})):
                 raise web_session.WebError("OneNote did not confirm the list changes; reload the note")
         status, source = graph_raw("GET", page_content_url(page_id) + "?includeIDs=true")
         if status != 200:
             raise web_session.WebError("OneNote did not return the saved lists; reload the note")
-        return list_indents.restore(source, confirmed.objects)
+        return list_indents.restore(source, written.objects)
     except web_session.WebError as error:
         fail("Could not save the lists: %s — your draft was kept" % error)
 
 
-def write_body(page_id, note, remote, current, *, lists_saved=False):
+def write_body(page_id, note, remote, current, revision):
     """Write the body of a merge planned against the exact HTML fetched by
-    this save. Returning means OneNote has accepted it."""
-    url = page_content_url(page_id)
-    saved_html = current
-    if note["body"] != normalize_note(remote)["body"]:
-        _recording_budget.start()            # the copies this save fetches
-        uploads = Uploads(recordings=remote.get("recordings", []))
-        runs = onenote_md.markdown_to_runs(note["body"], uploads.ref, uploads.audio_ref)
-        if uploads.error:
-            fail(uploads.error)
-        image_paths = {item["src"]: item.get("local") for item in remote.get("images", [])}
-        image_paths.update(uploads.image_paths)
+    this save, whose list levels were read from the native `revision`.
+    Returning means OneNote has accepted it.
 
-        def audio_identity(src, local, title, identifier):
-            recording = uploads.recordings.get(src)
-            return local, identifier or (recording or {}).get("id", "")
+    List structure Graph cannot move is written natively first (Plan.native);
+    the rest is planned again against the page that leaves.
+    """
+    if note["body"] == normalize_note(remote)["body"]:
+        remember_search(page_id, current, saved=True)
+        return
+    _recording_budget.start()            # the copies this save fetches
+    uploads = Uploads(recordings=remote.get("recordings", []))
+    runs = onenote_md.markdown_to_runs(note["body"], uploads.ref, uploads.audio_ref)
+    if uploads.error:
+        fail(uploads.error)
+    desired = "".join(run["html"] for run in runs)
+    image_paths = {item["src"]: item.get("local") for item in remote.get("images", [])}
+    image_paths.update(uploads.image_paths)
 
-        def project(element):
-            source = onenote_patch.serialize(element, keep_ids=True)
-            displayed = onenote_md.html_to_markdown(source, lambda src, width: image_paths.get(src),
-                                                   lambda src, title: uploads.audio_paths.get(src), audio_identity)
-            normalized = normalize_note(displayed)
-            return onenote_md.markdown_to_onenote_html(normalized["body"], uploads.ref, uploads.audio_ref)
+    def audio_identity(src, local, title, identifier):
+        recording = uploads.recordings.get(src)
+        return local, identifier or (recording or {}).get("id", "")
 
+    def as_note(source):
+        return onenote_md.html_to_markdown(source, lambda src, width: image_paths.get(src),
+                                           lambda src, title: uploads.audio_paths.get(src), audio_identity)
+
+    def project(element):
+        normalized = normalize_note(as_note(onenote_patch.serialize(element, keep_ids=True)))
+        return onenote_md.markdown_to_onenote_html(normalized["body"], uploads.ref, uploads.audio_ref)
+
+    def plan_against(page):
         try:
-            planned = onenote_patch.plan(current, "".join(run["html"] for run in runs), project=project)
+            planned = onenote_patch.plan(page, desired, project=project)
         except (onenote_patch.UnsupportedEdit, onenote_patch.InvalidPlan) as error:
             fail(str(error) + " — your draft was kept")
-        simulated_note = onenote_md.html_to_markdown(planned.simulated, lambda src, width: image_paths.get(src),
-                                                    lambda src, title: uploads.audio_paths.get(src), audio_identity)
-        if not simulated_note["editable"] or normalize_note(simulated_note)["body"] != note["body"]:
+        simulated = as_note(planned.simulated)
+        if not simulated["editable"] or normalize_note(simulated)["body"] != note["body"]:
             fail("the proposed update could not preserve this page's content — your draft was kept")
-        saved_html = planned.simulated
-        if list_edits.needs_native(current, planned):
-            if lists_saved:
-                fail("OneNote did not return the requested list layout — your draft was kept")
-            native_html = list_edits.list_changes(current, planned)
-            expected = onenote_md.html_to_markdown(native_html, lambda src, width: image_paths.get(src),
-                                                  lambda src, title: uploads.audio_paths.get(src), audio_identity)
-            saved_html = write_lists(page_id, current, native_html, remote.get("_list_revision", ""))
-            confirmed = onenote_md.html_to_markdown(saved_html, lambda src, width: image_paths.get(src),
-                                                     lambda src, title: uploads.audio_paths.get(src), audio_identity)
-            if not confirmed["editable"] or normalize_note(confirmed)["body"] != normalize_note(expected)["body"]:
-                fail("OneNote did not return the requested list layout — your draft was kept")
-            if normalize_note(confirmed)["body"] != note["body"]:
-                write_body(page_id, note, confirmed, saved_html, lists_saved=True)
-                return
-            remember_search(page_id, saved_html, saved=True)
-            return
-        commands = uploads.materialize(planned.commands)
-        if uploads.error:
-            fail(uploads.error)
-        if planned.blank_lines:
-            # First: Graph commands never target blank lines, so their
-            # targets survive this, and the next save plans without them.
-            remove_blank_lines(page_id, planned.blank_lines)
-        if commands:
-            if uploads.staged:
-                remember_pending_uploads(page_id, uploads.staged)
-            status, res = patch_page(url, commands, uploads.parts)
-            if status not in (200, 204):
-                try:
-                    fail(graph_err(json.loads(res), status))
-                except ValueError:
-                    fail("Graph error %s" % status)
-    remember_search(page_id, saved_html, saved=True)
+        return planned
+
+    planned = plan_against(current)
+    if planned.native is not None:
+        expected = normalize_note(as_note(planned.native))["body"]
+        current = write_lists(page_id, current, planned.native, revision)
+        returned = as_note(current)
+        if not returned["editable"] or normalize_note(returned)["body"] != expected:
+            fail("OneNote did not return the requested list layout — your draft was kept")
+        planned = plan_against(current)
+        if planned.native is not None:
+            fail("OneNote did not return the requested list layout — your draft was kept")
+    commands = uploads.materialize(planned.commands)
+    if uploads.error:
+        fail(uploads.error)
+    if planned.blank_lines:
+        # First: Graph commands never target blank lines, so their
+        # targets survive this, and the next save plans without them.
+        remove_blank_lines(page_id, planned.blank_lines)
+    if commands:
+        if uploads.staged:
+            remember_pending_uploads(page_id, uploads.staged)
+        status, res = patch_page(page_content_url(page_id), commands, uploads.parts)
+        if status not in (200, 204):
+            try:
+                fail(graph_err(json.loads(res), status))
+            except ValueError:
+                fail("Graph error %s" % status)
+    remember_search(page_id, planned.simulated, saved=True)
 
 
 def write_title(page_id, title):
@@ -1791,7 +1838,7 @@ def cmd_onenote_update(page_id, path):
     refuse_unkept_formatting(payload)
     with merge_store(page_id) as journal:
         journal.stage(payload.get("view", ""), payload)
-        remote, current = read_page(page_id)
+        remote, current, revision = read_page(page_id)
         if not remote["editable"]:
             fail(remote.get("reason") or "this page now contains content that cannot be saved safely — your draft was kept")
         merged = journal.prepare(remote, payload.get("resolution"))
@@ -1802,7 +1849,7 @@ def cmd_onenote_update(page_id, path):
         note = merged["note"]
         if normalize_note(note) != note:
             fail("the merged formatting needs review before saving — your draft was kept")
-        write_body(page_id, note, remote, current)
+        write_body(page_id, note, remote, current, revision)
         if note["title"] != remote["title"]:
             # The body is on the page. Record that before the title request,
             # which can fail or be throttled into a rerun of this job: the
@@ -2082,14 +2129,14 @@ def cmd_reorder_pages(payload_path):
         fail(message)
     # OneNote answered that it took the revision, so the order written is the
     # section's order: it is recorded without listing the section again, and
-    # a refresh leaves it until Graph lists it too (RELIST_AFTER).
+    # no refresh lists the section until Graph can show it too (RELIST_AFTER).
     with listing_lock():
         cache = load_listing() or {}
         listing = Listing(cache, cache.get("sections", []))
         current_section = next((value for value in listing.sections if value["id"] == section_id), None)
         if current_section is None:
             fail("The order was saved but the notebook inventory changed; refresh it")
-        listing.record(current_section, arranged)
+        listing.record(current_section, arranged, ordered=True)
         listing.revision = uuid.uuid4().hex
         listing.save(listing.complete())
         answer = listing.answer()

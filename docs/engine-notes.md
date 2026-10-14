@@ -616,9 +616,30 @@ documentation disagrees with the service in three places.
   unchanged element IDs and attributes before writing. Bare blank lines do
   not disable granular updates. An unsupported edit or failed simulation
   preserves the draft and reports an error; there is no page rebuild fallback.
-  List nesting and bullet/number family changes replace only the affected
-  span when every item in it changes level or family. Items that remain at
-  their level use the ordinary recursive diff, preserving their identities.
+  An element is unchanged only with the same text in the same list role: an
+  item and the same item one level deeper read alike, but are not the same.
+- **List structure is written natively, never through Graph.** Graph cannot
+  move a list item, and replacing one recreates it. OneNote's web revision
+  service (`list_edits.py`) reparents the existing items with their children
+  instead, keeping their text objects, when lists are indented, outdented,
+  split or change family. Graph's generated list IDs can describe virtual
+  containers, so they are not used as native ownership or assumed to be valid
+  PATCH targets; an insertion beside a list anchors on its other neighbour.
+  The planner names the page the native writer must make first
+  (`Plan.native`). The save writes it on the page revision it read,
+  validates the hierarchy, verifies the returned content, and plans the rest
+  again for Graph against that page. A list in a table cell stays Graph's:
+  the native writer moves a table as one element. While it runs, it also
+  removes the save's blank lines, and it always removes a blank line beside
+  a list, which `blank_lines.py` cannot name. It cannot write media: where a
+  table or picture goes, it leaves a paragraph holding one no-break space,
+  which Graph exports with an ID and the next plan replaces. Graph's HTML
+  export also omits skipped list levels and group boundaries;
+  `list_indents.py` restores them from the native objects. A page whose
+  levels OneNote does not return opens read-only, since a save planned
+  against Graph's HTML could flatten them. The page check, every minute,
+  reuses the levels the last read restored while Graph's HTML is unchanged;
+  a load and a save read them again.
 - A div can only be replaced by its **generated id**, never by its `data-id`
   (that one works for `insert`/`append`). Generated ids change on every write,
   so they must be read back with `?includeIDs=true` before each patch.

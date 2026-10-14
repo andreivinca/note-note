@@ -94,8 +94,8 @@ class NativeListTests(unittest.TestCase):
                    '<li style="list-style-type:lower-roman"><br/></li>' + '</ol>' * 6)
         desired = onenote.onenote_md.markdown_to_onenote_html(onenote.onenote_md.html_to_markdown(desired)["body"])
         planned = onenote.onenote_patch.plan(source, desired)
-        self.assertTrue(edits.needs_native(source, planned))
-        updates = edits.plan(source, planned.simulated, page)
+        self.assertIsNotNone(planned.native)
+        updates = edits.plan(source, planned.native, page)
         saved = edits.ListPage(apply(state, updates))
         self.assertEqual(saved.identity(), CLIENT)
         for number in (22, 25, 28, 31, 43):
@@ -128,7 +128,7 @@ class NativeListTests(unittest.TestCase):
     def test_leaf_text_edit_keeps_graph_path(self):
         _, source = fixture()
         planned = onenote.onenote_patch.plan(source, source.replace("Nested", "Edited"))
-        self.assertFalse(edits.needs_native(source, planned))
+        self.assertIsNone(planned.native)
 
     def test_parent_text_has_its_own_target_and_keeps_descendants(self):
         _, source = fixture()
@@ -264,7 +264,7 @@ class ReadTests(unittest.TestCase):
         restored = list_indents.restore(source, objects)
         body = onenote.onenote_md.html_to_markdown(restored)["body"].replace('data-list-indent="6"', 'data-list-indent="7"')
         planned = onenote.onenote_patch.plan(restored, onenote.onenote_md.markdown_to_onenote_html(body))
-        self.assertTrue(edits.needs_native(restored, planned))
+        self.assertIsNotNone(planned.native)
 
 
 class WriteTests(unittest.TestCase):

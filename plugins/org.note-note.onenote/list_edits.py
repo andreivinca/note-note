@@ -13,17 +13,16 @@ import re
 import time
 import uuid
 
-from blank_lines import ASCII_TEXT, CONTENT, ELEMENT, GENERATED_ID, RICH_TEXT, TEXT, Page
+from blank_lines import ASCII_TEXT, CONTENT, ELEMENT, GENERATED_ID, GROUP, RICH_TEXT, TEXT, Page
 from notemerge import AmbiguousAlignment, align
 from onenote_md import Converter, Node
-from onenote_patch import LISTS, children, parse, serialize, simulate, text, walk
+from onenote_patch import LISTS, children, parse, serialize, text, walk
 from revision_objects import CHILDREN, properties, references
 from web_session import WebError
 import liststyles
 import textcolor
 
 OUTLINE = 0x6000C
-GROUP = 0x60019
 NUMBER = 0x60012
 FORMAT = 0x12004D
 CHILD_LEVEL = 0x0C001C03
@@ -45,11 +44,22 @@ HIGHLIGHT = 0x14001C0D
 HYPERLINK = 0x08001E14
 HIDDEN = 0x08001E16
 LINK_PROTECTED = 0x08001E19
+SPACE_BEFORE = 0x1400342E
+SPACE_AFTER = 0x1400342F
 TAG_STATES = 0x40003489
+TAG_STATE = 0x44000811       # one entry of TAG_STATES, as the revision service lists them
 TAG_DEFINITION = 0x120043
 TAG_SHAPE = 0x10003464
 TAG_LABEL = 0x1C003468
 TAG_TYPE = 0x10003463
+TAG_HIGHLIGHT = 0x14003465
+TAG_TEXT_COLOR = 0x14003466
+TAG_STATUS = 0x14003467
+TAG_SCHEMA = 0x0C003473
+TAG_CHECKED = 0x10003470
+TAG_CREATED = 0x1400346E
+TAG_COMPLETED = 0x1400346F
+TAG_DEFINITION_REF = 0x20003488
 TAG_DEFINITIONS = {
     "to-do": (0, 3, "To Do"), "important": (1, 13, "Important"),
     "question": (2, 15, "Question"), "idea": (10, 21, "Idea"),
@@ -173,45 +183,6 @@ class ListPage(Page):
         for child in self.children(identifier):
             yield from self.descendants(child)
 
-def needs_native(source, planned):
-    """Graph can replace a leaf's inline text; topology needs a native edit."""
-    tree = parse(source)
-    scopes = {}
-    for node in walk(tree):
-        if node.tag in LISTS:
-            for child in walk(node):
-                if child.attrs.get("id"):
-                    scopes[child.attrs["id"]] = child
-    for command in planned.commands:
-        target = scopes.get(command["target"])
-        if any(node.tag in LISTS for node in walk(parse(command["content"]))):
-            return True
-        if target is not None and (command["action"] != "replace" or target.tag in LISTS
-                or any(child.tag in LISTS for child in walk(target))):
-            return True
-    return False
-
-
-def list_changes(source, planned):
-    """Native list edits first; independent Graph edits keep their own writer.
-
-    Media outside a list may share an insertion command with the list. Leave
-    those blocks for the subsequent Graph plan against the confirmed native
-    revision. The recovery journal retains the complete intent until both
-    writers finish, just as for native blank-line removal.
-    """
-    tree = parse(source)
-    targets = {child.attrs["id"] for node in walk(tree) if node.tag in LISTS
-               for child in walk(node) if child.attrs.get("id")}
-    commands = []
-    for command in planned.commands:
-        content = parse(command["content"])
-        if command["target"] not in targets and not any(node.tag in LISTS for node in walk(content)):
-            continue
-        content.children = [node for node in content.children if node.tag not in {"img", "object", "table"}]
-        commands.append(dict(command, content=serialize(content)))
-    return serialize(simulate(tree, commands), keep_ids=True)
-
 
 class Writer:
     def __init__(self, page):
@@ -310,7 +281,7 @@ class Writer:
         values = {TEXT: "".join(value for value, _ in runs),
                   RUN_FORMATTING: ",".join(reference(self.format(formatting)) for _, formatting in runs),
                   RUN_INDEX: ",".join(indices), MODIFIED: self.stamp,
-                  0x1400342E: "0", 0x1400342F: "0"}
+                  SPACE_BEFORE: "0", SPACE_AFTER: "0"}
         if tags:
             states = []
             for tag in dict.fromkeys(tags):
@@ -319,15 +290,17 @@ class Writer:
                     raise WebError("OneNote returned an unsupported note tag")
                 kind, shape, label = TAG_DEFINITIONS[name]
                 definition_values = {TAG_TYPE: str(kind), TAG_SHAPE: str(shape), TAG_LABEL: label,
-                                     0x14003467: "0", 0x0C003473: "0"}
+                                     TAG_STATUS: "0", TAG_SCHEMA: "0"}
                 if name in {"remember-for-later", "definition"}:
-                    definition_values.update({0x14003466: "0", 0x14003465: "65535" if name == "remember-for-later" else "65280"})
+                    # These two tags highlight their text: yellow and green.
+                    highlight = "65535" if name == "remember-for-later" else "65280"
+                    definition_values.update({TAG_TEXT_COLOR: "0", TAG_HIGHLIGHT: highlight})
                 definition = self.create(TAG_DEFINITION, definition_values)
                 checked = tag.endswith(":completed") or not name.startswith("to-do")
-                state = [0x10003470, "1" if checked else "0", 0x1400346E, self.stamp,
-                         0x1400346F, self.stamp if checked else "0", 0x20003488, reference(definition)]
+                state = [TAG_CHECKED, "1" if checked else "0", TAG_CREATED, self.stamp,
+                         TAG_COMPLETED, self.stamp if checked else "0", TAG_DEFINITION_REF, reference(definition)]
                 states.append(json.dumps(state, separators=(",", ":")))
-            values[TAG_STATES] = json.dumps({"PropertyId": 0x44000811, "Values": states}, separators=(",", ":"))
+            values[TAG_STATES] = json.dumps({"PropertyId": TAG_STATE, "Values": states}, separators=(",", ":"))
         return values
 
     def element(self, row, previous):

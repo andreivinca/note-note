@@ -178,37 +178,29 @@ class JoinTests(unittest.TestCase):
 
 
 class RemovalTests(unittest.TestCase):
-    def session(self, page, confirmed):
+    CELL = cell_guid(0) + "|1"
+
+    def session(self, confirmed):
         session = Mock()
-        session.read_section.return_value = section_state()
-        session.read.side_effect = [page, confirmed]
+        session.read.return_value = confirmed
         return session
 
-    def test_one_revision_to_the_page_cell_then_a_confirming_read(self):
+    def test_one_revision_of_the_page_then_a_confirming_read(self):
         state = page_state(LINES)
         run = BlankLines(graph_id(21), graph_id(27), 2, (0, 1))
         expected = blank_lines.updated_parents(blank_lines.Page(state), (run,))
         confirmed = page_state([(20, "Alpha"), (26, "Bravo")], outline=(20, 26))
-        session = self.session(state, confirmed)
-        blank_lines.remove(session, CLIENT, (run,))
-        cell = cell_guid(0) + "|1"
-        self.assertEqual([call.args for call in session.read.call_args_list], [(cell,), (cell,)])
-        session.write.assert_called_once_with(cell, state, expected)
+        session = self.session(confirmed)
+        blank_lines.remove(session, self.CELL, state, (run,))
+        session.write.assert_called_once_with(self.CELL, state, expected)
+        session.read.assert_called_once_with(self.CELL)
 
     def test_unconfirmed_removal_is_a_visible_failure(self):
         state = page_state(LINES)
-        session = self.session(state, copy.deepcopy(state))
+        session = self.session(copy.deepcopy(state))
         with self.assertRaises(web.WebError):
-            blank_lines.remove(session, CLIENT, (BlankLines(graph_id(21), graph_id(27), 2, (0,)),))
+            blank_lines.remove(session, self.CELL, state, (BlankLines(graph_id(21), graph_id(27), 2, (0,)),))
         session.write.assert_called_once()
-
-    def test_a_cell_holding_another_page_is_never_written(self):
-        state = page_state(LINES)
-        state["RevisionList"][0]["ObjectGroups"][0]["Objects"][1]["Properties"][1] = "11111111-2222-3333-4444-555555555555"
-        session = self.session(state, state)
-        with self.assertRaises(web.WebError):
-            blank_lines.remove(session, CLIENT, (BlankLines(graph_id(21), graph_id(27), 2, (0,)),))
-        session.write.assert_not_called()
 
     def test_page_write_names_the_page_cell_and_every_object(self):
         session = web.Session({"WOPIsrc": "https://example.test", "access_token": "private", "access_token_ttl": 999})
@@ -225,17 +217,20 @@ class RemovalTests(unittest.TestCase):
 class CommandTests(unittest.TestCase):
     RUNS = (BlankLines("p:first", "p:second", 1, (0,)),)
 
-    def remove(self, editable=True, granted=True, links=True, error=None):
+    def remove(self, editable=True, granted=True, links=True, error=None, page=None):
         """remove_blank_lines with the inventory, permissions and service given."""
         resources = {"pages": {"id": "page", "sectionId": "s"}, "sections": {"id": "s"}}
         metadata = {"links": {"oneNoteClientUrl": {"href": "onenote:https://example.test/#T&page-id={%s}&end" % CLIENT}}}
+        session = Mock()
+        session.read_section.return_value = section_state()
+        session.read.return_value = page or page_state(LINES)
         output = io.StringIO()
         with contextlib.ExitStack() as stack:
             stack.enter_context(patch.object(onenote, "cached_resource", side_effect=lambda kind, _: resources[kind]))
             stack.enter_context(patch.object(web, "writable_notebook", return_value=editable))
             stack.enter_context(patch.object(web, "write_granted", return_value=granted))
             graph = stack.enter_context(patch.object(onenote, "graph", return_value=(200, metadata if links else {})))
-            stack.enter_context(patch.object(web.Session, "for_section"))
+            stack.enter_context(patch.object(web.Session, "for_section", return_value=session))
             remove = stack.enter_context(patch.object(blank_lines, "remove", side_effect=error))
             stack.enter_context(contextlib.redirect_stdout(output))
             try:
@@ -244,10 +239,17 @@ class CommandTests(unittest.TestCase):
                 pass
         return (json.loads(output.getvalue()) if output.getvalue() else {}), graph, remove
 
-    def test_removal_uses_the_page_client_id(self):
+    def test_removal_joins_the_page_by_its_client_id(self):
         result, _, remove = self.remove()
         self.assertEqual(result, {})
-        self.assertEqual(remove.call_args.args[1:], (CLIENT, self.RUNS))
+        self.assertEqual(remove.call_args.args[1:], (cell_guid(0) + "|1", page_state(LINES), self.RUNS))
+
+    def test_a_cell_holding_another_page_is_never_written(self):
+        state = page_state(LINES)
+        state["RevisionList"][0]["ObjectGroups"][0]["Objects"][1]["Properties"][1] = "11111111-2222-3333-4444-555555555555"
+        result, _, remove = self.remove(page=state)
+        self.assertIn("could not be verified", result["error"])
+        remove.assert_not_called()
 
     def test_without_revision_access_nothing_is_requested(self):
         for editable, granted, advice in ((False, True, "remove them in OneNote"),

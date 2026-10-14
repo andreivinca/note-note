@@ -24,6 +24,7 @@ SCRIPTS = [
     "plugins/org.note-note.onenote/page_inventory_selftest.py",
     "plugins/org.note-note.onenote/page_order_selftest.py",
     "plugins/org.note-note.onenote/blank_lines_selftest.py",
+    "plugins/org.note-note.onenote/list_edits_selftest.py",
     "plugins/org.note-note.onenote/order_selftest.py",
     "services/microsoft/selftest.py",
     "lib/ratelimit_selftest.py",

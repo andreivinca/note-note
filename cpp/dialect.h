@@ -14,7 +14,6 @@ namespace NoteNoteDialect {
 // A quote is the pair of margins at or past this; an indent sets the left
 // one only.
 constexpr qreal QUOTE_PX = 40;
-constexpr qreal INDENT_PX = 36;
 // Prose line height, and the fixed distance beyond an image line's height.
 constexpr qreal LINE_HEIGHT_PCT = 130;
 constexpr qreal IMAGE_LINE_GAP_PX = 8;
@@ -22,6 +21,9 @@ constexpr qreal IMAGE_LINE_GAP_PX = 8;
 constexpr qreal CODE_MARGIN_PX = 20;
 // Markdown has no empty paragraph: a blank line is a paragraph holding this.
 constexpr QChar BLANK_PARAGRAPH = QChar(0xa0);
+// Nor a paragraph indent: a plain paragraph starts with this per level
+// (docs/decisions.md, "Indent on plain text is non-breaking spaces").
+inline const QString INDENT_TEXT = QString(4, BLANK_PARAGRAPH);
 // The inline-code family, exactly: a note face whose name holds "mono" is
 // prose (docs/engine-notes.md).
 inline const QString MONO_FAMILY = QStringLiteral("monospace");

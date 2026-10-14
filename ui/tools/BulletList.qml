@@ -20,7 +20,7 @@ Tool {
     Tool {
       editor: tool.editor
       toolId: "bulletDisc"
-      capability: "ul"
+      capability: "listStyles"
       label: "●  Filled circle"
       available: tool.available && editor.canStyleLists
       function execute() {
@@ -30,7 +30,7 @@ Tool {
     Tool {
       editor: tool.editor
       toolId: "bulletCircle"
-      capability: "ul"
+      capability: "listStyles"
       label: "○  Hollow circle"
       available: tool.available && editor.canStyleLists
       function execute() {
@@ -40,7 +40,7 @@ Tool {
     Tool {
       editor: tool.editor
       toolId: "bulletSquare"
-      capability: "ul"
+      capability: "listStyles"
       label: "◾  Square"
       available: tool.available && editor.canStyleLists
       function execute() {

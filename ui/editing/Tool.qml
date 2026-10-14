@@ -23,9 +23,10 @@ QtObject {
   // A tool can own a fixed set of choices. Other menus take their members
   // and order from toolbar settings.
   property list<Tool> options
-  property bool isMenu: options.length > 0
-  // A split menu also executes its primary action from the main button.
+  // A split menu executes its primary action from the main button and
+  // offers its options beside it; any other tool with options opens them.
   property bool splitMenu: false
+  property bool isMenu: options.length > 0 && !splitMenu
   property real previewScale: 1.0
   property bool previewBold: false
 

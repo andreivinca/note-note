@@ -195,10 +195,11 @@ Item {
     session.load(false)
   }
 
-  // Puts the note away for the caller that holds the lock — a settings
-  // commit retiring the provider whose note is open. selectPath refuses
-  // while locked, and it flushes; this does neither: the caller already
-  // saved, and holds the lock for exactly that reason.
+  // Puts the note away for the caller that holds the lock: a settings
+  // commit retiring the provider whose note is open, or a row action that
+  // took the open note with it. selectPath refuses while locked, and it
+  // flushes; this does neither: the caller already saved, and holds the
+  // lock for exactly that reason.
   function putAway() {
     session.currentPath = ""
     session.load(false)
@@ -442,6 +443,11 @@ Item {
   // Answers whether the note held unsaved text.
   function holdForDeletion(path) {
     path = session.resolvedPath(path)
+    var held = session.pendingDeletions[path]
+    if (held) {
+      // A delete already under way holds the note's text, and keeps it.
+      return held.unsaved
+    }
     var current = path === session.currentPath
     var recovery = current ? editor.snapshotDocument() : (session.drafts[path] || {}).document
     var recoveryView = current ? session.editingView : (session.drafts[path] || {}).view

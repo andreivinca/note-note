@@ -10,11 +10,19 @@ Item {
   property var queue: null
   property var run: null
   property var pendingSections: []
+  // Sections whose pages are listed only in part (onenote.py,
+  // Listing.partial): a first listing under way, or one cut at the limit.
+  property var partialSections: []
   // Sections whose cached list predates the page metadata listings now
   // carry (onenote.py, Listing.outdated). One is fetched again once it is
   // open; a closed one waits instead of spending the account's budget.
   property var outdatedSections: []
   property var retryAt: ({})
+  // When Graph should list each page order this app wrote moments ago, by
+  // section (epoch seconds; onenote.py, RELIST_AFTER): nothing lists such
+  // a section again before then, so the provider offers no Refresh for it.
+  // `settled` says that time has come for one.
+  property var orderSettlesAt: ({})
   property var preferredSections: []
   property var jobs: []
   property int epoch: 0
@@ -24,6 +32,7 @@ Item {
 
   signal loaded(var result)
   signal failed(string message)
+  signal settled()
 
   onSessionChanged: reset()
   onReadyChanged: {
@@ -51,8 +60,11 @@ Item {
       }
     }
     root.pendingSections = []
+    root.partialSections = []
     root.outdatedSections = []
     root.retryAt = ({})
+    root.orderSettlesAt = ({})
+    settleStep.stop()
     root.resumeAt = 0
     root.serial = 0
   }
@@ -66,8 +78,11 @@ Item {
       return true
     }
     root.pendingSections = result.pendingSections
+    root.partialSections = result.partialSections || []
     root.outdatedSections = result.outdatedSections || []
     root.retryAt = result.sectionRetryAt || ({})
+    root.orderSettlesAt = result.sectionOrderSettlesAt || ({})
+    root.awaitSettling()
     root.schedule()
     return true
   }
@@ -106,6 +121,36 @@ Item {
       return "Page loading paused — retry"
     }
     return "Loading pages…"
+  }
+
+  function orderSettling(sid) {
+    return (root.orderSettlesAt[sid] || 0) * 1000 > Date.now()
+  }
+
+  // Wakes when the first order still settling is due, then for the next.
+  function awaitSettling() {
+    var now = Date.now()
+    var due = Infinity
+    for (var sid in root.orderSettlesAt) {
+      var at = root.orderSettlesAt[sid] * 1000
+      if (at > now) {
+        due = Math.min(due, at)
+      }
+    }
+    if (due === Infinity) {
+      settleStep.stop()
+      return
+    }
+    settleStep.interval = Math.max(100, Math.min(3600000, due - now))
+    settleStep.restart()
+  }
+
+  Timer {
+    id: settleStep
+    onTriggered: {
+      root.settled()
+      root.awaitSettling()
+    }
   }
 
   Timer {

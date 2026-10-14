@@ -96,9 +96,11 @@ and omit notes hidden by pending deletion. Omit `count` when unavailable.
 ### Row menus
 
 A right-click on a row opens the menu its provider lists in the row's
-`menu`: `[{ id, title, icon?, command?, rename?, prompt?, confirm? }]`, in the
-order given. A row without one has no menu; search results have none. Which
-rows offer what is the provider's alone — the host adds no item of its own.
+`menu`: `[{ id, title, icon?, command?, rename?, prompt?, confirm?, enabled? }]`,
+in the order given. A row without one has no menu; search results have none.
+Which rows offer what is the provider's alone — the host adds no item of its
+own. An item with `enabled: false` is shown dimmed and cannot be chosen; the
+provider lists its rows again when that changes.
 
 - `command: "deleteNote"` on a note row is the app's own delete: its
   confirmation, then `remove()` and everything that flow does. A note is
@@ -142,8 +144,10 @@ delete their folder; a folder holding anything but notes is not deleted,
 and the delete is offered only while the listing read everything — a tree
 deeper than 16 levels or wider than 4096 folders lists as partial, and its
 folders cannot be deleted from the app. OneNote's
-notebook rows, in its one-tab shape, make a section; its section rows rename
-and delete one in personal notebooks the account can edit. Graph's OneNote API can do neither, but such a section is a
+notebook rows, in its one-tab shape, make a section; its section rows list
+the section's pages again (Refresh) in any notebook, and rename and delete
+one in personal notebooks the account can edit. Graph's OneNote API can
+neither rename nor delete a section, but such a section is a
 `.one` file in its owner's OneDrive, named after the section: renaming the
 file renames the section in every OneNote app, and deleting it sends the
 section to the OneDrive recycle bin. A new section is listed at once and takes

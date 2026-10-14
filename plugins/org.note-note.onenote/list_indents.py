@@ -8,10 +8,11 @@ from onenote_md import Node
 from onenote_patch import LISTS, children, parse, serialize, walk
 from revision_objects import CHILDREN, properties, references
 from web_session import WebError
-from list_edits import CHILD_LEVEL, LIST_NODES, object_id, rows
+from blank_lines import ELEMENT
+from list_edits import CHILD_LEVEL, GROUP, LIST_NODES, OUTLINE, object_id, rows
 import liststyles
 
-OUTLINE_CONTAINERS = {0x6000C, 0x6000D, 0x60019}
+OUTLINE_CONTAINERS = {OUTLINE, ELEMENT, GROUP}
 
 
 def levels(objects, outline):
@@ -37,7 +38,7 @@ def levels(objects, outline):
             if not 1 <= level <= 31:
                 raise WebError("OneNote returned an invalid list indentation")
             for child in descendants:
-                root_group = child if identifier == outline and objects.get(child, {}).get("ClassId") == 0x60019 else group
+                root_group = child if identifier == outline and objects.get(child, {}).get("ClassId") == GROUP else group
                 visit(child, depth + level, root_group)
 
     visit(outline, 0, outline)
@@ -89,6 +90,10 @@ def restore(source, objects):
                     result.append(container)
                 stack.append(container)
             container = stack[-1]
+            # The Graph list that held the item gives its ID, style and start
+            # to one rebuilt list, once: the item's own, or, below levels no
+            # item opens, the outermost, where Graph showed the list before it
+            # left those levels out.
             original = owners.get(row.node.attrs.get("id"))
             identifier = original.attrs.get("id") if original is not None else None
             identified = container

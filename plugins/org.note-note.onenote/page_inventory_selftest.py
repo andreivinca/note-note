@@ -93,6 +93,19 @@ class ListingTests(unittest.TestCase):
         second, _ = self.step((200, {"value": [{"id": "new"}]}))
         self.assertEqual([item["id"] for item in second["pages"]], ["kept", "new"])
 
+    def test_only_a_first_listing_under_way_is_partial(self):
+        self.save()
+        continuation = ROOT + "/sections/s/pages?$skip=100"
+        first, _ = self.step((200, {"value": [{"id": "p1"}], "@odata.nextLink": continuation}))
+        self.assertEqual(first["partialSections"], ["s"])
+        done, _ = self.step((200, {"value": [{"id": "p2"}]}))
+        self.assertEqual(done["partialSections"], [])
+        # Listed again once its stamp moved: its whole earlier list stands meanwhile.
+        self.save(sections=[dict(section("s"), modified="2")], pages=done["pages"],
+                  sectionPages={"s": {"modified": "1", "metadata": onenote.PAGE_METADATA_VERSION}})
+        again, _ = self.step((200, {"value": [{"id": "p1"}], "@odata.nextLink": continuation}))
+        self.assertEqual((again["pendingSections"], again["partialSections"]), (["s"], []))
+
     def test_budget_deferral_leaves_foreground_requests_available(self):
         self.save()
         key = onenote.msgraph.settings.rate_key
@@ -127,17 +140,31 @@ class ListingTests(unittest.TestCase):
         _, graph = self.step((200, {"value": []}))
         graph.assert_not_called()
 
-    def test_a_refresh_leaves_a_section_recorded_moments_ago(self):
-        """Graph shows a written page order some seconds late, so a refresh
-        does not list a section whose pages were recorded in the last
-        RELIST_AFTER seconds, and lists one recorded before that."""
-        for age, listed in ((5, False), (onenote.RELIST_AFTER + 5, True)):
-            self.save(pages=[page("p")], sectionPages={"s": {"modified": "1", "at": time.time() - age,
+    def test_no_refresh_lists_a_section_whose_order_was_written_moments_ago(self):
+        """Graph shows a written page order a few seconds late, so no
+        refresh lists a section whose order this app wrote in the last
+        RELIST_AFTER seconds, and the answer says when one may."""
+        now = time.time()
+        for ordered, interactive, listed in ((now - 5, False, False),
+                                             (now - 5, True, False),
+                                             (now - onenote.RELIST_AFTER - 5, True, True)):
+            self.save(pages=[page("p")], sectionPages={"s": {"modified": "1", "ordered": ordered,
                                                             "metadata": onenote.PAGE_METADATA_VERSION}})
-            self.payload.return_value = {"sectionId": "s", "refresh": True}
-            with self.subTest(age=age), patch.object(onenote, "graph", return_value=(200, {"value": [page("q")]})) as graph:
-                onenote.cmd_list_step("-")
-            self.assertEqual(graph.called, listed)
+            self.payload.return_value = {"sectionId": "s", "refresh": True, "interactive": interactive}
+            with self.subTest(age=round(now - ordered), interactive=interactive):
+                with patch.object(onenote, "graph", return_value=(200, {"value": [page("q")]})) as graph:
+                    onenote.cmd_list_step("-")
+                self.assertEqual(graph.called, listed)
+                self.assertEqual(self.output.call_args.args[0]["sectionOrderSettlesAt"],
+                                 {} if listed else {"s": ordered + onenote.RELIST_AFTER})
+
+    def test_a_listing_holds_back_no_refresh(self):
+        self.save()
+        self.step((200, {"value": [page("p")]}))
+        self.payload.return_value = {"sectionId": "s", "refresh": True}
+        with patch.object(onenote, "graph", return_value=(200, {"value": [page("q")]})) as graph:
+            onenote.cmd_list_step("-")
+        graph.assert_called_once()
 
     def test_section_refresh_does_not_renew_the_account_listing(self):
         discovered = time.time() - 700

@@ -32,7 +32,7 @@ QtObject {
   readonly property string nbsp4: "\u00a0\u00a0\u00a0\u00a0"
 
   readonly property bool canColorText: host.canColorText
-  readonly property bool canStyleLists: host.canStyleLists && supports("listStyles")
+  readonly property bool canStyleLists: host.canStyleLists
 
   function setTextColor(color) {
     if (!canColorText || !acceptsInline()) {

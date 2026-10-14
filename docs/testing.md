@@ -58,9 +58,16 @@ conditional revision.
 `plugins/org.note-note.onenote/list_edits_selftest.py` checks native list moves,
 preserved item and text identities, detached historical containers, duplicate
 parents, deep indentation, all marker styles, rich-text runs and stale native
-text. Its read fixtures include indentation omitted by Graph. The Graph merge
-fixture remains a DOM model; it does not substitute for these native ownership
-checks or live save-and-reload verification on disposable pages.
+text. Its read fixtures include indentation omitted by Graph.
+
+`merge_selftest.py` saves both ways. Its Graph fixture holds the page as
+Graph's HTML, for every edit Graph writes. `NativeSaveTests` holds the page as
+OneNote's native objects: Graph exports them, and the revision service reads
+and writes them. Lists moved between levels and families, media beside and
+between lists, and blank lines beside lists go through the real native writer,
+its revision checks and the read that restores omitted levels, and each moved
+item must keep its text object. Neither fixture substitutes for live
+save-and-reload verification on disposable pages.
 
 The QML fixture sends actual pointer drags through the shared sidebar,
 including future tree/subtree groups, scope boundaries,
@@ -225,14 +232,19 @@ leave the editor exactly as writable as the session's state says, and a
 document its provider opened read-only stays read-only. A folder renamed and
 renamed back leaves its notes at their own paths, saves included; a row's
 rename through the workspace asks for the name in the name dialog, and the
-workspace lets go of the note however the provider answers; and only the
-open note's stored snapshot is kept.
+workspace lets go of the note however the provider answers; a menu item its
+provider disables is dimmed and cannot be chosen; and only the open note's
+stored snapshot is kept.
 OneNote creation cases open editable drafts before any network response,
 append several pages in creation order, retain them during listings, and
 transfer early saves and conversions to the permanent page identity. They
 also check stable positions after sync, retained content on creation failure,
 and deletion while a page is being created. A sign-out that cancels a
 creation keeps the draft reachable and deletable, so it never blocks closing.
+A section's menu offers Refresh in every notebook, and rename and delete
+only where its file can be written; Refresh asks for the section's pages
+ahead of background listings and lets the open note go at once, and is
+disabled while a page order just written there may not reach Graph yet.
 Optimistic delete cases remove rows and release the editor before the remote
 response, keep them hidden during refreshes, and restore failed or cancelled
 deletes in their original positions. They retain unsaved text and its editing
@@ -532,7 +544,12 @@ OneNote search tests use temporary private caches and stubbed Graph replies.
 They check restart/resume, Unicode and visible-text extraction, skipped image
 resources, concurrent cache writers, deletion, stale read/save ordering,
 sign-out isolation, periodic refresh, failure backoff, bounds and atomic
-write failures. A real QML controller and request queue verify local search
+write failures. Reads go one at a time across workers and restarts: a
+searchable page READ_SPACING after the last read, an unread one
+FIRST_READ_SPEEDUP times as soon, and a read the budget defers spends no
+pace. A page the app read or saved after its last change is not read again,
+and a cache from before the pace is kept. A real QML controller and request
+queue verify local search
 during an API cooldown, parallel indexing while hidden, interactive capacity,
 account changes and callback delivery. Real processes verify distinct page
 claims and recovery after a worker exits. `tests/transition_selftest.py --host` also checks that background

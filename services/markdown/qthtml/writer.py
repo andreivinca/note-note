@@ -295,6 +295,9 @@ class _Renderer:
         if list_indent:
             css += "-qt-list-indent:%d;" % list_indent
             if list_indent > 1:
+                # Qt draws a list below the first level without vertical
+                # margins (docs/engine-notes.md, "Nested lists have no
+                # vertical margins"); one that starts there says so itself.
                 css += "margin-top:0px;margin-bottom:0px;"
         if css:
             attrs += ' style="%s"' % css

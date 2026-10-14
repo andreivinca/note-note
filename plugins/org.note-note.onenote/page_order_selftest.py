@@ -334,7 +334,8 @@ class CommandTests(unittest.TestCase):
 
     def test_a_written_order_is_recorded_without_listing_the_section_again(self):
         """OneNote's answer to the write is the confirmation: the order is
-        recorded at once, with no wait and no listing after the write."""
+        recorded at once, with no wait and no listing after the write, and
+        marked so no refresh lists the section until Graph can show it too."""
         _, pages = fixture()
         arranged = ordering.SectionOrder(fixture()[0], pages).arranged_pages(pages, ["opaque-2", "opaque-0"])
         cache = {"sections": [{"id": "s", "name": "S", "notebookId": "n"}], "pages": pages,
@@ -344,10 +345,13 @@ class CommandTests(unittest.TestCase):
             collect, sleep, saved, _ = self.command(stack, cache, pages, [{"pages": pages}], arranged=arranged)
             stack.enter_context(contextlib.redirect_stdout(output))
             onenote.cmd_reorder_pages("-")
-        self.assertTrue(json.loads(output.getvalue())["ok"])
+        answer = json.loads(output.getvalue())
+        self.assertTrue(answer["ok"])
         collect.assert_called_once()
         sleep.assert_not_called()
         self.assertEqual([page["id"] for page in saved.call_args.args[0]["pages"]], ["opaque-2", "opaque-0", "opaque-1"])
+        self.assertIn("ordered", saved.call_args.args[0]["sectionPages"]["s"])
+        self.assertEqual(list(answer["sectionOrderSettlesAt"]), ["s"])
 
     def test_revisions_require_a_personal_notebook_the_account_can_edit(self):
         personal = "0-0123456789abcdef!12"

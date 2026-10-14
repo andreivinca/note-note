@@ -10,6 +10,7 @@ Item {
   property int serial: 0
   property bool noteOpened: false
   property int loaded: 0
+  property int settled: 0
 
   function check(name, ok) {
     test.results.push({ name: name, ok: !!ok })
@@ -40,6 +41,7 @@ Item {
     queue: lane
     run: test.backend
     onLoaded: test.loaded++
+    onSettled: test.settled++
   }
 
   Component.onCompleted: {
@@ -99,9 +101,16 @@ Item {
                    lane.queue.jobs.length === 1 && lane.queue.jobs[0].priority === 0 && job.interactive)
         cache.ready = false
         test.check("disabling discovery drops queued work", lane.depth === 0 && cache.jobs.length === 0)
+        cache.accept({ pendingSections: [], sectionRetryAt: {}, sectionOrderSettlesAt: { s7: Date.now() / 1000 + 0.2 },
+                       pageListSerial: 1 })
+        test.check("a section whose page order was just written is settling",
+                   cache.orderSettling("s7") && !cache.orderSettling("s8") && test.settled === 0)
+        test.phase = 5
+      } else if (test.phase === 5 && test.settled > 0 && !cache.orderSettling("s7")) {
+        test.check("it settles at the time it was given, and says so", true)
         console.error("<<<RESULT>>>" + JSON.stringify(test.results) + "<<<END>>>")
         Qt.quit()
-        test.phase = 5
+        test.phase = 6
       }
     }
   }

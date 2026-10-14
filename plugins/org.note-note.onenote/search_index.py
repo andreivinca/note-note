@@ -5,6 +5,7 @@ Each read carries an entry revision: a late response cannot undo a save,
 inventory change, deletion or sign-out. Only sync() starts a new cache.
 """
 import contextlib
+import datetime
 import fcntl
 from html.parser import HTMLParser
 import json
@@ -18,6 +19,14 @@ MAX_PAGES = 3000
 MAX_TEXT_BYTES = 128 * 1024
 MAX_CACHE_BYTES = 16 * 1024 * 1024
 REFRESH_SECONDS = 7 * 86400
+# The indexer reads one page at a time, slowly, across workers and restarts:
+# a page already searchable READ_SPACING seconds after the last read, so
+# pages that come due together (a week after a first index) are read minutes
+# apart instead of filling the hour's request budget. A page search cannot
+# find yet goes FIRST_READ_SPEEDUP times as fast: until it is read, search
+# misses it.
+READ_SPACING = 180
+FIRST_READ_SPEEDUP = 6
 SAVE_GRACE_SECONDS = 60
 LEASE_SECONDS = 600
 VERSION = 1
@@ -69,7 +78,36 @@ def searchable_text(html):
 
 
 def empty_state(session=""):
-    return {"version": VERSION, "session": session, "serial": 0, "entries": {}}
+    return {"version": VERSION, "session": session, "serial": 0, "readAt": 0, "entries": {}}
+
+
+def modified_at(modified):
+    """Graph's lastModifiedDateTime in epoch seconds, or None."""
+    try:
+        moment = datetime.datetime.fromisoformat(modified)
+    except ValueError:
+        return None
+    return moment.timestamp() if moment.tzinfo else None
+
+
+def read_since(entry, modified):
+    """Whether the text was read, or saved, after the page's last change:
+    then the listing's newer stamp holds nothing new for search. Graph
+    stamps a change by its clock, and `checked` is this one's."""
+    changed = modified_at(modified)
+    return isinstance(entry.get("text"), str) and changed is not None and entry.get("checked", 0) >= changed
+
+
+def paced_at(state, entry, now):
+    """When the pace lets `entry` be read: READ_SPACING after the last read,
+    FIRST_READ_SPEEDUP times as soon for a page not searchable yet. A stamp
+    ahead of the clock (it was set back) holds nothing back."""
+    last = state.get("readAt", 0)
+    if last > now:
+        return 0
+    if isinstance(entry.get("text"), str):
+        return last + READ_SPACING
+    return last + READ_SPACING / FIRST_READ_SPEEDUP
 
 
 def due_at(entry):
@@ -79,6 +117,11 @@ def due_at(entry):
     if lease and not process_alive(entry.get("leasePid", 0)):
         lease = 0
     return max(due, entry.get("retryAt", 0), entry.get("holdUntil", 0), lease)
+
+
+def ready_at(state, entry, now):
+    """When `entry` may be read: its own due time, and the pace."""
+    return max(due_at(entry), paced_at(state, entry, now))
 
 
 def process_alive(pid):
@@ -95,7 +138,7 @@ def process_alive(pid):
 
 def select_page(state, preferred_sections, now):
     candidates = [(page_id, entry) for page_id, entry in state["entries"].items()
-                  if due_at(entry) <= now]
+                  if ready_at(state, entry, now) <= now]
     if not candidates:
         return None
     page_id, entry = min(candidates, key=lambda pair: (
@@ -112,14 +155,16 @@ def summary(state, now):
         section = result["sections"].setdefault(entry["sectionId"],
                     {"total": 0, "indexed": 0, "pending": 0, "failed": 0})
         indexed = isinstance(entry.get("text"), str)
-        pending = not indexed or not entry.get("checked") or entry["checked"] + REFRESH_SECONDS <= now
+        # Only a page search cannot find yet is pending: the slow refresh of
+        # a searchable one is upkeep, not progress to show.
+        pending = not indexed
         failed = pending and entry.get("failures", 0) > 0
         for counts in (result, section):
             counts["total"] += 1
             counts["indexed"] += int(indexed)
             counts["pending"] += int(pending)
             counts["failed"] += int(failed)
-        delays.append(max(0, due_at(entry) - now))
+        delays.append(max(0, ready_at(state, entry, now) - now))
     result["nextDelay"] = min(delays, default=3600)
     return result
 
@@ -156,7 +201,9 @@ class Index:
                 or not isinstance(state.get("entries"), dict)
                 or len(state["entries"]) > MAX_PAGES
                 or not isinstance(state.get("serial"), int)
-                or not isinstance(state.get("session"), str)):
+                or not isinstance(state.get("session"), str)
+                or not isinstance(state.get("readAt", 0), (int, float))
+                or not math.isfinite(state.get("readAt", 0)) or state.get("readAt", 0) < 0):
             return empty_state()
         for page_id, entry in state["entries"].items():
             if (not isinstance(page_id, str) or not isinstance(entry, dict)
@@ -209,8 +256,9 @@ class Index:
                              "failures": 0, "revision": state["serial"], "modified": modified}
                 elif entry["modified"] != modified:
                     state["serial"] += 1
-                    entry.update(modified=modified, checked=0, retryAt=0, failures=0, leaseUntil=0,
-                                 revision=state["serial"])
+                    entry.update(modified=modified, revision=state["serial"])
+                    if not read_since(entry, modified):
+                        entry.update(checked=0, retryAt=0, failures=0, leaseUntil=0)
                 entry["sectionId"] = page["sectionId"]
                 entries[page_id] = entry
             state["entries"] = entries
@@ -241,11 +289,12 @@ class Index:
             ticket = select_page(state, preferred_sections, self.now())
             if ticket is None:
                 return None
+            entry = state["entries"][ticket["id"]]
+            state["readAt"] = self.now()
             state["serial"] += 1
             ticket["revision"] = state["serial"]
-            state["entries"][ticket["id"]].update(revision=ticket["revision"],
-                                                  leasePid=os.getpid(),
-                                                  leaseUntil=self.now() + LEASE_SECONDS)
+            entry.update(revision=ticket["revision"], leasePid=os.getpid(),
+                         leaseUntil=self.now() + LEASE_SECONDS)
             self.write(state)
             return ticket
 
@@ -268,13 +317,15 @@ class Index:
             return True
 
     def release(self, ticket):
-        """A budget deferral did not fail the page or earn a retry backoff."""
+        """A budget deferral did not fail the page, earn a retry backoff or
+        spend a read: the pace owes it nothing."""
         with self.locked():
             state = self.read()
             entry = state["entries"].get(ticket["id"])
             if not self.current(state) or not entry or entry["revision"] != ticket["revision"]:
                 return
             entry["leaseUntil"] = 0
+            state["readAt"] = 0
             self.write(state)
 
     def failed(self, ticket, status=0):

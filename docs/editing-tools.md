@@ -141,14 +141,8 @@ removes its marker and list indentation together, preserving its text and table
 cell. Styled lists and lists inside tables are stored as semantic HTML in
 Markdown so their markers, nesting and check states survive saving. An indented
 first item stores its depth with `data-list-indent` when it has no parent.
-OneNote saves list structure through its native revision service: indenting,
-outdenting and splitting lists reparent the existing items together with their
-children. Graph's generated list IDs can describe virtual containers, so they
-are not used as native ownership or assumed to be valid PATCH targets. Native
-indentation and group boundaries also restore levels omitted by Graph's HTML
-export. The save checks the page revision, validates the resulting hierarchy,
-and verifies the returned content before accepting the draft. Unrelated Graph
-edits run against the confirmed list revision.
+OneNote keeps the items themselves when lists are indented, outdented or split
+([engine notes](engine-notes.md#microsoft-graph)).
 Quote and Code block can replace selected list items while keeping the
 unselected items' styles.
 
@@ -420,8 +414,8 @@ an action's content, rules and UI belong in its tool file.
 | `insertTable(markdown)` | Insert table content at the caret inside a cell, or as a normal snippet outside tables. |
 | `transformBlocks(transform, options)` | Transform selected Markdown blocks. The callback receives `{ indent, prefix, content, isList }` and returns a line. `options.list` manages paragraph separators when toggling lists; `unchangedMessage` supplies optional feedback. |
 | `toggleListStyle(style)` | Toggle `todo`, `ul` or `ol` on actual document blocks, including table cells, preserving selections and undo. |
-| `canStyleLists`, `setListStyle(style)` | Apply `disc`, `circle`, `square`, `decimal`, `lower-alpha`, `upper-alpha`, `lower-roman` or `upper-roman` without toggling off. Requires native support and `listStyles`. |
-| `indentBlocks(direction)` | Indent (`1`) or outdent (`-1`) selected list items natively, including table cells. Returns false for ordinary paragraphs so the tool can use its paragraph operation. |
+| `canStyleLists`, `setListStyle(style)` | Apply `disc`, `circle`, `square`, `decimal`, `lower-alpha`, `upper-alpha`, `lower-roman` or `upper-roman` without toggling off. `canStyleLists` is the native support; the style options declare the provider's `listStyles` capability, which gates them as any tool's. |
+| `indentBlocks(direction)` | Indent (`1`) or outdent (`-1`) selected list items natively, including table cells; paragraphs selected with them take or lose four no-break spaces, as the paragraph operation gives them. Returns false when no list item is selected, so the tool can use its paragraph operation. |
 | `tableContext()`, `changeTable(operation, index, count)` | Read the innermost table's row/column and dimensions, and insert/remove rows or columns as one undo transaction. Operations are `insertRows`, `removeRows`, `insertColumns`, `removeColumns`. |
 | `transformTable(transform)` | Plain-table fallback when the native helper is absent. Callback arguments are `(rows, row, column)`; row 1 is the Markdown separator row. Return `false` to leave the document unchanged. |
 | `withMarkdown(callback, asText, paragraphs)` | Read Markdown lines and the line/block map, rejecting stale or failed conversions. `asText` optionally reads a code block as prose. `paragraphs` projects selected list items as paragraphs without changing the live document, for block restyling. |

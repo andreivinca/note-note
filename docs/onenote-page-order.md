@@ -69,8 +69,10 @@ pages whose hierarchy is listed: a section listed before pages carried their
 level has it once it is opened and listed again. Read-only shares and work or
 school notebooks offer no drags; the provider and `reorder-pages` apply the
 same rule. Nothing a section is doing turns ordering off: not a listing of its
-pages, which a startup listing starts for every section whose stamp moved, not
-an order still saving, not a page being made or deleted. Each parent declares
+pages again, which a startup listing starts for every section whose stamp
+moved, not an order still saving, not a page being made or deleted. Only a
+section listed in part offers none: its first listing still under way, or one
+cut at the page limit, shows only some of its pages (`partialSections`). Each parent declares
 its section's reorder group and carries its subpages; a page being made is in
 the group at once, at the end of its section, and a draft OneNote could not
 make leaves it. Subpage indentation is shown, and
@@ -92,8 +94,8 @@ concurrent changes. Only the section root's page-series sequence is submitted.
 OneNote's answer to the write says whether it took the revision, and the
 order written is then published as the section's order, with no read-back and
 no listing after it. Graph lists a new order some seconds after the service
-takes it, so a refresh leaves a section whose pages were recorded in the last
-30 seconds.
+takes it, so for 30 seconds after the app writes a section's order nothing
+lists that section again, and its menu's Refresh is disabled.
 
 The UI keeps a pending drag visible across refreshes while saving the order
 in the background, and the section can be dragged again at once. The

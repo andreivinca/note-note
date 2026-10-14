@@ -234,10 +234,11 @@ LaneProvider {
     })
   }
 
-  // Page order is written into the section's file in its owner's OneDrive:
-  // a personal notebook this account owns, or one shared with it for
-  // editing. web_session.py's writable_notebook() enforces the same rule.
-  function pageOrderingNotebook(bookId) {
+  // A section is a .one file in its owner's OneDrive, which its page order,
+  // rename and delete write: a personal notebook this account owns, or one
+  // shared with it for editing. web_session.py's writable_notebook()
+  // enforces the same rule.
+  function sectionFileWritable(bookId) {
     var book = root.onNotebooks.find(function(candidate) {
       return candidate.id === bookId
     })
@@ -247,13 +248,15 @@ LaneProvider {
   }
 
   // Page ordering is the notebook's to allow, and nothing the section is
-  // doing turns it off: not a listing of its pages, not an order still
+  // doing turns it off: not a listing of its pages again, not an order still
   // saving, not a page being made or deleted. An order asked for meanwhile
-  // is queued (reorder). The section needs only its hierarchy, which a list
-  // from before pages carried their level lacks until the section is opened
-  // and listed again, and two parent pages to arrange.
+  // is queued (reorder). The section needs all its pages listed (a first
+  // listing under way, or one cut at the limit, has only some), its
+  // hierarchy, which a list from before pages carried their level lacks
+  // until the section is opened and listed again, and two parent pages.
   function pageOrderingAvailable(section) {
-    if (!root.ready || !root.ms.hasScope("Files.ReadWrite") || !root.pageOrderingNotebook(section.notebookId)) {
+    if (!root.ready || !root.ms.hasScope("Files.ReadWrite") || !root.sectionFileWritable(section.notebookId)
+        || pageInventory.partialSections.indexOf(section.id) >= 0) {
       return false
     }
     return root.parentPageIds(section.id).length > 1 && root.sectionPages(section.id).every(function(page) {
@@ -309,7 +312,7 @@ LaneProvider {
   function accountActions(bookId) {
     var actions = []
     if (bookId && root.bookWritable(bookId)) {
-      actions.push({ path: "newsection:" + bookId, title: "New section", icon: "󰉗", prompt: "Section name" })
+      actions.push({ path: "newSection", title: "New section", icon: "󰉗", prompt: "Section name" })
     }
     actions.push({ path: "logout", title: "Sign out" + (ms.account ? " (" + ms.account + ")" : ""), icon: "󰍃" })
     return actions
@@ -467,7 +470,9 @@ LaneProvider {
     root.persistRequested()
   }
 
-  function action(id, value) {
+  // `sectionKey` is the tab a footer action belongs to: a notebook's ID,
+  // where the footer offers New section.
+  function action(id, value, sectionKey) {
     if (!ms) {
       return
     }
@@ -496,8 +501,8 @@ LaneProvider {
       root.listPages(true)
     } else if (id.indexOf("loadsection:") === 0) {
       pageInventory.request(id.substring(12), true, false)
-    } else if (id.indexOf("newsection:") === 0) {
-      root.createSection(id.substring(11), value, function(result) {
+    } else if (id === "newSection") {
+      root.createSection(sectionKey, value, function(result) {
         if (result.error) {
           root.statusRequested("OneNote: " + result.error)
         }
@@ -555,8 +560,7 @@ LaneProvider {
           root.onSections = root.onSections.filter(function(other) { return other.id !== draft.id })
           root.expanded = root.expanded.filter(function(id) { return id !== draft.id })
           root.rebuild()
-          var error = r ? r.error : (info.cancelled ? "the window closed before the section was made" : "the section was not made")
-          root.statusRequested(root.name + ": " + error)
+          root.statusRequested(root.name + ": " + root.sectionFailure(r, info, "section creation"))
           return
         }
         var sct = r.section
@@ -581,20 +585,30 @@ LaneProvider {
       })
   }
 
-  // ── section rename and delete ───────────────────────────────────────
+  // ── section refresh, rename and delete ──────────────────────────────
+  // Refresh lists a section's pages again at once, whatever its timestamp
+  // says: besides the open page's, a section is listed again only when the
+  // periodic listing finds its timestamp moved (poll). Every section
+  // OneNote has made offers it, disabled while a page order this app wrote
+  // there may not reach Graph yet (PageInventory.orderSettling): a listing
+  // then could bring the old order back.
   // A section of a personal notebook is a .one file in its owner's OneDrive,
   // named after it: renaming or deleting the file renames the section in
   // every OneNote app, or sends it to the recycle bin (onenote.py,
-  // rename-section and delete-section). Offered on the terms page
-  // ordering is, once OneNote has made the section.
+  // rename-section and delete-section). Those two are offered where that
+  // file can be written (sectionFileWritable); the rows that carry this
+  // menu are listed only for an account that may write files (accountRows).
   function sectionMenu(sec) {
-    if (root.creatingSections[sec.id] || !root.ready || !root.ms.hasScope("Files.ReadWrite")
-        || !root.pageOrderingNotebook(sec.notebookId)) {
+    if (root.creatingSections[sec.id]) {
       return []
     }
-    return [{ id: "rename", title: "Rename", icon: "󰑕", rename: true },
-            { id: "delete", title: "Delete", icon: "󰆴",
-              confirm: "Delete the section “" + sec.name + "” and everything in it? It goes to your OneDrive recycle bin." }]
+    var menu = [{ id: "refresh", title: "Refresh", icon: "󰑐", enabled: !pageInventory.orderSettling(sec.id) }]
+    if (root.sectionFileWritable(sec.notebookId)) {
+      menu.push({ id: "rename", title: "Rename", icon: "󰑕", rename: true },
+                { id: "delete", title: "Delete", icon: "󰆴",
+                  confirm: "Delete the section “" + sec.name + "” and everything in it? It goes to your OneDrive recycle bin." })
+    }
+    return menu
   }
 
   // A page of the section may still be saving, so a section's request waits
@@ -616,6 +630,13 @@ LaneProvider {
       return
     }
     var sec = root.sectionAt(path)
+    if (sec && id === "refresh") {
+      // Nothing the user wrote moves or goes with a listing, so the open
+      // note need not wait for it: the pages show as they arrive.
+      pageInventory.request(sec.id, true, true)
+      cb({})
+      return
+    }
     var run = null
     if (sec && id === "rename") {
       // Shown at once as typed. renameSection then shows the name onenote.py
@@ -743,6 +764,15 @@ LaneProvider {
     gone.forEach(function(id) {
       delete root.bodies[id]
     })
+    // Its drafts OneNote could not make go with it: the host was told they
+    // went, and no listing would show their section again.
+    var drafts = {}
+    for (var draftId in root.pendingPages) {
+      if (root.pendingPages[draftId].page.sectionId !== sec.id) {
+        drafts[draftId] = root.pendingPages[draftId]
+      }
+    }
+    root.pendingPages = drafts
     root.pages = root.pages.filter(function(page) { return page.sectionId !== sec.id })
     root.onSections = root.onSections.filter(function(other) { return other.id !== sec.id })
     root.expanded = root.expanded.filter(function(id) { return id !== sec.id })
@@ -775,7 +805,7 @@ LaneProvider {
     var sectionId = scope.indexOf("pages:") === 0 ? scope.substring(6) : ""
     var section = root.sectionAt(sectionId)
     if (!section || !root.rq || !root.pageOrderingAvailable(section)) {
-      callback({ error: "The complete section and page ordering permission must be available before reordering" })
+      callback({ error: "This section's pages cannot be reordered until they are all listed" })
       return
     }
     var wanted = paths.map(function(path) {
@@ -956,6 +986,7 @@ LaneProvider {
       root.statusRequested("OneNote: " + message)
       root.rebuild()
     }
+    onSettled: root.rebuild()
   }
 
   property int inventoryRevision: 0
@@ -1488,12 +1519,15 @@ LaneProvider {
       })
   }
 
-  // Polling, on a diet. Every third tick (so once a minute) this costs at
-  // most two requests: the open page, and the pages of the section it is in.
-  // It used to re-list *every* expanded section — up to eleven requests a
-  // minute, which is 660 an hour against a budget of 400, so polling alone
-  // could exhaust the account. Other sections come back with the periodic
-  // listing (which now fetches only what changed) or a manual refresh.
+  // Polling, on a diet. Every third tick (so once a minute) this asks for
+  // the open page and lists the section it is in: two requests while the
+  // page is unchanged and the section holds at most a hundred pages. A page
+  // that did change also costs its list levels and the images not cached
+  // yet (onenote.py, read_page). It used to re-list *every* expanded
+  // section — up to eleven requests a minute, which is 660 an hour against
+  // a budget of 400, so polling alone could exhaust the account. Other
+  // sections come back with the periodic listing (which now fetches only
+  // what changed) or their menu's Refresh (sectionMenu).
   property int pollTick: 0
   function poll(currentPath) {
     if (!root.ready || !root.rq) {
@@ -1501,9 +1535,13 @@ LaneProvider {
     }
     root.pollTick++
     // Everything the poll no longer looks at comes back here instead: every
-    // fifth minute the account is re-listed. Unchanged section timestamps
-    // skip page requests; OneDrive metadata supplies section order. Under
-    // --max-age the complete cached listing avoids both kinds of request.
+    // fifth minute the account listing is asked for. Unchanged section
+    // timestamps skip page requests; OneDrive metadata supplies section
+    // order. Under --max-age (listPages) a complete cached listing under ten
+    // minutes old answers with no request of either kind, and a listing is
+    // stamped a few seconds after the tick that asked for it, so a steady
+    // run lists the account again at every third ask: about every fifteen
+    // minutes.
     if (root.pollTick % 15 === 0) {
       root.listPages(false)
     }

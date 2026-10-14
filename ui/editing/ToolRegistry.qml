@@ -163,7 +163,7 @@ Item {
     if (!builtin && claim.all > 1) {
       return "duplicate or reserved tool id"
     }
-    if (tool.shortcutKey && ((tool.isMenu && !tool.splitMenu) || !Stroke.fromQt(tool.shortcutKey, tool.shortcutModifiers))) {
+    if (tool.shortcutKey && (tool.isMenu || !Stroke.fromQt(tool.shortcutKey, tool.shortcutModifiers))) {
       return "a shortcut needs a supported key and an executable tool"
     }
     return ""
@@ -253,16 +253,16 @@ Item {
     if (!tool || !tool.available) {
       return false
     }
-    if (tool.options.length > 0 && !tool.splitMenu) {
+    if (tool.isMenu && tool.options.length > 0) {
       return Array.from(tool.options).some(function(option) {
         return registry.isVisible(option)
       })
     }
-    return (tool.isMenu && !tool.splitMenu) || editor.supports(tool.capability)
+    return tool.isMenu || editor.supports(tool.capability)
   }
 
   function canExecute(tool) {
-    if (!upToDate || !tool || (tool.isMenu && !tool.splitMenu) || !editor.writable || !isVisible(tool)) {
+    if (!upToDate || !tool || tool.isMenu || !editor.writable || !isVisible(tool)) {
       return false
     }
     return true

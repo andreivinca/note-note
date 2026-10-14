@@ -101,7 +101,7 @@ def _inline(nodes):
         elif tag == "audio":
             attrs = audio.from_attributes(node.attrs)
             if attrs is None:
-                raise ValueError("Unsupported audio in an HTML table")
+                raise ValueError("Unsupported audio in an HTML table or list")
             out.append({"type": "audio", "attrs": attrs})
         elif tag == "span":
             children = _inline(node.children)
@@ -111,7 +111,7 @@ def _inline(nodes):
             else:
                 out.extend(children)
         elif tag != "input":
-            raise ValueError("Unsupported content in an HTML table: " + str(tag))
+            raise ValueError("Unsupported content in an HTML table or list: " + str(tag))
     return out
 
 
@@ -137,7 +137,7 @@ def _blocks(nodes):
             else:
                 out.append({"type": "paragraph", "children": _inline(node.children)})
         elif tag in {"ul", "ol"}:
-            out.extend(_lists(node))
+            out.extend(lists(node, _item))
         elif tag == "blockquote":
             out.append({"type": "block_quote", "children": _blocks(node.children)})
         elif tag == "pre":
@@ -151,15 +151,21 @@ def _blocks(nodes):
     return out
 
 
-def _lists(node, depth=1):
+def lists(node, read_item, depth=1):
+    """The list tokens of an HTML list, its items read by `read_item(li, depth)`.
+
+    An item takes the list's marker style unless it names its own, and a
+    change of style starts another list, which counts from 1. A sublist
+    beside an item belongs to that item; one before any item lifts its own
+    level instead (list_indent).
+    """
     ordered = node.tag == "ol"
-    default = liststyles.default(ordered)
-    inherited = liststyles.from_attributes(node.attrs, default)
+    inherited = liststyles.from_attributes(node.attrs, liststyles.default(ordered))
     indent = int(node.attrs.get("data-list-indent", "0"))
     groups = []
     for child in node.children:
         if child.tag in {"ul", "ol"}:
-            nested = _lists(child, depth + 1)
+            nested = lists(child, read_item, depth + 1)
             if groups and groups[-1]["children"]:
                 groups[-1]["children"][-1]["children"].extend(nested)
             else:
@@ -170,16 +176,21 @@ def _lists(node, depth=1):
         if child.tag != "li":
             continue
         style = liststyles.from_attributes(child.attrs, inherited)
-        attrs = {"ordered": ordered, "list_style": style, "list_indent": indent}
         if not groups or groups[-1]["attrs"]["list_style"] != style:
-            attrs["start"] = int(node.attrs.get("start", "1")) if not groups else 1
-            groups.append({"type": "list", "tight": True, "attrs": attrs, "children": []})
-        item = {"type": "list_item", "children": _blocks(child.children)}
-        checks = list(_item_checkboxes(child))
-        if checks:
-            item.update(type="task_list_item", attrs={"checked": "checked" in checks[0].attrs})
-        groups[-1]["children"].append(item)
+            start = int(node.attrs.get("start", "1")) if not groups else 1
+            groups.append({"type": "list", "tight": True, "children": [],
+                           "attrs": {"ordered": ordered, "start": start, "list_style": style, "list_indent": indent}})
+        groups[-1]["children"].append(read_item(child, depth))
     return groups
+
+
+def _item(node, depth):
+    """A list item of the semantic HTML: its blocks, and its checkbox."""
+    item = {"type": "list_item", "children": _blocks(node.children)}
+    checks = list(_item_checkboxes(node))
+    if checks:
+        item.update(type="task_list_item", attrs={"checked": "checked" in checks[0].attrs})
+    return item
 
 
 def _item_checkboxes(node):

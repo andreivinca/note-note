@@ -2,9 +2,9 @@
 
 OneNote search uses a persistent text cache. Initial indexing runs while the
 provider is enabled in the shell, starting with unread pages in the active
-notebook. Up to two background jobs each read one page's HTML and extract text
-without fetching image or attachment resources. Searches use the cache and
-make no Graph requests.
+notebook. Background jobs read one page's HTML at a time, at the pace below,
+and extract text without fetching image or attachment resources. Searches use
+the cache and make no Graph requests.
 
 Startup discovers notebooks and sections before downloading their page lists.
 Discovery also checks recent notebooks for personal OneDrive shares omitted
@@ -41,13 +41,21 @@ attachment-content search.
 ## Refresh and request usage
 
 - Successful page reads and saves update the cached text without another
-  request. New pages are added and confirmed deletions remove their text.
+  request: opening a note, its once-a-minute check and a save each record the
+  page as read. New pages are added and confirmed deletions remove their text.
   Saves index the validated merged page, including remote edits. An unresolved
   local conflict leaves the index at the fetched remote version. The search
   cache never changes the editor's merge baseline.
-- Changed page timestamps trigger another background read. Unchanged entries
-  are revisited after seven days because Graph sometimes misses timestamp
-  changes. Closed-app time counts toward that interval.
+- A changed page timestamp triggers another background read, unless the app
+  read or saved the page after that change. Unchanged entries are revisited
+  after seven days because Graph sometimes misses timestamp changes.
+  Closed-app time counts toward that interval.
+- Pages are read one at a time, slowly, across workers and restarts: a page
+  already searchable three minutes after the last read, so pages that come due
+  together spread out instead of filling the hour's budget, and a page not yet
+  searchable six times as fast (`READ_SPACING`, `FIRST_READ_SPEEDUP`). A read
+  the budget defers does not count. The search panel shows progress only for
+  pages not yet searchable.
 - Failed pages remain pending, with retry delays from five minutes up to one
   day. Existing text survives transient failures; inaccessible or missing
   pages lose their cached text. Incomplete coverage remains visible.

@@ -1,7 +1,9 @@
 """OneNote merge integration, with a scripted server and private temporary state."""
 import contextlib
+import copy
 import html
 import io
+import itertools
 import json
 import os
 from pathlib import Path
@@ -10,6 +12,7 @@ import tempfile
 import unittest
 import urllib.error
 from unittest.mock import patch
+import uuid
 from xml.etree import ElementTree as ET
 
 WORK = tempfile.TemporaryDirectory(prefix="note-note-onenote-merges-")
@@ -21,9 +24,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "services" / "clipb
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import clipboard  # noqa: E402
 import onenote  # noqa: E402
+from blank_lines import BLANK_TEXTS, CONTENT, ELEMENT, GENERATED_ID, RICH_TEXT, TEXT  # noqa: E402
+import list_edits  # noqa: E402
+import liststyles  # noqa: E402
 from notemerge import MergeStore, StaleRemote  # noqa: E402
+from onenote_md import Node  # noqa: E402
 from parse import parse  # noqa: E402
 from qthtml import to_html, to_markdown  # noqa: E402
+import revision_objects  # noqa: E402
+from revision_objects import CHILDREN, CONTENT_ROOT, ENTITY_GUID, PAGE_METADATA, properties, references  # noqa: E402
+from web_session import NIL, WebError  # noqa: E402
 
 
 def note(body, title="Title"):
@@ -42,6 +52,229 @@ def page_html(value):
         if node.tag in onenote.onenote_patch.REPLACEABLE or node.tag == "div":
             node.set("id", "%s:fixture%d" % (node.tag, index))
     return ET.tostring(tree, encoding="unicode")
+
+
+# A page as OneNote holds it: native objects, which its web revision service
+# reads and writes, and from which Graph exports the page as HTML.
+NATIVE = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"   # the page's own objects
+GRAPH = "bbbbbbbb-cccc-dddd-eeee-ffffffffffff"    # the elements a Graph PATCH writes
+CLIENT = "12345678-1234-1234-1234-123456789abc"   # the page's OneNote client ID
+CELL = "cccccccc-dddd-eeee-ffff-000000000000|1"   # the cell holding its content
+NOTEBOOK = "0-0123456789abcdef!1"                  # a personal notebook the account owns
+PAGE_ROOT, PAGE_NODE = 0x60037, 0x6000B
+EMBEDDED = 0x60022     # a table or picture: this fixture keeps it as Graph's markup
+MARKUP = 0x1C00FFF0    # that markup
+ELEMENT_OFFSET = 1000000  # an element's number, past the object its Graph ID names
+TEXT_OFFSET = 2000000     # an item's text, when no paragraph inside it names one
+MARKER_STYLES = {value: style for style, value in list_edits.MARKERS.items()}
+
+
+def native_object(identifier, kind, values):
+    return {"ObjectId": identifier, "ClassId": kind,
+            "Properties": [value for pair in values.items() for value in pair]}
+
+
+def generated_id(tag, identifier):
+    """The ID Graph generates for the element that names the object `identifier`."""
+    return "%s:{%s}{%s}" % ((tag,) + tuple(identifier.split("|")))
+
+
+def offset(identifier, amount):
+    guid, number = identifier.split("|")
+    return "%s|%d" % (guid, int(number) + amount)
+
+
+def native_page(source):
+    """The objects of a page Graph exports as `source`.
+
+    Each block of an outline is an element. A list item hangs under the item
+    before it at a lower level; one at a level no item opens sits in a group.
+    Objects take the numbers Graph's IDs give them, as OneNote's do: a div
+    names its outline, an li its marker, a p its text and any other block its
+    content. A block without such an ID gets new objects.
+    """
+    patch_module = onenote.onenote_patch
+    namespace, fresh = str(uuid.uuid4()), itertools.count(1)
+    objects = []
+
+    def named(node):
+        match = GENERATED_ID.fullmatch(node.attrs.get("id", ""))
+        if match:
+            return "%s|%d" % (uuid.UUID(match[1]), int(match[2]))
+        return "%s|%d" % (namespace, next(fresh))
+
+    def visible(node):
+        """A block's text as OneNote stores it; a line break is \\x0b."""
+        return "".join((child.text or "") if child.tag is None else "\x0b" if child.tag == "br" else visible(child)
+                       for child in node.children if child.tag not in patch_module.LISTS)
+
+    def blocks(container, depth=0, style=""):
+        """(block, list depth, marker style) in order; an item's sublists follow it."""
+        for child in patch_module.children(container):
+            if child.tag in patch_module.LISTS:
+                ordered = child.tag == "ol"
+                yield from blocks(child, depth + 1, liststyles.from_attributes(child.attrs, liststyles.default(ordered)))
+            elif child.tag == "li":
+                yield child, depth, liststyles.from_attributes(child.attrs, style)
+                sublists = Node("root")
+                sublists.children = [nested for nested in child.children if nested.tag in patch_module.LISTS]
+                yield from blocks(sublists, depth, style)
+            else:
+                yield child, 0, ""
+
+    def element(node, style):
+        """A block's element values; its content, and an item's marker, become objects."""
+        values = {list_edits.CHILD_LEVEL: "1"}
+        if node.tag == "li":
+            marker = named(node)
+            paragraphs = [child for child in node.children
+                          if child.tag == "p" and GENERATED_ID.fullmatch(child.attrs.get("id", ""))]
+            content = named(paragraphs[0]) if paragraphs else offset(marker, TEXT_OFFSET)
+            identifier = offset(marker, ELEMENT_OFFSET)
+            objects.append(native_object(marker, list_edits.NUMBER, {list_edits.LIST_FORMAT: list_edits.MARKERS[style]}))
+            values[list_edits.LIST_NODES] = list_edits.reference(marker)
+        else:
+            content = named(node)
+            identifier = offset(content, ELEMENT_OFFSET)
+        if node.tag in {"table", "img", "object"}:
+            objects.append(native_object(content, EMBEDDED, {MARKUP: patch_module.serialize(node, keep_ids=True)}))
+        else:
+            objects.append(native_object(content, RICH_TEXT, {TEXT: visible(node)}))
+        values[CONTENT] = list_edits.reference(content)
+        return identifier, values
+
+    def attach(holder, identifier, distance):
+        if holder.get(CHILDREN) and holder[list_edits.CHILD_LEVEL] != str(distance):
+            raise ValueError("this fixture holds an element's children at one level")
+        holder[list_edits.CHILD_LEVEL] = str(distance)
+        holder[CHILDREN] = ",".join(filter(None, [holder.get(CHILDREN), list_edits.reference(identifier)]))
+
+    tree = patch_module.parse(source)
+    body = next((node for node in patch_module.walk(tree) if node.tag == "body"), tree)
+    outlines = []
+    for outline in [child for child in patch_module.children(body) if child.tag == "div"]:
+        top, holders, open_items, group = [], [], [], None
+        for node, depth, style in blocks(outline):
+            identifier, values = element(node, style)
+            holders.append((identifier, ELEMENT, values))
+            while open_items and open_items[-1][0] >= depth > 0:
+                open_items.pop()
+            if not depth:
+                top.append(identifier)
+                open_items, group = [], None
+            elif open_items:
+                attach(open_items[-1][1], identifier, depth - open_items[-1][0])
+            elif depth == 1:
+                top.append(identifier)
+                group = None
+            else:
+                if group is None or group[0] != depth:
+                    group = (depth, {list_edits.CHILD_LEVEL: str(depth - 1)})
+                    grouped = "%s|%d" % (namespace, next(fresh))
+                    holders.append((grouped, list_edits.GROUP, group[1]))
+                    top.append(grouped)
+                attach(group[1], identifier, depth - 1)
+            if depth:
+                open_items.append((depth, values))
+        for identifier, kind, values in holders:
+            objects.append(native_object(identifier, kind, values))
+        own = named(outline)
+        objects.append(native_object(own, list_edits.OUTLINE, {
+            list_edits.CHILD_LEVEL: "2", CHILDREN: ",".join(map(list_edits.reference, top))}))
+        outlines.append(own)
+    root, page, metadata = ("%s|%d" % (NATIVE, number) for number in (1, 2, 3))
+    objects += [native_object(root, PAGE_ROOT, {CONTENT: list_edits.reference(page)}),
+                native_object(page, PAGE_NODE, {CHILDREN: ",".join(map(list_edits.reference, outlines))}),
+                native_object(metadata, PAGE_METADATA, {ENTITY_GUID: CLIENT})]
+    revision = "%s|1" % uuid.uuid4()
+    return {"LatestRevisionId": revision, "ClientKnowledge": "known", "RevisionList": [
+        {"Id": revision, "BaseId": NIL,
+         "RootObjectDescriptors": [{"RootId": CONTENT_ROOT, "ObjectId": root},
+                                   {"RootId": "metadata", "ObjectId": metadata}],
+         "ObjectGroups": [{"Objects": objects}]}]}
+
+
+def graph_page(state, title):
+    """The page as Graph exports it from `state`, with the IDs Graph generates.
+
+    A group's items stand where the group does, so a level no item opens is
+    left out, and each list is named after its owner: the outline, or the
+    item it hangs under. list_indents.py restores both from the objects.
+    """
+    page = list_edits.ListPage(state)
+    root = properties(page.objects[page.roots[CONTENT_ROOT]])
+
+    def text(content):
+        return html.escape(properties(page.objects[content]).get(TEXT) or "", quote=False).replace("\x0b", "<br/>")
+
+    def entries(elements):
+        """(list tag, or None, and markup) for each block; a group's items stand in for it."""
+        result = []
+        for element in elements:
+            values = properties(page.objects[element])
+            if page.objects[element]["ClassId"] == list_edits.GROUP:
+                result.extend(entries(page.children(element)))
+                continue
+            content = references(values[CONTENT])[0]
+            markers = references(values.get(list_edits.LIST_NODES, ""))
+            nested = page.children(element)
+            if page.objects[content]["ClassId"] == EMBEDDED:
+                result.append((None, properties(page.objects[content])[MARKUP]))
+            elif markers:
+                style = MARKER_STYLES[properties(page.objects[markers[0]])[list_edits.LIST_FORMAT]]
+                tag = "ol" if style in liststyles.NUMBERS else "ul"
+                styled = ' style="list-style-type:%s"' % style if style != liststyles.default(tag == "ol") else ""
+                inner = '<p id="%s">%s</p>' % (generated_id("p", content), text(content)) if nested else text(content)
+                item = '<li id="%s"%s>%s</li>' % (generated_id("li", markers[0]), styled, inner)
+                result.append((tag, item + lists(entries(nested), element)))
+            elif properties(page.objects[content]).get(TEXT) in BLANK_TEXTS:
+                result.append((None, "<br/>"))
+            else:
+                result.append((None, '<p id="%s">%s</p>' % (generated_id("p", content), text(content))))
+        return result
+
+    def lists(blocks, owner):
+        """The blocks, each run of items in one list named after `owner`."""
+        markup, open_tag = "", None
+        for tag, block in blocks:
+            if tag != open_tag:
+                if open_tag:
+                    markup += "</%s>" % open_tag
+                if tag:
+                    markup += '<%s id="%s">' % (tag, generated_id(tag, owner))
+                open_tag = tag
+            markup += block
+        if open_tag:
+            markup += "</%s>" % open_tag
+        return markup
+
+    outlines = page.children(references(root[CONTENT])[0])
+    body = "".join('<div id="%s">%s</div>' % (generated_id("div", outline), lists(entries(page.children(outline)), outline))
+                   for outline in outlines)
+    return "<html><head><title>%s</title></head><body>%s</body></html>" % (html.escape(title, quote=False), body)
+
+
+def revised(state, objects):
+    """`state` after one more revision, which writes `objects`."""
+    result = copy.deepcopy(state)
+    revision = "%s|1" % uuid.uuid4()
+    result["RevisionList"].append({"Id": revision, "BaseId": result["LatestRevisionId"],
+                                   "ObjectGroups": [{"Objects": copy.deepcopy(list(objects))}]})
+    result["LatestRevisionId"] = revision
+    return result
+
+
+def section_state():
+    """The section holding the page: one page series, whose page keeps its content in CELL."""
+    root, series, metadata = ("%s|%d" % (NATIVE, number) for number in (101, 102, 103))
+    objects = [native_object(root, revision_objects.SECTION, {CHILDREN: list_edits.reference(series)}),
+               native_object(series, revision_objects.PAGE_SERIES,
+                             {revision_objects.PAGE_CELLS: list_edits.reference(CELL),
+                              revision_objects.PAGE_METADATA_REFS: list_edits.reference(metadata)}),
+               native_object(metadata, PAGE_METADATA, {ENTITY_GUID: CLIENT})]
+    return {"LatestRevisionId": "section|1", "RevisionList": [
+        {"Id": "section|1", "BaseId": NIL, "RootObjectDescriptors": [{"RootId": CONTENT_ROOT, "ObjectId": root}],
+         "ObjectGroups": [{"Objects": objects}]}]}
 
 
 class ImageConversionTests(unittest.TestCase):
@@ -175,7 +408,110 @@ class PastedImageTests(unittest.TestCase):
                 self.assertIn(header.encode() + data, body)
 
 
-class SaveTests(unittest.TestCase):
+class SaveFixture(unittest.TestCase):
+    """A page behind a scripted Graph, saved and read through the provider's commands."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(dir=WORK.name)
+        self.addCleanup(self.temp.cleanup)
+        self.remote = page_html(note("one\n\nmiddle\n\nthree"))
+        self.calls = []
+        self.refuse_title = False
+        self.refuse_body = False
+        self.refuse_paragraphs = False
+        self.write_ids = 0
+        self.audio_paths = {}
+        self.audio_uploads = []
+        self.generate_object_ids = True
+        self.addCleanup(patch.stopall)
+        self.raw_transport = onenote.graph_raw
+        patch.object(onenote, "merge_store", self.store).start()
+        patch.object(onenote, "graph_raw", self.graph).start()
+        patch.object(onenote, "graph", side_effect=AssertionError("unexpected network request")).start()
+        patch.object(onenote, "ONENOTE_AUDIO_DIR", str(Path(self.temp.name) / "audio")).start()
+        patch.object(onenote, "AUDIO_INDEX", str(Path(self.temp.name) / "audio/index.json")).start()
+        patch.object(onenote, "PENDING_UPLOADS_DIR", str(Path(self.temp.name) / "uploads")).start()
+        patch.object(onenote, "cached_audio", side_effect=lambda src, title: self.audio_paths.get(src)).start()
+
+    def written_id(self, tag):
+        """The ID Graph generates for an element a PATCH writes."""
+        return "%s:written%d" % (tag, self.write_ids)
+
+    def store(self, page_id="page"):
+        return MergeStore(self.temp.name, "onenote", "test-account", page_id,
+                          normalize=onenote.normalize_note, stale_seconds=120)
+
+    def graph(self, method, path, data=None, content_type=None, **options):
+        self.calls.append((method, path, data))
+        if method == "GET":
+            return 200, self.remote
+        if method == "PATCH":
+            operations = json.loads(data)
+            current = ET.fromstring(self.remote)
+            for operation in operations:
+                if operation["target"] == "title":
+                    if self.refuse_title:
+                        return 500, '{"error":{"message":"title refused"}}'
+                    current.find("./head/title").text = html.unescape(operation["content"])
+                else:
+                    if self.refuse_body:
+                        return 400, '{"error":{"message":"body refused"}}'
+                    if self.refuse_paragraphs and operation["target"].startswith("p:"):
+                        return 400, '{"error":{"message":"The PATCH target P for action replace is not supported"}}'
+                    replacements = list(ET.fromstring("<root>" + operation["content"] + "</root>"))
+                    for replacement in replacements:
+                        for child in replacement.iter():
+                            self.write_ids += 1
+                            if child.tag != "object" or self.generate_object_ids:
+                                child.set("id", self.written_id(child.tag))
+                    if operation["target"] == "body":
+                        self.assertEqual(operation["action"], "append", "a save must never replace the page body")
+                        body = current.find("body")
+                        outer = body.find("div")
+                        (outer if outer is not None else body).extend(replacements)
+                        continue
+                    identifier = operation["target"]
+                    attribute = "data-id" if identifier.startswith("#") else "id"
+                    value = identifier[1:] if attribute == "data-id" else identifier
+                    found = [(parent, child) for parent in current.iter() for child in parent
+                             if child.get(attribute) == value]
+                    self.assertEqual(len(found), 1, "PATCH targeted a missing or repeated generated ID")
+                    parent, child = found[0]
+                    index = list(parent).index(child)
+                    if operation["action"] == "replace":
+                        parent[index:index + 1] = replacements
+                    elif operation["action"] == "append":
+                        if operation.get("position", "after") == "before":
+                            child[0:0] = replacements
+                        else:
+                            child.extend(replacements)
+                    else:
+                        self.assertEqual(operation["action"], "insert")
+                        index += int(operation.get("position", "after") == "after")
+                        parent[index:index] = replacements
+            self.remote = ET.tostring(current, encoding="unicode")
+            return 204, ""
+        raise AssertionError("unexpected request " + method)
+
+    def invoke(self, function, *args):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            try:
+                function(*args)
+            except SystemExit:
+                pass
+        return json.loads(output.getvalue())
+
+    def load(self, page_id="page"):
+        return self.invoke(onenote.cmd_onenote_page, page_id)
+
+    def save(self, value, view, resolution=None, page_id="page"):
+        path = Path(self.temp.name) / "payload.json"
+        path.write_text(json.dumps(dict(value, view=view, resolution=resolution)))
+        return self.invoke(onenote.cmd_onenote_update, page_id, str(path))
+
+
+class SaveTests(SaveFixture):
     def recording(self, name="phone", title="Audio Recording.3gp"):
         """An attachment served by the scripted page endpoint, whose bytes a
         save can fetch to copy or recreate it."""
@@ -658,99 +994,6 @@ class SaveTests(unittest.TestCase):
         identifiers = {node.get("id") for node in ET.fromstring(self.remote).iter()}
         self.assertTrue({"div:outline", "ol:outline", "li:first", "li:second"} <= identifiers)
 
-    def test_split_native_nested_list_and_append_deep_list(self):
-        self.remote = ('<html><head><title>Title</title></head><body><div id="div:first">'
-                       '<ol id="ol:first"><li id="li:parent"><p id="p:parent">Parent</p>'
-                       '<ol id="ol:children"><li id="li:upper" style="list-style-type:upper-alpha">Upper</li>'
-                       '<li id="li:lower" style="list-style-type:lower-alpha"><p id="p:lower">Lower</p>'
-                       '<ol id="ol:nested"><li id="li:nested" style="list-style-type:lower-roman">Nested</li>'
-                       '</ol></li></ol></li></ol></div><div id="div:last">'
-                       '<ol id="ol:last"><li id="li:last" style="list-style-type:upper-roman">Last</li>'
-                       '</ol><br/></div></body></html>')
-        loaded = self.load()
-        desired = ('<ol><li><p>Parent</p><ol style="list-style-type:upper-alpha"><li><p>Upper</p></li>'
-                   '</ol></li></ol>\n\n'
-                   '<ol style="list-style-type:lower-alpha" data-list-indent="2"><li><p>Lower</p>'
-                   '<ol style="list-style-type:lower-roman"><li><p>Nested</p></li></ol></li></ol>\n\n'
-                   '<ol style="list-style-type:upper-roman"><li><p>Last</p></li></ol>\n\n\u00a0\n\n\u00a0\n\n'
-                   '<ol style="list-style-type:lower-roman" data-list-indent="6">'
-                   '<li><p>Added</p></li><li></li></ol>')
-        result = self.save(note(desired), loaded["view"])
-        self.assertTrue(result.get("ok"), result)
-        self.assertEqual(self.load()["body"], desired)
-        operations = [op for method, _, data in self.calls if method == "PATCH" for op in json.loads(data)]
-        self.assertEqual([(op["target"], op["action"]) for op in operations],
-                         [("div:last", "append"), ("div:last", "append"), ("li:lower", "replace")])
-        identifiers = {node.get("id") for node in ET.fromstring(self.remote).iter()}
-        self.assertTrue({"li:parent", "p:parent", "li:upper", "li:last"} <= identifiers)
-
-    def test_indenting_and_outdenting_a_styled_item_is_saved(self):
-        self.remote = page_html(note("1. First\n2. Second\n3. Third\n4. Last\n\nFooter"))
-        original = ET.fromstring(self.remote)
-        kept = {node.get("id") for node in original.iter() if node.text in {"First", "Last", "Footer"}}
-        loaded = self.load()
-        indented = ('<ol><li><p>First</p><ol style="list-style-type:lower-alpha">'
-                    '<li><p>Second</p></li><li><p>Third</p></li></ol></li><li><p>Last</p></li></ol>\n\nFooter')
-        result = self.save(note(indented), loaded["view"])
-        self.assertTrue(result.get("ok"), result)
-        loaded = self.load()
-        self.assertIn("list-style-type:lower-alpha", loaded["body"])
-        self.assertTrue(kept.issubset({node.get("id") for node in ET.fromstring(self.remote).iter()}))
-        result = self.save(note("1. First\n2. Edited\n3. Third\n4. Last\n\nFooter"), loaded["view"])
-        self.assertTrue(result.get("ok"), result)
-        self.assertEqual(self.load()["body"], "1. First\n2. Edited\n3. Third\n4. Last\n\nFooter")
-        self.assertTrue(kept.issubset({node.get("id") for node in ET.fromstring(self.remote).iter()}))
-
-    def test_list_split_merges_with_remote_blank_deletion_and_reopens_cleanly(self):
-        original = ('<ol style="list-style-type:lower-roman" data-list-indent="6">'
-                    '<li><p>First</p></li><li><p>Last</p></li></ol>')
-        split = ('<ol style="list-style-type:lower-roman" data-list-indent="6">'
-                 '<li><p>First</p></li></ol>\n\n'
-                 '<ol style="list-style-type:lower-alpha" data-list-indent="2">'
-                 '<li><p>Last</p></li></ol>')
-        self.remote = page_html(note("Before\n\n" + "\u00a0\n\n" * 3 + original))
-        loaded = self.load()
-        self.remote = page_html(note("Before\n\n" + "\u00a0\n\n" * 2 + original))
-        result = self.save(note(loaded["body"].replace(original, split)), loaded["view"])
-        self.assertTrue(result.get("ok"), result)
-        expected = "Before\n\n" + "\u00a0\n\n" * 2 + split
-        self.assertEqual(result["body"], expected)
-        reopened = self.load()
-        self.assertEqual(reopened["body"], expected)
-        self.assertNotIn("conflict", reopened)
-        self.assertNotIn("recovered", reopened)
-
-    def test_list_split_merges_with_remote_appended_lists_and_reopens_cleanly(self):
-        original = ('<ol style="list-style-type:lower-roman" data-list-indent="6">'
-                    '<li><p>First</p></li><li><p>Last</p></li></ol>')
-        split = ('<ol style="list-style-type:lower-roman" data-list-indent="6">'
-                 '<li><p>First</p></li></ol>\n\n'
-                 '<ol data-list-indent="4"><li><p>Last</p></li></ol>')
-        added = ('\n\n<ol style="list-style-type:lower-alpha" data-list-indent="2">'
-                 '<li><p>Added</p></li></ol>\n\n1. More\n2. ')
-        self.remote = page_html(note(original))
-        loaded = self.load()
-        self.remote = page_html(note(original + added))
-        result = self.save(note(split), loaded["view"])
-        self.assertTrue(result.get("ok"), result)
-        expected = onenote.normalize_note(note(split + added))["body"]
-        self.assertEqual(result["body"], expected)
-        reopened = self.load()
-        self.assertEqual(reopened["body"], expected)
-        self.assertNotIn("conflict", reopened)
-        self.assertNotIn("recovered", reopened)
-
-    def test_changing_list_family_keeps_neighbouring_paragraphs(self):
-        self.remote = page_html(note("Above\n\n- First\n- Second\n\nFooter"))
-        paragraphs = {node.get("id") for node in ET.fromstring(self.remote).iter("p")}
-        loaded = self.load()
-        numbered = ('Above\n\n<ol style="list-style-type:upper-roman">'
-                    '<li>First</li><li>Second</li></ol>\n\nFooter')
-        result = self.save(note(numbered), loaded["view"])
-        self.assertTrue(result.get("ok"), result)
-        self.assertIn("list-style-type:upper-roman", self.load()["body"])
-        self.assertTrue(paragraphs.issubset({node.get("id") for node in ET.fromstring(self.remote).iter("p")}))
-
     def test_styled_lists_in_table_cells_keep_their_markers(self):
         source = ('<table><tr><td><ol start="4" style="list-style-type:upper-roman">'
                   '<li>Four</li><li>Five</li></ol></td><td><p>Keep</p></td></tr></table>')
@@ -774,6 +1017,14 @@ class SaveTests(unittest.TestCase):
                         token = parse(source)[0]
                         self.assertEqual(token["attrs"]["list_indent"], depth)
                         self.assertEqual(token["attrs"].get("list_style", style), style)
+
+    def test_sublists_under_numbered_items_read_at_their_depth(self):
+        # A sublist hangs under its item's text, which a wider marker moves.
+        for source in ("1. One\n   1. Two\n2. Three", "1. One\n   - Two\n2. Three",
+                       "9. Nine\n10. Ten\n    1. Under ten", "- One\n  1. Two\n     - Deep\n- Three"):
+            with self.subTest(source=source):
+                rendered = onenote.onenote_md.markdown_to_onenote_html(source)
+                self.assertEqual(onenote.onenote_md.html_to_markdown(rendered)["body"], source)
 
     def test_styled_list_labels_keep_literal_markdown_prefixes(self):
         for label in ("# Topic", "1. literal", "- literal", "> literal"):
@@ -1027,104 +1278,6 @@ class SaveTests(unittest.TestCase):
                     result = self.save(note(refilled), reloaded["view"])
                     self.assertTrue(result.get("ok"), result)
                     self.assertEqual(onenote.normalize_note(self.load()), onenote.normalize_note(note(refilled)))
-
-    def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(dir=WORK.name)
-        self.addCleanup(self.temp.cleanup)
-        self.remote = page_html(note("one\n\nmiddle\n\nthree"))
-        self.calls = []
-        self.refuse_title = False
-        self.refuse_body = False
-        self.refuse_paragraphs = False
-        self.write_ids = 0
-        self.audio_paths = {}
-        self.audio_uploads = []
-        self.generate_object_ids = True
-        self.addCleanup(patch.stopall)
-        self.raw_transport = onenote.graph_raw
-        patch.object(onenote, "merge_store", self.store).start()
-        patch.object(onenote, "graph_raw", self.graph).start()
-        patch.object(onenote, "graph", side_effect=AssertionError("unexpected network request")).start()
-        patch.object(onenote, "ONENOTE_AUDIO_DIR", str(Path(self.temp.name) / "audio")).start()
-        patch.object(onenote, "AUDIO_INDEX", str(Path(self.temp.name) / "audio/index.json")).start()
-        patch.object(onenote, "PENDING_UPLOADS_DIR", str(Path(self.temp.name) / "uploads")).start()
-        patch.object(onenote, "cached_audio", side_effect=lambda src, title: self.audio_paths.get(src)).start()
-        # This fixture models Graph's HTML commands. Native ownership,
-        # conditional writes and readback have their own revision fixtures.
-        patch.object(onenote.list_edits, "needs_native", return_value=False).start()
-
-    def store(self, page_id="page"):
-        return MergeStore(self.temp.name, "onenote", "test-account", page_id,
-                          normalize=onenote.normalize_note, stale_seconds=120)
-
-    def graph(self, method, path, data=None, content_type=None, **options):
-        self.calls.append((method, path, data))
-        if method == "GET":
-            return 200, self.remote
-        if method == "PATCH":
-            operations = json.loads(data)
-            current = ET.fromstring(self.remote)
-            for operation in operations:
-                if operation["target"] == "title":
-                    if self.refuse_title:
-                        return 500, '{"error":{"message":"title refused"}}'
-                    current.find("./head/title").text = html.unescape(operation["content"])
-                else:
-                    if self.refuse_body:
-                        return 400, '{"error":{"message":"body refused"}}'
-                    if self.refuse_paragraphs and operation["target"].startswith("p:"):
-                        return 400, '{"error":{"message":"The PATCH target P for action replace is not supported"}}'
-                    replacements = list(ET.fromstring("<root>" + operation["content"] + "</root>"))
-                    for replacement in replacements:
-                        for child in replacement.iter():
-                            self.write_ids += 1
-                            if child.tag != "object" or self.generate_object_ids:
-                                child.set("id", "%s:written%d" % (child.tag, self.write_ids))
-                    if operation["target"] == "body":
-                        self.assertEqual(operation["action"], "append", "a save must never replace the page body")
-                        body = current.find("body")
-                        outer = body.find("div")
-                        (outer if outer is not None else body).extend(replacements)
-                        continue
-                    identifier = operation["target"]
-                    attribute = "data-id" if identifier.startswith("#") else "id"
-                    value = identifier[1:] if attribute == "data-id" else identifier
-                    found = [(parent, child) for parent in current.iter() for child in parent
-                             if child.get(attribute) == value]
-                    self.assertEqual(len(found), 1, "PATCH targeted a missing or repeated generated ID")
-                    parent, child = found[0]
-                    index = list(parent).index(child)
-                    if operation["action"] == "replace":
-                        parent[index:index + 1] = replacements
-                    elif operation["action"] == "append":
-                        if operation.get("position", "after") == "before":
-                            child[0:0] = replacements
-                        else:
-                            child.extend(replacements)
-                    else:
-                        self.assertEqual(operation["action"], "insert")
-                        index += int(operation.get("position", "after") == "after")
-                        parent[index:index] = replacements
-            self.remote = ET.tostring(current, encoding="unicode")
-            return 204, ""
-        raise AssertionError("unexpected request " + method)
-
-    def invoke(self, function, *args):
-        output = io.StringIO()
-        with contextlib.redirect_stdout(output):
-            try:
-                function(*args)
-            except SystemExit:
-                pass
-        return json.loads(output.getvalue())
-
-    def load(self, page_id="page"):
-        return self.invoke(onenote.cmd_onenote_page, page_id)
-
-    def save(self, value, view, resolution=None, page_id="page"):
-        path = Path(self.temp.name) / "payload.json"
-        path.write_text(json.dumps(dict(value, view=view, resolution=resolution)))
-        return self.invoke(onenote.cmd_onenote_update, page_id, str(path))
 
     @contextlib.contextmanager
     def http_transport(self, endpoint):
@@ -1528,7 +1681,7 @@ class SaveTests(unittest.TestCase):
                        '<p id="p:first">Before</p><cite>Quoted</cite><br/><p id="p:second">After</p>'
                        '</div></body></html>')
         loaded = self.load()
-        result = self.save(note(loaded["body"].replace("\n\n ", "")), loaded["view"])
+        result = self.save(note(loaded["body"].replace("\n\n\u00a0", "")), loaded["view"])
         self.assertIn("no editable target", result.get("error", ""))
         self.assertFalse(any(call[0] in ("REVISION", "PATCH") for call in self.calls))
 
@@ -1593,7 +1746,7 @@ class SaveTests(unittest.TestCase):
 
     def test_invalid_simulation_keeps_the_draft_without_writing(self):
         loaded = self.load()
-        invalid = onenote.onenote_patch.Plan((), "<body><p>Wrong</p></body>", ())
+        invalid = onenote.onenote_patch.Plan((), "<body><p>Wrong</p></body>", (), None)
         with patch.object(onenote.onenote_patch, "plan", return_value=invalid):
             result = self.save(note("Edited"), loaded["view"])
         self.assertIn("could not preserve", result["error"])
@@ -1996,6 +2149,304 @@ class SaveTests(unittest.TestCase):
         self.assertIn("# Shopping", result["body"])
         self.assertIn("[ ] Bread", result["body"])
         self.assertIn("**Phone reminder**", result["body"])
+
+
+class RevisionService:
+    """OneNote's web revision service, over the page a NativeSaveTests holds."""
+
+    def __init__(self, test):
+        self.test = test
+
+    def read_section(self):
+        return section_state()
+
+    def read(self, cell):
+        self.test.assertEqual(cell, CELL)
+        if self.test.unavailable:
+            raise WebError("Microsoft did not confirm the change (HTTP 503); refresh the section")
+        self.test.reads += 1
+        return copy.deepcopy(self.test.native)
+
+    def write(self, cell, state, objects):
+        """One revision, written only on the revision it was planned against."""
+        self.test.assertEqual(cell, CELL)
+        if state["LatestRevisionId"] != self.test.native["LatestRevisionId"]:
+            raise WebError("The section changed in OneNote — refresh it and try again")
+        self.test.revisions.append(list(objects))
+        self.test.native = revised(self.test.native, objects)
+
+
+def labels(markdown):
+    """The text of each line of `markdown` that holds some, without its list marker or checkbox."""
+    return {line.strip().lstrip("-*0123456789.").strip().removeprefix("[ ]").removeprefix("[x]").strip()
+            for line in markdown.split("\n")} - {""}
+
+
+TABLE = "| a | b |\n|---|---|\n| 1 | 2 |"
+MEDIA_BESIDE_LISTS = [
+    ("- One\n- Two\n\nFooter", "- One\n- Two\n\n" + TABLE + "\n\nFooter"),
+    ("- One\n- Two", "- One\n- Two\n\n" + TABLE),
+    ("Before\n\n- One\n- Two", "Before\n\n" + TABLE + "\n\n- One\n- Two"),
+    ("- One\n- Two", TABLE + "\n\n- One\n- Two"),
+    ("- One\n- Two\n- Three", "- One\n- Two\n\n" + TABLE + "\n\n- Three"),
+    ("- One\n- Two\n- Three\n\n\u00a0\n\nFooter", "- One\n  - Two\n\n" + TABLE + "\n\n- Three\n\nFooter"),
+]
+RELEVELS = [
+    ("- One\n- Two\n- Three\n\nFooter", "- One\n  - Two\n- Three\n\nFooter"),
+    ("- One\n- Two\n- Three\n\nFooter", "- One\n- Two\n  - Three\n\nFooter"),
+    ("- One\n  - Two\n- Three\n\nFooter", "- One\n- Two\n- Three\n\nFooter"),
+    ("- One\n- Two\n- Three", "- One\n  - Two\n- Three"),
+    ("- One\n- Two", "- One\n  - Two\n- Three"),
+    ("- One\n  - Two\n- Three", "- One\n- Two\n- Edited"),
+    ("- One\n- Two\n- Three", "- One\n  - Two\n- Edited"),
+    ("- One\n- Two\n- Three", "- One\n  - Two\n  - Three"),
+    ("- One\n  - Two\n  - Three", "- One\n- Two\n- Three"),
+    ("- One\n  - Two\n  - Three", "- One\n  - Two\n    - Three"),
+    ("- One\n  - Two\n    - Three", "- One\n  - Two\n  - Three"),
+    ("- One\n- Two\n- Three", "- One\n  1. Two\n- Three"),
+    ("1. One\n2. Two\n3. Three\n\nFooter", "1. One\n   1. Two\n2. Three\n\nFooter"),
+    ("1. One\n   1. Two\n2. Three", "1. One\n2. Two\n3. Three"),
+    ("1. One\n2. Two\n3. Three", "1. One\n   - Two\n2. Three"),
+]
+
+
+class NativeSaveTests(SaveFixture):
+    """Saves that change list structure, through OneNote's native list writer.
+
+    The page is OneNote's objects (`self.native`). The revision service
+    reads and writes them; Graph exports them as HTML, and what a PATCH
+    leaves becomes the page's objects again. Only those two transports are
+    stand-ins. Text is plain: an item's formatting lives in its text object,
+    which the tests compare as it is.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.revisions, self.reads, self.unavailable = [], 0, False
+        listing = {"notebooks": [{"id": NOTEBOOK, "userRole": "Owner"}],
+                   "sections": [{"id": "section", "notebookId": NOTEBOOK}],
+                   "pages": [{"id": "page", "sectionId": "section", "clientId": CLIENT}]}
+        patch.object(onenote, "load_listing", return_value=listing).start()
+        patch.object(onenote.web_session, "write_granted", return_value=True).start()
+        patch.object(onenote.web_session.Session, "for_section", return_value=RevisionService(self)).start()
+        patch.object(onenote, "graph", side_effect=self.page_record).start()
+        self.page("one\n\nmiddle\n\nthree")
+
+    def page(self, body, title="Title"):
+        """The page as OneNote holds it: `body`, as the Markdown writer renders it."""
+        self.title = title
+        self.native = native_page("<html><body><div>%s</div></body></html>"
+                                  % onenote.onenote_md.markdown_to_onenote_html(body))
+
+    def graph(self, method, path, data=None, content_type=None, **options):
+        # Graph exports the page from its objects; what a PATCH leaves becomes its objects.
+        self.remote = graph_page(self.native, self.title)
+        answer = super().graph(method, path, data, content_type, **options)
+        if method == "PATCH":
+            self.title = ET.fromstring(self.remote).find("./head/title").text or ""
+            self.native = native_page(self.remote)
+        return answer
+
+    def written_id(self, tag):
+        return generated_id(tag, "%s|%d" % (GRAPH, self.write_ids))
+
+    def page_record(self, method, path, data=None, **options):
+        """Graph's record of the page, which names its OneNote client ID."""
+        self.assertEqual(method, "GET")
+        self.assertTrue(path.endswith("?$select=id,links"), path)
+        link = "onenote:https://example.com/Notes/Section.one#page-id={%s}" % CLIENT
+        return 200, {"id": "page", "links": {"oneNoteClientUrl": {"href": link}}}
+
+    def texts(self):
+        """The page's text objects, by ID."""
+        page = list_edits.ListPage(self.native)
+        return {identifier: page.objects[identifier] for identifier in page.reachable
+                if page.objects[identifier]["ClassId"] == RICH_TEXT}
+
+    def patches(self):
+        return [op for method, _, data in self.calls if method == "PATCH" for op in json.loads(data)]
+
+    def test_moving_items_between_levels_keeps_their_text_objects(self):
+        for before, after in RELEVELS:
+            with self.subTest(before=before, after=after):
+                with self.store() as journal:
+                    journal.discard()
+                self.page(before)
+                self.revisions, self.calls = [], []
+                texts = self.texts()
+                loaded = self.load()
+                result = self.save(note(after), loaded["view"])
+                self.assertTrue(result.get("ok"), result)
+                self.assertEqual(self.load()["body"], after)
+                self.assertEqual((len(self.revisions), self.patches()), (1, []))
+                kept = {identifier: text for identifier, text in texts.items()
+                        if properties(text)[TEXT] in labels(after)}
+                self.assertEqual({identifier: self.texts().get(identifier) for identifier in kept}, kept)
+
+    def test_media_beside_and_between_lists_is_saved(self):
+        for before, after in MEDIA_BESIDE_LISTS:
+            with self.subTest(before=before, after=after):
+                with self.store() as journal:
+                    journal.discard()
+                self.page(before)
+                texts = self.texts()
+                loaded = self.load()
+                result = self.save(note(after), loaded["view"])
+                self.assertTrue(result.get("ok"), result)
+                self.assertEqual(self.load()["body"], onenote.normalize_note(note(after))["body"])
+                kept = {identifier: text for identifier, text in texts.items()
+                        if properties(text)[TEXT] in labels(after)}
+                self.assertEqual({identifier: self.texts().get(identifier) for identifier in kept}, kept)
+
+    def test_media_beside_a_list_takes_its_other_neighbour_as_the_anchor(self):
+        self.page("Before\n\n- One\n- Two")
+        loaded = self.load()
+        result = self.save(note("Before\n\n" + TABLE + "\n\n- One\n- Two"), loaded["view"])
+        self.assertTrue(result.get("ok"), result)
+        self.assertEqual(self.revisions, [])
+        self.assertEqual([(op["target"].split(":")[0], op["action"], op["position"]) for op in self.patches()],
+                         [("p", "insert", "after")])
+
+    def test_a_blank_line_beside_a_list_is_removed_by_the_native_writer(self):
+        for before, after in [("- One\n- Two\n\n\u00a0\n\nFooter", "- One\n- Two\n\nFooter"),
+                              ("- One\n- Two\n- Three\n\n\u00a0\n\nFooter", "- One\n  - Two\n- Three\n\nFooter")]:
+            with self.subTest(before=before, after=after):
+                with self.store() as journal:
+                    journal.discard()
+                self.page(before)
+                self.revisions, self.calls = [], []
+                loaded = self.load()
+                result = self.save(note(after), loaded["view"])
+                self.assertTrue(result.get("ok"), result)
+                self.assertEqual(self.load()["body"], after)
+                self.assertEqual((len(self.revisions), self.patches()), (1, []))
+
+    def test_the_page_check_reads_list_levels_again_only_when_the_page_changed(self):
+        self.page("- One\n  - Two\n- Three")
+        loaded = self.load()
+        reads = self.reads
+        for _ in range(2):
+            self.assertEqual(self.invoke(onenote.cmd_onenote_page, "page", True)["body"], loaded["body"])
+        self.assertEqual(self.reads, reads)
+        self.page("- One\n  - Two\n- Three\n- Four")
+        self.assertEqual(self.invoke(onenote.cmd_onenote_page, "page", True)["body"], "- One\n  - Two\n- Three\n- Four")
+        self.assertEqual(self.reads, reads + 1)
+
+    def test_a_page_whose_list_levels_are_not_returned_opens_read_only(self):
+        self.page("- One\n  - Two\n- Three")
+        self.unavailable = True
+        loaded = self.load()
+        self.assertFalse(loaded["editable"])
+        self.assertIn("list levels", loaded["reason"])
+        result = self.save(note("- One\n- Two\n- Three"), loaded["view"])
+        self.assertIn("list levels", result.get("error", ""))
+        self.assertEqual(self.revisions, [])
+
+    def test_changing_list_family_keeps_items_and_neighbouring_paragraphs(self):
+        self.page("Above\n\n- First\n- Second\n\nFooter")
+        texts = self.texts()
+        loaded = self.load()
+        numbered = ('Above\n\n<ol style="list-style-type:upper-roman">'
+                    '<li>First</li><li>Second</li></ol>\n\nFooter')
+        result = self.save(note(numbered), loaded["view"])
+        self.assertTrue(result.get("ok"), result)
+        self.assertIn("list-style-type:upper-roman", self.load()["body"])
+        self.assertEqual(self.texts(), texts)
+
+    def test_indenting_and_outdenting_a_styled_item_keeps_the_other_items(self):
+        self.page("1. First\n2. Second\n3. Third\n4. Last\n\nFooter")
+        texts = self.texts()
+        loaded = self.load()
+        indented = ('<ol><li><p>First</p><ol style="list-style-type:lower-alpha">'
+                    '<li><p>Second</p></li><li><p>Third</p></li></ol></li><li><p>Last</p></li></ol>\n\nFooter')
+        result = self.save(note(indented), loaded["view"])
+        self.assertTrue(result.get("ok"), result)
+        loaded = self.load()
+        self.assertIn("list-style-type:lower-alpha", loaded["body"])
+        self.assertEqual(self.texts(), texts)
+        result = self.save(note("1. First\n2. Edited\n3. Third\n4. Last\n\nFooter"), loaded["view"])
+        self.assertTrue(result.get("ok"), result)
+        self.assertEqual(self.load()["body"], "1. First\n2. Edited\n3. Third\n4. Last\n\nFooter")
+        kept = {identifier: text for identifier, text in texts.items() if properties(text)[TEXT] != "Second"}
+        self.assertEqual({identifier: self.texts().get(identifier) for identifier in kept}, kept)
+
+    def test_split_nested_list_and_append_deep_list_keep_every_item(self):
+        self.native = native_page(
+            '<html><body><div><ol><li><p>Parent</p><ol><li style="list-style-type:upper-alpha">Upper</li>'
+            '<li style="list-style-type:lower-alpha"><p>Lower</p><ol><li style="list-style-type:lower-roman">Nested</li>'
+            '</ol></li></ol></li></ol></div><div><ol><li style="list-style-type:upper-roman">Last</li></ol><br/>'
+            '</div></body></html>')
+        # Blank lines have no identity to keep: the writer makes the ones asked for.
+        items = {identifier: text for identifier, text in self.texts().items() if properties(text)[TEXT]}
+        loaded = self.load()
+        desired = ('<ol><li><p>Parent</p><ol style="list-style-type:upper-alpha"><li><p>Upper</p></li>'
+                   '</ol></li></ol>\n\n'
+                   '<ol style="list-style-type:lower-alpha" data-list-indent="2"><li><p>Lower</p>'
+                   '<ol style="list-style-type:lower-roman"><li><p>Nested</p></li></ol></li></ol>\n\n'
+                   '<ol style="list-style-type:upper-roman"><li><p>Last</p></li></ol>\n\n\u00a0\n\n\u00a0\n\n'
+                   '<ol style="list-style-type:lower-roman" data-list-indent="6">'
+                   '<li><p>Added</p></li><li></li></ol>')
+        result = self.save(note(desired), loaded["view"])
+        self.assertTrue(result.get("ok"), result)
+        self.assertEqual(self.load()["body"], desired)
+        self.assertEqual((len(self.revisions), self.patches()), (1, []))
+        self.assertEqual({identifier: self.texts().get(identifier) for identifier in items}, items)
+
+    def test_list_split_merges_with_remote_blank_deletion_and_reopens_cleanly(self):
+        original = ('<ol style="list-style-type:lower-roman" data-list-indent="6">'
+                    '<li><p>First</p></li><li><p>Last</p></li></ol>')
+        split = ('<ol style="list-style-type:lower-roman" data-list-indent="6">'
+                 '<li><p>First</p></li></ol>\n\n'
+                 '<ol style="list-style-type:lower-alpha" data-list-indent="2">'
+                 '<li><p>Last</p></li></ol>')
+        self.page("Before\n\n" + "\u00a0\n\n" * 3 + original)
+        loaded = self.load()
+        self.page("Before\n\n" + "\u00a0\n\n" * 2 + original)
+        result = self.save(note(loaded["body"].replace(original, split)), loaded["view"])
+        self.assertTrue(result.get("ok"), result)
+        expected = "Before\n\n" + "\u00a0\n\n" * 2 + split
+        self.assertEqual(result["body"], expected)
+        reopened = self.load()
+        self.assertEqual(reopened["body"], expected)
+        self.assertNotIn("conflict", reopened)
+        self.assertNotIn("recovered", reopened)
+
+    def test_list_split_merges_with_remote_appended_lists_and_reopens_cleanly(self):
+        original = ('<ol style="list-style-type:lower-roman" data-list-indent="6">'
+                    '<li><p>First</p></li><li><p>Last</p></li></ol>')
+        split = ('<ol style="list-style-type:lower-roman" data-list-indent="6">'
+                 '<li><p>First</p></li></ol>\n\n'
+                 '<ol data-list-indent="4"><li><p>Last</p></li></ol>')
+        added = ('\n\n<ol style="list-style-type:lower-alpha" data-list-indent="2">'
+                 '<li><p>Added</p></li></ol>\n\n1. More\n2. ')
+        self.page(original)
+        loaded = self.load()
+        self.page(original + added)
+        result = self.save(note(split), loaded["view"])
+        self.assertTrue(result.get("ok"), result)
+        expected = onenote.normalize_note(note(split + added))["body"]
+        self.assertEqual(result["body"], expected)
+        reopened = self.load()
+        self.assertEqual(reopened["body"], expected)
+        self.assertNotIn("conflict", reopened)
+        self.assertNotIn("recovered", reopened)
+
+    def test_a_refused_graph_edit_after_the_list_revision_is_finished_by_the_next_save(self):
+        self.page("- One\n- Two\n- Three\n\nFooter")
+        loaded = self.load()
+        edited = "- One\n  - Two\n- Three\n\nEdited footer"
+        self.refuse_body = True
+        result = self.save(note(edited), loaded["view"])
+        self.assertIn("body refused", result.get("error", ""))
+        self.assertEqual(len(self.revisions), 1)
+        self.refuse_body = False
+        reopened = self.load()
+        self.assertTrue(reopened.get("recovered"))
+        self.assertEqual(reopened["body"], edited)
+        result = self.save(note(edited), reopened["view"])
+        self.assertTrue(result.get("ok"), result)
+        self.assertEqual(self.load()["body"], edited)
+        self.assertEqual(len(self.revisions), 1)
 
 
 if __name__ == "__main__":

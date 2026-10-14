@@ -182,8 +182,15 @@ ShellRoot {
   // the name dialog, which a write to the rows leaves standing; the action
   // holds the note still until the provider answers, and lets go of it
   // whatever the answer — an external provider may answer with nothing at
-  // all. Follows the conflict cases.
+  // all. An item the provider disables is dimmed and cannot be chosen.
+  // Follows the conflict cases.
   function hostRowActionCases() {
+    var rowMenu = rowMenuFactory.createObject(test)
+    rowMenu.row = { menu: [{ id: "open", title: "Open" }, { id: "wait", title: "Wait", enabled: false }] }
+    check("a row menu item its provider disables is dimmed and cannot be chosen",
+          rowMenu.count === 2 && rowMenu.itemAt(0).enabled && !rowMenu.itemAt(1).enabled
+          && rowMenu.itemAt(1).contentItem.opacity < 1, "items: " + rowMenu.count)
+    rowMenu.destroy()
     var app = test.appHost
     var saves = [], actions = []
     var source = { id: "rows", name: "Rows", markdown: false, hasTitle: false, canDelete: true, sections: [],
@@ -1480,6 +1487,7 @@ ShellRoot {
   Component { id: localFactory; Local.Provider {} }
   Component { id: stickyFactory; Sticky.Provider {} }
   Component { id: notionFactory; Notion.Provider {} }
+  Component { id: rowMenuFactory; Ui.RowMenu {} }
 
   // A lane that records what it is handed and lets the test answer it.
   QtObject {
@@ -1660,7 +1668,7 @@ ShellRoot {
           orderingSource.microsoftScopes.indexOf("Files.ReadWrite") >= 0
           && orderingSource.accountActions(orderingBook).map(function(action) {
             return action.path
-          }).join(",") === "newsection:" + orderingBook + ",logout")
+          }).join(",") === "newSection,logout")
     oneNoteAccount.filesWrite = false
     check("a sign-in without OneDrive write access asks to sign in again",
           orderingSource.accountRows().length === 1 && orderingSource.accountRows()[0].path === "login")
@@ -1674,6 +1682,9 @@ ShellRoot {
           orderingRows[0].reorder === undefined && orderingRows[1].reorder.scope === "pages:" + orderingSection
           && orderingRows[1].reorder.descendants && !orderingRows[2].reorder && orderingRows[2].level === 2
           && orderingRows[3].reorder.scope === orderingRows[1].reorder.scope)
+    check("a OneNote section offers Refresh, and rename and delete where its file can be written",
+          orderingRows[0].menu.map(function(item) { return item.id }).join(",") === "refresh,rename,delete",
+          JSON.stringify(orderingRows[0].menu))
     // What a startup listing does to a section the user worked in: its
     // stamp moved, so its pages are listed again.
     orderingSource.applyInventory({ sections: orderingSource.onSections, notebooks: orderingSource.onNotebooks,
@@ -1681,12 +1692,37 @@ ShellRoot {
     var relisted = orderingSource.bookRows(orderingBook, 0)[1].reorder
     check("a section whose pages are being listed again keeps its page drags",
           !!relisted && relisted.scope === "pages:" + orderingSection)
+    // A first listing publishes its pages as they come: until it is done,
+    // an order would leave out the ones still to come.
+    orderingSource.applyInventory({ sections: orderingSource.onSections, notebooks: orderingSource.onNotebooks,
+                                    pages: orderingSource.pages, pendingSections: [orderingSection],
+                                    partialSections: [orderingSection], pageListSerial: 2 })
+    check("a section listed only in part offers no page drags", !orderingSource.bookRows(orderingBook, 0)[1].reorder)
+    orderingSource.applyInventory({ sections: orderingSource.onSections, notebooks: orderingSource.onNotebooks,
+                                    pages: orderingSource.pages, pendingSections: [], pageListSerial: 3 })
+    // A page order just written may not reach Graph for a few seconds, and
+    // a listing meanwhile could bring the old one back.
+    var settlesAt = {}
+    settlesAt[orderingSection] = Date.now() / 1000 + 30
+    orderingSource.applyInventory({ sections: orderingSource.onSections, notebooks: orderingSource.onNotebooks,
+                                    pages: orderingSource.pages, pendingSections: [],
+                                    sectionOrderSettlesAt: settlesAt, pageListSerial: 4 })
+    var settlingRefresh = orderingSource.bookRows(orderingBook, 0)[0].menu[0]
+    check("a section whose page order was just written offers Refresh disabled",
+          settlingRefresh.id === "refresh" && settlingRefresh.enabled === false, JSON.stringify(settlingRefresh))
+    orderingSource.applyInventory({ sections: orderingSource.onSections, notebooks: orderingSource.onNotebooks,
+                                    pages: orderingSource.pages, pendingSections: [], pageListSerial: 5 })
+    check("its Refresh comes back once the order has settled",
+          orderingSource.bookRows(orderingBook, 0)[0].menu[0].enabled === true)
     orderingSource.pages[1].level = undefined
     check("a section listed before its pages carried their level offers no ordering",
           !orderingSource.pageOrderingAvailable(orderingSource.onSections[0]))
     orderingSource.pages[1].level = 1
     orderingSource.onNotebooks = [{ id: orderingBook, name: "Book", userRole: "Reader" }]
     check("read-only OneNote notebooks cannot expose reorder capabilities", !orderingSource.pageOrderingAvailable(orderingSource.onSections[0]))
+    var readOnlyMenu = orderingSource.bookRows(orderingBook, 0)[0].menu
+    check("a read-only notebook's OneNote section offers Refresh alone",
+          readOnlyMenu.map(function(item) { return item.id }).join(",") === "refresh", JSON.stringify(readOnlyMenu))
     orderingSource.onNotebooks = [{ id: orderingBook, name: "Book", userRole: "Contributor" }]
     check("notebooks shared for editing expose reorder capabilities",
           orderingSource.pageOrderingAvailable(orderingSource.onSections[0]))
@@ -1694,7 +1730,7 @@ ShellRoot {
     orderingSource.onNotebooks = [{ id: guidBook, name: "Book", userRole: "Owner" },
                                   { id: guidBook.slice(0, -1), name: "Short", userRole: "Owner" }]
     check("notebooks OneDrive gave a GUID ID are personal and expose reorder capabilities",
-          orderingSource.pageOrderingNotebook(guidBook) && !orderingSource.pageOrderingNotebook(guidBook.slice(0, -1)))
+          orderingSource.sectionFileWritable(guidBook) && !orderingSource.sectionFileWritable(guidBook.slice(0, -1)))
     orderingSource.destroy()
     // A drop is taken however soon it follows the last: a section's writes
     // run one at a time, a newer order replaces one still waiting, and each
@@ -1895,14 +1931,14 @@ ShellRoot {
     // keyed to a notebook.
     var lane = created.rq, queued = []
     created.rq = { enqueue: function(opts) { queued.push(opts.key) } }
-    created.action("newsection:other-book", "Plans")
+    created.action("newSection", "Plans", "other-book")
     created.rq = lane
     var sectionJobs = queued.filter(function(key) { return key.indexOf("section:") === 0 })
     check("OneNote footer section creation targets its own notebook",
           sectionJobs.length === 1 && sectionJobs[0] === "section:other-book", JSON.stringify(queued))
     check("OneNote publishes section creation with its account footer and no New Note button",
           created.sections.every(function(section) {
-            return section.footerActions.some(function(action) { return action.path === "newsection:" + section.key })
+            return section.footerActions.some(function(action) { return action.path === "newSection" })
                 && section.footerActions.some(function(action) { return action.path === "logout" })
                 && !section.footerActions.some(function(action) { return action.path === "newNote" })
           }))
@@ -1911,13 +1947,13 @@ ShellRoot {
     check("OneNote New Note remains inside sections and New section is absent from the tree",
           created.sections.every(function(section) {
             return section.rows.some(function(row) { return row.kind === "new" && row.level === 1 })
-                && !section.rows.some(function(row) { return row.path.indexOf("newsection:") === 0 })
+                && !section.rows.some(function(row) { return row.path === "newSection" })
           }))
     created.notebookTabs = false
     created.rebuild()
     var bookRows = created.sections[0].rows.filter(function(row) { return row.kind === "tree" && row.level === 0 })
     check("the combined OneNote tab offers New section on each notebook's row, not in its footer",
-          !created.sections[0].footerActions.some(function(action) { return action.path.indexOf("newsection:") === 0 })
+          !created.sections[0].footerActions.some(function(action) { return action.path === "newSection" })
           && bookRows.map(function(row) { return row.path }).sort().join(",") === "book,other-book"
           && bookRows.every(function(row) {
             return row.menu.some(function(item) { return item.id === "newSection" && !!item.prompt })
@@ -1927,7 +1963,7 @@ ShellRoot {
     // as it is deleted; OneNote's answer only settles what then stays.
     var jobs = []
     created.rq = { depth: 0, enqueue: function(opts, start, settled) {
-      jobs.push({ key: opts.key, settled: settled })
+      jobs.push({ key: opts.key, priority: opts.priority, settled: settled })
       return { cancel: function() {} }
     }, cancelOwner: function(owner) {} }
     // A section's job; a new queue starts a listing of its own besides.
@@ -1957,12 +1993,22 @@ ShellRoot {
           JSON.stringify({ asked: asked, draft: draft, rows: rowPaths(), jobs: jobs.map(function(job) { return job.key }) }))
     var refused = null
     created.create("section:" + draft.id, function(result) { refused = result })
-    check("a section still being created takes no page and offers no rename or delete",
+    check("a section still being created takes no page and has no menu",
           !!refused && String(refused.error).indexOf("still being created") >= 0
           && created.sectionMenu(draft).length === 0, JSON.stringify(refused))
     sectionJob().settled({ section: { id: "made", notebookId: "other-book", name: "Ideas" }, pageListSerial: 0 }, {})
     check("OneNote's answer puts the made section in the stand-in's place",
           listedIds().indexOf("made") >= 0 && listedIds().indexOf(draft.id) < 0 && rowPaths().indexOf("made") >= 0)
+    var refreshed = null
+    created.rowAction("made", "refresh", "", function(result) { refreshed = result })
+    var refreshJob = jobs.filter(function(job) { return job.key === "pages:made" })[0]
+    check("a OneNote section's Refresh lists its pages ahead of background work and lets the open note go at once",
+          !!refreshed && !refreshed.error && !!refreshJob && refreshJob.priority === 0,
+          JSON.stringify({ refreshed: refreshed, jobs: jobs.map(function(job) { return job.key }) }))
+    if (refreshJob) {
+      jobs.splice(jobs.indexOf(refreshJob), 1)
+      refreshJob.settled(null)
+    }
     created.createSection("other-book", "Broken", function(result) {})
     var broken = created.onSections.filter(function(section) { return section.name === "Broken" })[0]
     sectionJob().settled({ error: "refused" }, {})
@@ -1990,6 +2036,17 @@ ShellRoot {
     check("a section OneNote deletes is gone for good, each page told so",
           listedIds().indexOf("made") < 0 && rowPaths().indexOf("made") < 0
           && outcomes.join(",") === created.pathOf("p1") + ":ok," + created.pathOf("p2") + ":ok", outcomes.join(","))
+    // A draft OneNote could not make goes with its section, and no listing brings it back.
+    created.onSections = created.onSections.concat([{ id: "drafts", notebookId: "other-book", name: "Drafts" }])
+    var failedDraft = { id: "draft-page", sectionId: "drafts", title: "Draft" }
+    created.pendingPages = { "draft-page": { page: failedDraft, operations: [], error: "not made" } }
+    created.pages = created.pages.concat([failedDraft])
+    created.rowAction("drafts", "delete", "", function(result) {})
+    sectionJob().settled({ ok: true, pages: [], pageListSerial: 0 }, {})
+    created.applyInventory({ sections: created.onSections, notebooks: created.onNotebooks, pages: [], pageListSerial: 100 })
+    check("a deleted section's drafts OneNote could not make go with it",
+          Object.keys(created.pendingPages).length === 0
+          && !created.pages.some(function(page) { return page.id === "draft-page" }), JSON.stringify(created.pages))
     created.rq = lane
     created.destroy()
     oneNote.notebookTabs = false
@@ -2021,7 +2078,7 @@ ShellRoot {
     check("read-only shared notebooks keep their notes and omit creation actions",
           oneNote.sections[0].notes.length === 1 &&
           !oneNote.bookRows("book", 0).some(function(row) { return row.kind === "new" }) &&
-          !oneNote.accountActions("book").some(function(action) { return action.path.indexOf("newsection:") === 0 }) &&
+          !oneNote.accountActions("book").some(function(action) { return action.path === "newSection" }) &&
           oneNote.createTargetFor("onenote:page") === "")
     var sharedBody = oneNote.cacheBody("onenote:page", { title: "Title", body: "Shared", view: "shared-view", editable: true })
     check("a cached shared page respects its notebook's read-only permission", !sharedBody.editable && !!sharedBody.reason)
@@ -2325,6 +2382,11 @@ ShellRoot {
           mergeLane.jobs.length === 1)
     check("the session reports a refused delete once",
           creationSession.reports.join("|") === duplicate.error)
+    // What a section delete taking the same note does (Workspace.runRowAction).
+    creationSession.holdForDeletion("onenote:b")
+    check("a section delete keeps the text a note's own delete still holds",
+          creationSession.pendingDeletions["onenote:b"].document.body === "unsaved text before deletion"
+          && creationSession.pendingDeletions["onenote:b"].unsaved)
     source.applyInventory({ sections: source.onSections, pages: pages })
     source.rebuild()
     check("refreshing during deletion does not bring its row back",
@@ -2431,6 +2493,21 @@ ShellRoot {
     source.destroy()
   }
 
+  // The cases about notes, which NOTE_NOTE_TEST_NOTES_ONLY runs alone.
+  function noteCases() {
+    unsavedTitleCases()
+    sessionCases()
+    mergeCases()
+    lifecycleCases()
+    editabilityCases()
+    renameBackCases()
+    storedCases()
+    oneNoteCases()
+    oneNoteCreationCases()
+    oneNoteDeletionCases()
+    oneNoteAccountChangeCases()
+  }
+
   Component.onCompleted: {
     backend.install()
     try {
@@ -2438,33 +2515,13 @@ ShellRoot {
         return
       }
       if (Platform.env("NOTE_NOTE_TEST_NOTES_ONLY")) {
-        unsavedTitleCases()
-        sessionCases()
-        mergeCases()
-        lifecycleCases()
-        editabilityCases()
-        renameBackCases()
-        storedCases()
-        oneNoteCases()
-        oneNoteCreationCases()
-        oneNoteDeletionCases()
-        oneNoteAccountChangeCases()
+        noteCases()
         report()
         return
       }
       editorCases()
-      unsavedTitleCases()
-      sessionCases()
-      mergeCases()
-      lifecycleCases()
-      editabilityCases()
-      renameBackCases()
-      storedCases()
+      noteCases()
       pureCases()
-      oneNoteCases()
-      oneNoteCreationCases()
-      oneNoteDeletionCases()
-      oneNoteAccountChangeCases()
       orderCases()
       listingRaceCases()
       laneProviderCases()

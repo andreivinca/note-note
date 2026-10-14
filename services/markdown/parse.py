@@ -108,19 +108,29 @@ def parse(markdown):
 def _read_html_blocks(tokens):
     result = []
     for token in tokens:
-        if token["type"] == "block_html" and re.match(r"\s*<table(?:\s|>)", token.get("raw", ""), re.I):
-            token = htmltables.parse_table(token["raw"])
-        elif token["type"] == "block_html" and re.match(r"\s*<(?:ul|ol)(?:\s|>)", token.get("raw", ""), re.I):
-            result.extend(htmltables.parse_lists(token["raw"]))
+        if token["type"] == "block_html":
+            result.extend(_html_block(token))
             continue
-        elif token["type"] == "block_html":
-            attrs = audio.from_markup(token.get("raw", ""))
-            if attrs is not None:
-                token = {"type": "audio", "attrs": attrs}
-        elif token.get("children"):
+        if token.get("children"):
             _read_html_blocks(token["children"])
         result.append(token)
     tokens[:] = result
+
+
+def _html_block(token):
+    """The tokens an HTML block reads as: a table or a list in the dialect's
+    semantic HTML, or a recording. Any other HTML stays HTML, which the
+    editor shows read-only as its source (docs/decisions.md)."""
+    raw = token.get("raw", "")
+    try:
+        if re.match(r"\s*<table(?:\s|>)", raw, re.I):
+            return [htmltables.parse_table(raw)]
+        if re.match(r"\s*<(?:ul|ol)(?:\s|>)", raw, re.I):
+            return htmltables.parse_lists(raw)
+    except ValueError:
+        return [token]
+    attrs = audio.from_markup(raw)
+    return [token] if attrs is None else [{"type": "audio", "attrs": attrs}]
 
 
 def walk_text(tokens):

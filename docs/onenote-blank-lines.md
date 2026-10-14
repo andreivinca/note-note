@@ -40,7 +40,10 @@ them. Every failure keeps the draft.
 
 The plan keeps blank lines apart from its Graph commands, and
 `remove_blank_lines()` in `onenote.py` is the one place a save hands them to
-`blank_lines.py`. Should Graph ever target blank lines, the planner emits
+`blank_lines.py`. A save that moves list items hands them to OneNote's native
+list writer instead, which rewrites their outlines anyway. So does a blank
+line beside a list: a list's ID names its outline or the item it hangs under,
+never a sibling of the blank line ([engine notes](engine-notes.md#microsoft-graph)). Should Graph ever target blank lines, the planner emits
 Graph commands for them instead, and that function, `blank_lines.py` and its
 tests go.
 

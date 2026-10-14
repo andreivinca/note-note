@@ -7,6 +7,7 @@ import "../design/controls"
 // The actions a provider offers on one of its sidebar rows — the row's
 // `menu` (docs/providers.md) — opened at the pointer by a right-click.
 // Choosing an item only reports it: what the item does is the host's to run.
+// An item the provider marks `enabled: false` is dimmed and cannot be chosen.
 QQC.Menu {
   id: menu
   palette: ControlPalette {}
@@ -79,6 +80,7 @@ QQC.Menu {
       required property var modelData
       objectName: "rowMenu-" + entry.modelData.id
       text: entry.modelData.title
+      enabled: entry.modelData.enabled !== false
       hoverEnabled: true
       implicitWidth: contentItem.implicitWidth + leftPadding + rightPadding
       implicitHeight: Math.max(menu.popupStyle.rowHeight, contentItem.implicitHeight + topPadding + bottomPadding)
@@ -91,6 +93,7 @@ QQC.Menu {
 
       contentItem: RowLayout {
         spacing: Style.spacing.controlGap
+        opacity: entry.enabled ? 1 : 0.45
 
         Text {
           visible: menu.iconColumnWidth > 0

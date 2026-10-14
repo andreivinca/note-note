@@ -2496,6 +2496,32 @@ Window {
     require(!listFormatAt("Target").list, "outdent at the first level did not leave the list")
   }
 
+  // Tab under a sublist an earlier item opened joins it, whatever marker that level took.
+  function listIndentJoinsSublist() {
+    load({ source: "1. One\n   1. Nested\n2. Two\n" })
+    editor.setCursorPosition(editor.plainText().indexOf("Two") + 1)
+    keys.keyClick(Qt.Key_Tab)
+    var nested = listFormatAt("Nested"), two = listFormatAt("Two")
+    require(two.listIndent === 2 && two.listStyle === nested.listStyle && two.listNumber === 2,
+            "Tab did not join the sublist above: " + JSON.stringify([nested, two]))
+    require(savedMarkdown() === "1. One\n   1. Nested\n   2. Two\n", "joined sublist saved as " + savedMarkdown())
+  }
+
+  // A paragraph indented with a list item takes the indent Markdown keeps, and gives it back.
+  function listIndentWithParagraph() {
+    load({ source: "- One\n- Two\n\nPara\n" })
+    var start = editor.plainText().indexOf("Two"), end = editor.plainText().indexOf("Para") + 4
+    editor.setCursorPosition(end)
+    for (var i = 0; i < end - start; i++) {
+      keys.keyClick(Qt.Key_Left, Qt.ShiftModifier)
+    }
+    keys.keyClick(Qt.Key_Tab)
+    require(listFormatAt("Two").listIndent === 2 && savedMarkdown().endsWith("\n\n    Para\n"),
+            "indented paragraph saved as " + JSON.stringify(savedMarkdown()))
+    keys.keyClick(Qt.Key_Backtab, Qt.ShiftModifier)
+    require(savedMarkdown() === "- One\n- Two\n\nPara\n", "outdent left " + JSON.stringify(savedMarkdown()))
+  }
+
   function listStyleChoices() {
     var choices = [
       { id: "bulletDisc", menu: "ul", style: -1 },
@@ -2522,15 +2548,6 @@ Window {
       var row = keys.findChild(popup.contentItem, "editingMenu-" + choice.id)
       require(row && row.visible, "missing style choice " + choice.id)
       keys.waitForRendering(row)
-      var preview = Platform.env("NOTE_NOTE_LIST_SCREENSHOT")
-      if (preview) {
-        var captured = false
-        test.contentItem.grabToImage(function(result) {
-          result.saveToFile(preview + "-" + choice.id + ".png")
-          captured = true
-        })
-        keys.tryVerify(function() { return captured }, 3000)
-      }
       keys.mouseClick(row, row.width / 2, row.height / 2)
       keys.tryVerify(function() { return listFormatAt("Target").listStyle === choice.style }, 1000)
       require(listFormatAt("Target").listStyle === choice.style,
@@ -3316,6 +3333,8 @@ Window {
       { name: "split list buttons offer every marker and preserve it on reload", run: listStyleChoices },
       { name: "Tab cycles bullets and Shift+Tab restores their levels", run: function() { listIndentCycle("ul", [-1, -2, -3]) } },
       { name: "Tab cycles numbering and Shift+Tab restores their levels", run: function() { listIndentCycle("ol", [-4, -5, -7]) } },
+      { name: "Tab joins the sublist an earlier item opened", run: listIndentJoinsSublist },
+      { name: "a paragraph indented with list items takes no-break spaces", run: listIndentWithParagraph },
       { name: "list styles respect selections, numbering, table cells and read-only notes", run: listStyleSelectionAndTables },
       { name: "styled lists continue on Enter and indent at empty and boundary positions", run: styledListTyping },
       { name: "block tools transform selected styled-list items and preserve their neighbours", run: styledListBlockTools }

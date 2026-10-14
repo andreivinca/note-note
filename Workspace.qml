@@ -277,9 +277,9 @@ Item {
       return queue.writeDepth > 0
     })
   // The close follows the settling — once the notification has completed:
-  // finishing a close writes what this state reads (a failed close reopens
-  // the workspace, which refreshes providers and resumes lanes), and a
-  // reaction that writes its own inputs mid-update is a binding loop.
+  // the host's answer to readyToClose retires the providers this state
+  // reads, and a reaction that writes its own inputs mid-update is a
+  // binding loop.
   onWritesSettledChanged: Qt.callLater(root.finishClose)
 
   signal dismissRequested()

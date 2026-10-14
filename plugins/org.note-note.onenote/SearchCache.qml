@@ -271,7 +271,7 @@ Item {
     if (counts.failed && counts.failed === counts.pending) {
       return progress + " · retrying unavailable pages"
     }
-    return progress + (counts.indexed === counts.total ? " · refreshing…" : " · indexing…")
+    return progress + " · indexing…"
   }
 
   function diagnostics() {

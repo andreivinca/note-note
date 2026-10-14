@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -21,6 +22,11 @@ from notemerge import MergeStore  # noqa: E402
 
 def page(page_id, section="s", modified="1"):
     return {"id": page_id, "sectionId": section, "modified": modified}
+
+
+def graph_stamp(seconds):
+    """`seconds` as Graph writes a lastModifiedDateTime."""
+    return time.strftime("%Y-%m-%dT%H:%M:%S.123Z", time.gmtime(seconds))
 
 
 def write_child(directory, ticket, text):
@@ -72,7 +78,7 @@ class CacheTests(unittest.TestCase):
         self.index.sync([page("p1", modified="2"), page("p3")])
         self.assertEqual(self.index.search("cached")["ids"], ["p1"])
         self.assertFalse(self.index.record("p2", "late", old))
-        self.assertEqual(self.index.status()["pending"], 2)
+        self.assertEqual(self.index.status()["pending"], 1)
         self.index.sync([page("p1", modified="2"), page("p2")])
         self.assertFalse(self.index.record("p2", "late", old))
 
@@ -123,6 +129,52 @@ class CacheTests(unittest.TestCase):
         self.index.sync([page("p1"), page("p2", "other")])
         self.assertEqual(self.index.next_page(["other"])["id"], "p2")
 
+    def test_reads_are_paced_and_first_reads_go_faster(self):
+        """A week after a first index every page comes due together. The
+        indexer reads one at a time across workers and restarts: a
+        searchable page READ_SPACING after the last read, a page search
+        cannot find yet FIRST_READ_SPEEDUP times as soon."""
+        first_read = search.READ_SPACING / search.FIRST_READ_SPEEDUP
+        self.put("p1", "one")
+        self.put("p2", "two")
+        self.index.sync([page("p1"), page("p2", "other"), page("p3"), page("p4")])
+        self.clock += search.REFRESH_SECONDS + 1
+        self.assertEqual(self.index.status()["pending"], 2, "a due refresh is upkeep, not progress")
+        self.assertEqual(self.index.claim_page([])["id"], "p3")
+        self.assertIsNone(self.index.claim_page([]))
+        self.assertEqual(self.index.status()["nextDelay"], first_read)
+        self.clock += first_read
+        self.assertEqual(self.index.claim_page([])["id"], "p4")
+        self.clock += first_read
+        restarted = search.Index(self.temp.name, "a", now=lambda: self.clock)
+        self.assertIsNone(restarted.claim_page([]), "a refresh waits the full spacing, across restarts")
+        self.clock += search.READ_SPACING - first_read
+        self.assertIsNotNone(restarted.claim_page([]))
+
+    def test_a_clock_set_back_does_not_stall_the_indexer(self):
+        searchable, unread = {"text": "x"}, {"text": None}
+        self.assertEqual(search.paced_at({"readAt": 2000}, searchable, 1000), 0)
+        self.assertEqual(search.paced_at({"readAt": 900}, searchable, 1000), 900 + search.READ_SPACING)
+        self.assertEqual(search.paced_at({"readAt": 900}, unread, 1000),
+                         900 + search.READ_SPACING / search.FIRST_READ_SPEEDUP)
+
+    def test_a_page_read_since_its_last_change_is_not_read_again(self):
+        """Opening a note, its once-a-minute check and a save record its
+        text: a listing stamp no newer than that brings nothing new."""
+        self.put("p1", "current")
+        self.put("p2", "other")
+        self.index.sync([page("p1", modified=graph_stamp(self.clock - 60)), page("p2", "other")])
+        self.assertIsNone(self.index.next_page([]))
+        self.index.sync([page("p1", modified=graph_stamp(self.clock + 60)), page("p2", "other")])
+        self.assertEqual(self.index.next_page([])["id"], "p1")
+
+    def test_a_cache_from_before_the_pace_is_kept(self):
+        self.put("p1", "kept")
+        state = json.loads(Path(self.index.path).read_text())
+        del state["readAt"]
+        Path(self.index.path).write_text(json.dumps(state))
+        self.assertEqual(self.index.search("kept")["ids"], ["p1"])
+
     def test_bounds_corruption_and_failed_atomic_write(self):
         self.put("p1", "original")
         with self.assertRaises(ValueError):
@@ -149,6 +201,8 @@ class CacheTests(unittest.TestCase):
         self.assertEqual(set(self.index.search("needle")["ids"]), {"p1", "p2"})
 
     def test_parallel_workers_claim_distinct_pages_and_recover_after_exit(self):
+        # The pace aside: a read slower than it leaves another worker free to claim.
+        self.enterContext(patch.object(search, "READ_SPACING", 0))
         context = multiprocessing.get_context("fork")
         answers, release = context.Queue(), context.Event()
         processes = [context.Process(target=claim_child, args=(self.temp.name, answers, release))

@@ -73,7 +73,8 @@ public:
     Q_INVOKABLE int deletePreviousTable(int position);
 
     // Format the actual selected paragraphs, with an exclusive selection end.
-    // Mixed selections adopt the style; a uniform selection toggles it off.
+    // Mixed selections adopt the style; a uniform selection toggles it off,
+    // unless `toggle` is false: then the style applies even where it is set.
     // List membership never crosses a table cell. Return the selection adjusted
     // for empty items' rendering fillers. The operation is one undo step.
     Q_INVOKABLE QVariantMap toggleList(int from, int to, const QString &style, bool toggle = true);

@@ -114,17 +114,21 @@ QVector<QTextBlock> selectedBlocks(QTextDocument *doc, int from, int to)
     return blocks;
 }
 
+bool isCheckbox(const QTextBlock &block)
+{
+    return block.blockFormat().marker() != QTextBlockFormat::MarkerType::NoMarker;
+}
+
 bool hasStyle(const QTextBlock &block, ListStyle style)
 {
     const QTextList *list = block.textList();
     if (!list) {
         return false;
     }
-    const bool checkbox = block.blockFormat().marker() != QTextBlockFormat::MarkerType::NoMarker;
     if (style.checkbox) {
-        return checkbox;
+        return isCheckbox(block);
     }
-    return !checkbox && list->format().style() == style.marker;
+    return !isCheckbox(block) && list->format().style() == style.marker;
 }
 
 bool allHaveStyle(const QVector<QTextBlock> &blocks, ListStyle style)
@@ -161,17 +165,16 @@ QTextList *listOf(const QTextBlock &block, const QTextListFormat &format, ListSt
     return list;
 }
 
-// A neighbour's list the block can join: list membership never crosses a
+// The list of an earlier item the block can join: the nearest one at its
+// level or above, past any deeper items. List membership never crosses a
 // table cell.
-QTextList *neighbouringList(const QTextBlock &block, const QTextBlock &neighbour,
-                            const QTextListFormat &format, ListStyle style)
+QTextList *earlierList(const QTextBlock &block, const QTextListFormat &format, ListStyle style)
 {
-    const bool forward = neighbour.position() > block.position();
-    for (QTextBlock next = neighbour; next.isValid() && sameContainer(block, next);
-         next = forward ? next.next() : next.previous()) {
-        const QTextList *list = next.textList();
+    for (QTextBlock previous = block.previous(); previous.isValid() && sameContainer(block, previous);
+         previous = previous.previous()) {
+        const QTextList *list = previous.textList();
         if (!list || list->format().indent() <= format.indent()) {
-            return listOf(next, format, style);
+            return listOf(previous, format, style);
         }
     }
     return nullptr;
@@ -250,7 +253,10 @@ void joinFollowing(QTextList *list, const QTextBlock &block, const QTextListForm
 
 void applyList(const QTextBlock &block, ListStyle style, const QTextListFormat &format)
 {
+    // Taken before removeList clears it.
     const auto marker = markerFor(block, style);
+    // A QTextList holds items of one level and style: an item moving above
+    // its list, or taking another style at its level, leaves it first.
     const QTextList *previous = block.textList();
     if (previous && (format.indent() < previous->format().indent()
         || (format.indent() == previous->format().indent() && format.style() != previous->format().style()))) {
@@ -262,7 +268,7 @@ void applyList(const QTextBlock &block, ListStyle style, const QTextListFormat &
     QTextCursor cursor(block);
     cursor.setBlockFormat(paragraph);
 
-    QTextList *list = neighbouringList(block, block.previous(), format, style);
+    QTextList *list = earlierList(block, format, style);
     if (!list) {
         list = listOf(block, format, style);
     }
@@ -282,6 +288,19 @@ void applyList(const QTextBlock &block, ListStyle style, const QTextListFormat &
 bool isEmptyItem(const QTextBlock &block)
 {
     return block.text().isEmpty() || block.text() == QString(NoteNoteDialect::BLANK_PARAGRAPH);
+}
+
+// A plain paragraph takes one level more or less of the indent Markdown
+// keeps, as the Markdown tools give it (ui/tools/Indent.qml, Outdent.qml).
+void indentParagraph(const QTextBlock &block, int direction)
+{
+    QTextCursor cursor(block);
+    if (direction > 0) {
+        cursor.insertText(NoteNoteDialect::INDENT_TEXT);
+    } else if (block.text().startsWith(NoteNoteDialect::INDENT_TEXT)) {
+        cursor.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor, int(NoteNoteDialect::INDENT_TEXT.size()));
+        cursor.removeSelectedText();
+    }
 }
 
 }
@@ -341,11 +360,7 @@ bool TextBlocks::indentBlocks(int from, int to, int direction, bool cycleStyles)
     for (const QTextBlock &block : blocks) {
         QTextList *list = block.textList();
         if (!list) {
-            QTextBlockFormat format = block.blockFormat();
-            if (!NoteNoteDialect::isQuote(format)) {
-                format.setLeftMargin(qMax(0.0, format.leftMargin() + direction * NoteNoteDialect::INDENT_PX));
-                QTextCursor(block).setBlockFormat(format);
-            }
+            indentParagraph(block, direction);
             continue;
         }
         const int indent = list->format().indent() + direction;
@@ -353,33 +368,30 @@ bool TextBlocks::indentBlocks(int from, int to, int direction, bool cycleStyles)
             removeList(block);
             continue;
         }
-        const bool checkbox = block.blockFormat().marker() != QTextBlockFormat::MarkerType::NoMarker;
-        ListStyle style{list->format().style(), checkbox};
-        if (cycleStyles && !checkbox) {
+        ListStyle style{list->format().style(), isCheckbox(block)};
+        if (cycleStyles && !style.checkbox) {
             style.marker = styleAtDepth(style.marker, indent);
+        }
+        // An item moving to a level an earlier item of its list holds takes
+        // that item's marker, even one chosen from the dropdown: its parent's
+        // when it returns to that level, its sibling's when it joins it.
+        for (QTextBlock previous = block.previous(); previous.isValid() && sameContainer(block, previous);
+             previous = previous.previous()) {
+            const QTextList *earlier = previous.textList();
+            if (!earlier || earlier->format().indent() < indent) {
+                break;
+            }
+            if (earlier->format().indent() == indent) {
+                const bool sameFamily = style.checkbox || isNumbered(earlier->format().style()) == isNumbered(style.marker);
+                if (isCheckbox(previous) == style.checkbox && sameFamily) {
+                    style.marker = earlier->format().style();
+                }
+                break;
+            }
         }
         QTextListFormat format;
         format.setStyle(style.marker);
         format.setIndent(indent);
-        // Returning to a parent's level returns to its chosen marker, even
-        // when that level began with a style selected from the dropdown.
-        if (direction < 0) {
-            for (QTextBlock previous = block.previous(); previous.isValid() && sameContainer(block, previous);
-                 previous = previous.previous()) {
-                const QTextList *parent = previous.textList();
-                if (!parent || parent->format().indent() < indent) {
-                    break;
-                }
-                if (parent->format().indent() == indent) {
-                    const bool parentCheckbox = previous.blockFormat().marker() != QTextBlockFormat::MarkerType::NoMarker;
-                    if (parentCheckbox == checkbox && (checkbox || isNumbered(parent->format().style()) == isNumbered(style.marker))) {
-                        style.marker = parent->format().style();
-                        format.setStyle(style.marker);
-                    }
-                    break;
-                }
-            }
-        }
         applyList(block, style, format);
     }
     transaction.endEditBlock();

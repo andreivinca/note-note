@@ -5,6 +5,9 @@ neither authorizes a broader replacement. Graph capabilities are documented
 at https://learn.microsoft.com/en-us/graph/onenote-update-page. Graph has no
 target for a blank line; the plan lists those removals separately, for the
 caller to make before any Graph command (docs/onenote-blank-lines.md).
+Graph cannot move a list item either: the plan names the page OneNote's
+native writer must make first (list_edits.py), and the caller plans again
+against the page that writer leaves.
 """
 import copy
 from dataclasses import dataclass
@@ -17,6 +20,7 @@ import htmltables
 REPLACEABLE = {"p", "li", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "table", "img", "object"}
 LISTS = {"ul", "ol"}
 LAYOUT = {"html", "body", "div"}
+MEDIA = {"img", "object", "table"}
 
 
 class UnsupportedEdit(ValueError):
@@ -46,6 +50,7 @@ class Plan:
     commands: tuple
     simulated: str
     blank_lines: tuple
+    native: str | None     # the page the native writer makes before any of the commands
 
 
 def parse(source):
@@ -58,6 +63,14 @@ def walk(node):
     yield node
     for child in node.children:
         yield from walk(child)
+
+
+def outside_tables(node):
+    """`node` and its descendants, except those inside a table."""
+    yield node
+    if node.tag != "table":
+        for child in node.children:
+            yield from outside_tables(child)
 
 
 def serialize(node, keep_ids=False):
@@ -120,8 +133,26 @@ def text(node):
     return converter.result()
 
 
+def role(node):
+    """The part of a list node's identity that its text does not carry.
+
+    A node renders out of context, so an item and the same item wrapped one
+    level deeper both read "- Two". Graph cannot move an item: the same text
+    in another list role is another element, never an unchanged one.
+    """
+    return node.tag if node.tag in LISTS | {"li"} else ""
+
+
 def identity(node):
-    return text_key(text(node))
+    key = text_key(text(node))
+    if key is None:
+        return None
+    return role(node), key
+
+
+def unchanged(old, new):
+    """Whether `new` is `old` as it stands: the same text in the same list role."""
+    return role(old) == role(new) and text(old) == text(new)
 
 
 def list_levels(nodes, depth=0, kind=""):
@@ -225,7 +256,7 @@ class _Planner:
         # An unchanged prefix has no identities to disambiguate, even when
         # appended content repeats an existing heading or checklist label.
         # Preserve every original node and use the last one as the anchor.
-        if len(after) > len(before) and all(text(old) == text(new) for old, new in zip(before, after)):
+        if len(after) > len(before) and all(unchanged(old, new) for old, new in zip(before, after)):
             for original in before:
                 self.retain(original)
             self.insert(after[len(before):], before, len(before), container)
@@ -333,6 +364,7 @@ class _Planner:
                 if command is not None:
                     self.insertions.append(command)
                     return
+                continue
             identifier = target_identifier(node)
             if identifier:
                 command = {"target": identifier, "action": "insert", "position": position}
@@ -343,6 +375,14 @@ class _Planner:
                 if command is not None:
                     self.insertions.append(command)
                     return
+        if command is None:
+            # Only lists around it. A list's ID can name a container Graph
+            # cannot find; the native writer carries this one (Plan.native).
+            for node, position in candidates:
+                identifier = target_identifier(node)
+                if identifier:
+                    command = {"target": identifier, "action": "insert", "position": position}
+                    break
         if command is None and not before and container.tag in LISTS | {"body", "div"}:
             identifier = container.attrs.get("id")
             if container.tag != "body" and not identifier:
@@ -386,8 +426,12 @@ class _Planner:
         return None
 
     def update(self, old, new):
-        if text(old) == text(new):
+        if unchanged(old, new):
             self.retain(old)
+            return
+        if role(old) != role(new) and self.relevel_list([old], [new]):
+            # An item moved to another level or family, in a span whose
+            # other items changed in their own ways.
             return
         if old.tag == new.tag and old.tag in LISTS:
             self.retain(old, subtree=False)
@@ -503,7 +547,44 @@ class _Planner:
                 raise InvalidPlan("an unchanged element lost its identity")
             if content is not None and serialize(kept, keep_ids=True) != content:
                 raise InvalidPlan("an unchanged element was modified")
-        return Plan(commands, serialize(simulated, keep_ids=True), blank_lines)
+        return Plan(commands, serialize(simulated, keep_ids=True), blank_lines, self.native(commands, blank_lines))
+
+    def native(self, commands, blank_lines):
+        """The page OneNote's native writer must make first, or None.
+
+        Graph cannot move a list item, and a list's ID can name a container
+        it cannot find (list_edits.py). When a command moves an outline's
+        list items, every command on its lists goes to the native writer,
+        which also edits their text in place. A table is one element to that
+        writer, so a list in a table cell stays Graph's.
+
+        The native writer then also removes the blank lines, as it rewrites
+        their outlines anyway; one beside a list is its to remove in any case,
+        since blank_lines.py cannot name a list as a neighbour. Media cannot
+        be written natively: a paragraph holding a no-break space stands where
+        each goes, which Graph can target and the next plan replaces.
+        """
+        # What the outlines' lists hold, by ID; and the targets inside tables.
+        scope = {node.attrs["id"]: node for outline_list in outside_tables(self.tree) if outline_list.tag in LISTS
+                 for node in outside_tables(outline_list) if node.attrs.get("id")}
+        cells = {target_identifier(node) for table in walk(self.tree) if table.tag == "table"
+                 for node in list(walk(table))[1:]} - {""}
+        carried = []
+        moves = any(run.before in scope or run.after in scope for run in blank_lines)
+        for command in commands:
+            content = parse(command["content"])
+            lists = any(node.tag in LISTS for node in outside_tables(content))
+            target = scope.get(command["target"])
+            if command["target"] in cells or (target is None and not lists):
+                continue
+            # Only an item's text replaced in place leaves its list as it was.
+            moves = moves or lists or command["action"] != "replace" or any(node.tag in LISTS for node in walk(target))
+            content.children = [parse("<p>\u00a0</p>").children[0] if node.tag in MEDIA else node
+                                for node in content.children]
+            carried.append(dict(command, content=serialize(content)))
+        if not moves:
+            return None
+        return serialize(simulate(without_blank_lines(self.tree, blank_lines), carried), keep_ids=True)
 
 
 def without_blank_lines(tree, blank_lines):
@@ -576,14 +657,14 @@ def preserve_projected(before, after, project):
         groups.append((original, start, len(projected)))
 
     matches = {}
-    if len(after) >= len(projected) and all(text(old) == text(new) for old, new in zip(projected, after)):
+    if len(after) >= len(projected) and all(unchanged(old, new) for old, new in zip(projected, after)):
         matches = dict(enumerate(range(len(projected))))
     else:
         for span in align(projected, after, identity):
             if span.kind != "equal":
                 continue
             for old, new in zip(range(span.before_start, span.before_end), range(span.after_start, span.after_end)):
-                if text(projected[old]) == text(after[new]):
+                if unchanged(projected[old], after[new]):
                     matches[old] = new
 
     retained = {}

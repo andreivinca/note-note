@@ -20,7 +20,7 @@ Tool {
     Tool {
       editor: tool.editor
       toolId: "numberDecimal"
-      capability: "ol"
+      capability: "listStyles"
       label: "1, 2, 3  Numbers"
       available: tool.available && editor.canStyleLists
       function execute() {
@@ -30,7 +30,7 @@ Tool {
     Tool {
       editor: tool.editor
       toolId: "numberLowerAlpha"
-      capability: "ol"
+      capability: "listStyles"
       label: "a, b, c  Lowercase letters"
       available: tool.available && editor.canStyleLists
       function execute() {
@@ -40,7 +40,7 @@ Tool {
     Tool {
       editor: tool.editor
       toolId: "numberUpperAlpha"
-      capability: "ol"
+      capability: "listStyles"
       label: "A, B, C  Uppercase letters"
       available: tool.available && editor.canStyleLists
       function execute() {
@@ -50,7 +50,7 @@ Tool {
     Tool {
       editor: tool.editor
       toolId: "numberUpperRoman"
-      capability: "ol"
+      capability: "listStyles"
       label: "I, II, III  Roman numerals"
       available: tool.available && editor.canStyleLists
       function execute() {
@@ -60,7 +60,7 @@ Tool {
     Tool {
       editor: tool.editor
       toolId: "numberLowerRoman"
-      capability: "ol"
+      capability: "listStyles"
       label: "i, ii, iii  Lowercase Roman numerals"
       available: tool.available && editor.canStyleLists
       function execute() {

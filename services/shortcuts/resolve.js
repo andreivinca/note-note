@@ -76,7 +76,7 @@ function addTargets(state, defaults, tools, commands) {
         protected: !!action.protected, workspace: !!action.workspace })
   })
   tools.forEach(function(tool) {
-    if (!tool.isMenu || tool.splitMenu) {
+    if (!tool.isMenu) {
       addTarget(state, "tool/" + tool.toolId, "tool", tool.toolId, tool.label, "Editing", "editor")
     }
   })

@@ -222,7 +222,11 @@ their provider’s hierarchy and order, and show how many notes each holds.
 Right-click a note to delete it. Right-click a section — or a notebook, when
 notebooks share one tab — to make a section inside it, rename it or delete
 it. OneNote sections are renamed and deleted in personal notebooks you can
-edit; a deleted one goes to the OneDrive recycle bin.
+edit; a deleted one goes to the OneDrive recycle bin. Every OneNote section
+also has **Refresh**, which lists its pages again now: otherwise the open
+page's section is listed every minute, and the others only when OneNote
+reports a change. It is greyed out for half a minute after you reorder that
+section's pages, while OneNote catches up.
 
 The body is Markdown, rendered live and saved back as Markdown, with a
 formatting toolbar for headings, lists, tables, links, images and the usual
