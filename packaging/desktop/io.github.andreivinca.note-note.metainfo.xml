@@ -34,6 +34,16 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.0.43" date="2026-10-14">
+      <description>
+        <p>OneNote's hourly request limit lasts longer on pages with lists.
+        Microsoft's limit counts only OneNote's own requests, and Note Note now
+        counts them the same way: the OneDrive and OneNote web requests that
+        list editing and page ordering need are paced on their own. Opening a
+        page with lists uses one OneNote request instead of six, and indenting
+        a list item three instead of fifteen.</p>
+      </description>
+    </release>
     <release version="1.0.42" date="2026-10-14">
       <description>
         <p>Right-click a OneNote section and choose Refresh to list its pages
