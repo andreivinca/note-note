@@ -34,6 +34,26 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.0.42" date="2026-10-14">
+      <description>
+        <p>Right-click a OneNote section and choose Refresh to list its pages
+        again at once. It is greyed out for half a minute after you reorder
+        that section's pages, while OneNote catches up.</p>
+        <p>OneNote content search reads pages slowly in the background, one at
+        a time, so it no longer uses up OneNote's hourly request limit. Pages
+        you open or save count as read, and the open page's check uses fewer
+        requests.</p>
+        <p>Nested numbered lists in OneNote keep their nesting, a list made in
+        a table cell can be saved, and a blank line next to a list can be
+        removed. A page whose list levels OneNote does not return opens
+        read-only instead of failing.</p>
+        <p>Indenting a list item joins the list already at that level, and a
+        paragraph indented with it is indented like any other paragraph. A
+        local note with an HTML table or list the editor cannot show opens as
+        read-only source. Deleting a OneNote section no longer brings back
+        pages that could not be created in it.</p>
+      </description>
+    </release>
     <release version="1.0.41" date="2026-10-12">
       <description>
         <p>Bullets and numbered lists have styles: the arrow next to each
