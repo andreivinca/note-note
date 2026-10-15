@@ -250,7 +250,8 @@ def loose_themes(catalog, directory):
 
 def legacy_providers(catalog, directory):
     """Compatibility window: a provider in the old directory, as it was
-    installed — by copy or by symlink — and switched on as it always was."""
+    installed — by copy or by symlink — and switched on as it always was.
+    It has no manifest to name it, so it goes by its directory's name."""
     for name in listing(catalog, directory):
         root = directory / name
         package_id = "legacy." + name
@@ -260,8 +261,8 @@ def legacy_providers(catalog, directory):
         except (OSError, ValueError) as error:
             diagnose(catalog, root, str(error), package_id)
             continue
-        descriptor = {"id": name, "packageId": package_id, "root": str(root), "url": Path(path).as_uri(),
-                      "builtin": False, "order": DEFAULT_ORDER}
+        descriptor = {"id": name, "packageId": package_id, "packageName": name, "root": str(root),
+                      "url": Path(path).as_uri(), "builtin": False, "order": DEFAULT_ORDER}
         admit(catalog, {"providers": [descriptor]}, root, package_id)
 
 

@@ -6,7 +6,7 @@ import "../design/controls"
 Item {
   id: root
 
-  // The tabs as the host builds them: { key, name, color, logo, count }.
+  // The tabs as the host builds them: { key, provider, name, color, logo, count }.
   property var sections: []
   // Search hits per tab key; kept beside `sections` so a keystroke moves
   // the numbers without touching the tabs (see the host's rebuildRows).
@@ -36,6 +36,8 @@ Item {
   readonly property real faceHeight: railHeight - topInset - bottomInset
   implicitHeight: faceHeight + bottomInset
   signal activated(string key)
+  // A tab was right-clicked; what its menu offers is the bar's to say.
+  signal menuRequested(var tab)
 
   clip: true
 
@@ -131,6 +133,7 @@ Item {
             // The active notebook uses the theme's selected-tab colors.
             color: tab.current || hovered ? root.activeBackground : "transparent"
             onClicked: root.activated(tab.modelData.key)
+            onMenuRequested: root.menuRequested(tab.modelData)
             Behavior on color {
               ColorAnimation {
                 duration: 120

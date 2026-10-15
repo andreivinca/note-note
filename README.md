@@ -173,8 +173,10 @@ setting on first run.
   another. Click a letter to insert it at the caret, or select it with arrow keys
   and Enter; see [region detection](docs/editing-tools.md#diacritics).
 - `providers.<id>.enabled` — hide a source (`local`, `sticky`, `onenote`,
-  `notion`, or an external provider's own id) from the sidebar. Reordering
-  the `providers` object reorders the sidebar tabs to match.
+  `notion`, or an external provider's own id) from the sidebar. **Providers**,
+  in the same menu, ticks every source that is on; a click turns one on or
+  off and saves it here. Reordering the `providers` object reorders the
+  sidebar tabs to match.
 - `providers.local.notesDir` — where local notebooks live, overriding
   `~/Notes/` or `NOTE_NOTE_DIR`.
 - `providers.<id>.notebookTabs` — `true` spreads a source's notebooks into

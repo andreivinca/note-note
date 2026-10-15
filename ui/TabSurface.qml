@@ -18,6 +18,7 @@ Item {
   readonly property real bottomY: selected ? height : Math.max(0, height - bottomInset)
   readonly property bool hovered: hover.hovered
   signal clicked()
+  signal menuRequested()
 
   // The same path draws the tab and defines its pointer region, including
   // selected shoulders that extend beyond the face into neighboring slots.
@@ -36,6 +37,11 @@ Item {
     TapHandler {
       acceptedButtons: Qt.LeftButton
       onTapped: surface.clicked()
+    }
+
+    TapHandler {
+      acceptedButtons: Qt.RightButton
+      onTapped: surface.menuRequested()
     }
 
     ShapePath {

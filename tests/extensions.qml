@@ -197,6 +197,96 @@ Window {
       compare(editor.tools.find("bold").shortcutLabel, "ctrl+b")
     }
 
+    // The menu's rows and the providers it switches live in popups, which
+    // stand in the window's overlay rather than under the workspace — and
+    // only while they are open.
+    function menuItem(name) {
+      return findChild(window.contentItem, name)
+    }
+
+    function shown(name) {
+      var item = menuItem(name)
+      return item !== null && item.visible
+    }
+
+    // The pointer resting on Providers opens its submenu.
+    function openProvidersMenu() {
+      mouseClick(findChild(workspace, "applicationMenu"))
+      tryVerify(function() { return shown("applicationMenu-providers") }, 5000)
+      mouseMove(menuItem("applicationMenu-providers"))
+      tryVerify(function() { return shown("providerSwitch-notion") }, 5000)
+    }
+
+    // Leaving through another row closes the submenu with the menu.
+    function leaveThroughKeyBindings() {
+      mouseClick(menuItem("applicationMenu-keys"))
+      compare(workspace.page, "keys")
+      verify(!shown("providerSwitch-notion") && !shown("applicationMenu-keys"))
+      workspace.closePage()
+    }
+
+    // A click switches the provider through the save a Settings edit takes:
+    // it is created or retired, and the submenu stays open for the next.
+    function switchProvider(id, enabled) {
+      mouseClick(menuItem("providerSwitch-" + id))
+      tryVerify(function() {
+        return (workspace.providerById(id) !== null) === enabled && workspace.providersSwitchable
+      }, 10000)
+      compare(workspace.config.providers[id].enabled, enabled)
+      verify(shown("providerSwitch-" + id), "the submenu stays open")
+    }
+
+    function checkProvidersMenu(editor) {
+      openProvidersMenu()
+      var keys = menuItem("applicationMenu-keys"), settings = menuItem("applicationMenu-settings")
+      verify(menuItem("applicationMenu-providers").y < keys.y && keys.y < settings.y,
+             "Providers, Key bindings, then Settings last")
+      compare(workspace.providerSwitches.map(function(entry) { return entry.name }).join(),
+              "Local notes,Sticky Notes,OneNote,Notion", "every provider, in tab order, on or off")
+      compare(workspace.providerSwitches.map(function(entry) { return entry.enabled }).join(),
+              "true,false,false,false")
+      verify(workspace.providerById("notion") === null)
+      switchProvider("notion", true)
+      // Its tab comes with its first listing, once it has asked its status.
+      tryVerify(function() {
+        return workspace.tabs.some(function(tab) { return tab.key === "notion/notion" })
+      }, 10000, "Notion has its tab")
+      switchProvider("notion", false)
+      verify(!workspace.tabs.some(function(tab) { return tab.key === "notion/notion" }))
+      switchProvider("notion", true)
+      leaveThroughKeyBindings()
+
+      // A right-click on a provider's tab hides it the same way.
+      var tab = null
+      tryVerify(function() {
+        tab = findChild(workspace, "notebookTab-notion/notion")
+        return tab !== null
+      }, 10000)
+      mouseClick(tab, tab.width / 2, tab.height / 2, Qt.RightButton)
+      tryVerify(function() { return shown("rowMenu-hide") }, 5000)
+      compare(menuItem("rowMenu-hide").text, "Hide Notion")
+      mouseClick(menuItem("rowMenu-hide"))
+      tryVerify(function() {
+        return workspace.providerById("notion") === null && workspace.providersSwitchable
+      }, 10000)
+      compare(workspace.config.providers.notion.enabled, false)
+      verify(!workspace.tabs.some(function(tab) { return tab.key === "notion/notion" }))
+
+      // A Settings edit waiting to be saved would be written over: the
+      // submenu takes no click.
+      workspace.openPage("settings")
+      var page = workspace.currentPage()
+      page.focusBody()
+      keyClick(Qt.Key_Space)
+      verify(page.dirty)
+      openProvidersMenu()
+      verify(!menuItem("providerSwitch-notion").enabled)
+      mouseClick(menuItem("providerSwitch-notion"))
+      verify(!workspace.settings.busy && workspace.providerById("notion") === null)
+      leaveThroughKeyBindings()
+      editor.focusEditor()
+    }
+
     function checkWorkspaceCommands(editor) {
       ShortcutChecks.run(function(value, message) { verify(value, message) })
       var provider = workspace.providerById("local")
@@ -406,6 +496,7 @@ Window {
       verify(editor.canColorText)
       checkPackageTools(editor)
       checkShortcutRebinding(editor)
+      checkProvidersMenu(editor)
       var area = editor.tools.editor.textArea
       verify(!workspace.dirty, "clean before selection")
       var before = area.text

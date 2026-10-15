@@ -861,6 +861,42 @@ Item {
     lifecycle.apply(text, callback, revision)
   }
 
+  // What the title bar's Providers submenu lists: every provider the catalog
+  // found, in tab order, whether it runs or not. One that is off was never
+  // created to say its own name, so each goes by its package's.
+  readonly property var providerSwitches: {
+    var names = {}
+    pluginCatalog.providers.forEach(function(descriptor) {
+      names[descriptor.id] = descriptor.packageName
+    })
+    return root.orderProviderIds(Object.keys(names), root.config).map(function(id) {
+      return { id: id, name: names[id], enabled: root.providerEnabledIn(root.config, id) }
+    })
+  }
+
+  // Whether a provider can be switched just now. A switch saves the settings
+  // in force with one provider turned on or off, so no other settings change
+  // may be under way, they must be all the file holds, and no Settings edit
+  // may be waiting to be saved over them.
+  readonly property bool providersSwitchable: !lifecycle.busy && settingsStore.refusal() === ""
+    && !settingsPage.dirty && !settingsStore.readError && settingsStore.problems.length === 0
+
+  // A provider turned on or off from the Providers submenu, applied as a
+  // Settings save is: it is created, or retired once its writes settle.
+  function setProviderEnabled(id, enabled) {
+    if (!root.providersSwitchable) {
+      return
+    }
+    var providers = Object.assign({}, root.config.providers)
+    providers[id] = Object.assign({}, providers[id], { "enabled": enabled })
+    var text = JSON.stringify(Object.assign({}, root.config, { "providers": providers }))
+    root.applySettingsJson(text, function(result) {
+      if (result.error) {
+        root.showStatus(result.error)
+      }
+    }, settingsStore.revision)
+  }
+
   function retireProvider(provider) {
     root.cancelQueuedFor(provider)
     // Its writes die with it, so their callbacks never come: a group left
@@ -2681,6 +2717,8 @@ Item {
         detached: root.detached
         supportsOverlay: root.supportsOverlay
         pageOpen: root.pageOpen
+        providers: root.providerSwitches
+        providersSwitchable: root.providersSwitchable
         cornerRadius: root.chromeRadius
         background: root.background
         foreground: root.foreground
@@ -2700,6 +2738,9 @@ Item {
         onSettingsRequested: root.openPage("settings")
         onKeysRequested: root.openPage("keys")
         onDetachToggled: root.setDetached(!root.detached)
+        onProviderToggled: function(id, enabled) {
+          root.setProviderEnabled(id, enabled)
+        }
       }
 
       // ---- workspace: the binder rail and sidebar, the splitter, the note

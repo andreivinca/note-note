@@ -5,7 +5,8 @@ import "../design"
 import "../design/controls"
 
 // The actions a provider offers on one of its sidebar rows — the row's
-// `menu` (docs/providers.md) — opened at the pointer by a right-click.
+// `menu` (docs/providers.md) — opened at the pointer by a right-click. The
+// title bar opens it on a tab as well, with a `menu` of its own.
 // Choosing an item only reports it: what the item does is the host's to run.
 // An item the provider marks `enabled: false` is dimmed and cannot be chosen.
 QQC.Menu {

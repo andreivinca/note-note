@@ -63,7 +63,7 @@ function build(providers, active, query, contentHits) {
       var found = q ? notes.filter(function(item) {
         return matchesQuery(item, q) || content[item.path] === true
       }) : []
-      tabs.push({ key: key, name: section.name, color: section.color || "", logo: provider.logo || "",
+      tabs.push({ key: key, provider: provider.id, name: section.name, color: section.color || "", logo: provider.logo || "",
                   count: section.count !== undefined ? section.count : notes.length })
       hits[key] = found.length
       if (key === active) {

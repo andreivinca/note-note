@@ -215,6 +215,7 @@ class Catalog(unittest.TestCase):
         self.assertEqual({item["id"]: item["url"] for item in result["providers"]},
                          {"copied": (legacy / "copied/Provider.qml").as_uri(),
                           "linked": (legacy / "linked/Provider.qml").as_uri()})
+        self.assertEqual([item["packageName"] for item in result["providers"]], ["copied", "linked"])
         self.assertEqual({item["packageId"] for item in result["diagnostics"]}, {"legacy.Not An Id", "legacy.empty"})
 
     def test_a_contested_provider_names_each_claimant(self):

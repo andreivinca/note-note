@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls as QQC
+import QtQuick.Layouts
 import "../design"
 import "../design/controls"
 
@@ -28,6 +29,11 @@ Item {
   // bindings. The bar only needs to know that the notes are not on screen,
   // not which page took them.
   property bool pageOpen: false
+  // The note providers the Providers submenu turns on and off, in tab order,
+  // as { id, name, enabled }. While they cannot be switched, the submenu
+  // dims them.
+  property var providers: []
+  property bool providersSwitchable: true
   property color background: Color.menu.background
   property color foreground: Color.menu.text
   property color accent: Color.accent
@@ -44,6 +50,7 @@ Item {
   signal settingsRequested()
   signal keysRequested()
   signal detachToggled()
+  signal providerToggled(string id, bool enabled)
 
   height: tabStrip.railHeight
 
@@ -54,11 +61,99 @@ Item {
     id: popupStyle
   }
 
+  // One row of the application menu or of its Providers submenu: a glyph, a
+  // label and, on a row that opens a submenu, a chevron at the far end. It
+  // lights up under the pointer, and stays lit while the submenu it opened
+  // is showing. A row that cannot be chosen just now is dimmed.
+  component MenuRow: Rectangle {
+    id: menuRow
+    property string icon: ""
+    property string label: ""
+    property bool opensSubmenu: false
+    property bool lit: false
+    readonly property real iconWidth: Math.ceil(Style.font.icon * 1.2)
+    readonly property bool highlighted: rowMouse.containsMouse || menuRow.lit
+    // The row's ink, named once: the glyph and the label are one thing
+    // lighting up, not two that agree by accident. The glyph carries it a
+    // shade lighter — it labels the row, the word is the row.
+    readonly property color ink: menuRow.highlighted
+      ? Style.hoverStateColor(popupStyle.text, root.accent) : popupStyle.text
+
+    signal entered()
+    signal clicked()
+
+    implicitWidth: popupStyle.horizontalPadding * 2 + iconWidth + Style.spacing.controlGap + rowLabel.implicitWidth
+      + (opensSubmenu ? Style.spacing.controlGap + chevron.implicitWidth : 0)
+    implicitHeight: popupStyle.rowHeight
+    radius: popupStyle.rowRadius
+    color: menuRow.highlighted ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
+    opacity: enabled ? 1 : 0.45
+
+    Text {
+      id: rowIcon
+      textFormat: Text.PlainText
+      anchors.left: parent.left
+      anchors.leftMargin: popupStyle.horizontalPadding
+      anchors.verticalCenter: parent.verticalCenter
+      width: menuRow.iconWidth
+      horizontalAlignment: Text.AlignHCenter
+      text: menuRow.icon
+      color: Util.alpha(menuRow.ink, 0.75)
+      font.family: Style.fontFamily
+      font.pixelSize: Style.font.icon
+    }
+
+    Text {
+      id: rowLabel
+      textFormat: Text.PlainText
+      anchors.left: rowIcon.right
+      anchors.leftMargin: Style.spacing.controlGap
+      anchors.verticalCenter: parent.verticalCenter
+      text: menuRow.label
+      color: menuRow.ink
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.body
+    }
+
+    Text {
+      id: chevron
+      visible: menuRow.opensSubmenu
+      textFormat: Text.PlainText
+      anchors.right: parent.right
+      anchors.rightMargin: popupStyle.horizontalPadding
+      anchors.verticalCenter: parent.verticalCenter
+      text: "󰅂"
+      color: Util.alpha(menuRow.ink, 0.75)
+      font.family: Style.fontFamily
+      font.pixelSize: Style.font.iconSmall
+    }
+
+    MouseArea {
+      id: rowMouse
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      onEntered: menuRow.entered()
+      onClicked: menuRow.clicked()
+    }
+  }
+
   Rectangle {
     anchors.fill: parent
     color: root.fill
     topLeftRadius: root.cornerRadius
     topRightRadius: root.cornerRadius
+  }
+
+  // A tab's right-click menu: hide the provider it belongs to, as unticking
+  // it under Providers does.
+  RowMenu {
+    id: tabMenu
+    accent: root.accent
+    fontFamily: root.fontFamily
+    onChosen: function(row, item) {
+      root.providerToggled(row.provider, false)
+    }
   }
 
   Item {
@@ -86,6 +181,13 @@ Item {
       fontFamily: root.fontFamily
       fontSize: root.tabFontSize
       onActivated: function(key) { root.sectionActivated(key) }
+      onMenuRequested: function(tab) {
+        var provider = root.providers.find(function(entry) {
+          return entry.id === tab.provider
+        })
+        tabMenu.openFor({ provider: tab.provider, menu: [{ id: "hide", title: "Hide " + provider.name, icon: "󰈉",
+                                                           enabled: root.providersSwitchable }] })
+      }
     }
 
     NoteSearch {
@@ -110,10 +212,10 @@ Item {
     }
 
     // Everything you do to note-note rather than to the note in front of you
-    // lives behind this one button: detaching the window, the settings page,
-    // the key bindings. A row of pills along the bar would have to grow with
-    // each new one, and each would spend the bar's width saying its own
-    // name; the menu spends none until it is asked.
+    // lives behind this one button: detaching the window, the note providers,
+    // the key bindings, the settings page. A row of pills along the bar would
+    // have to grow with each new one, and each would spend the bar's width
+    // saying its own name; the menu spends none until it is asked.
     ChromeButton {
       id: menuButton
       objectName: "applicationMenu"
@@ -122,7 +224,7 @@ Item {
       anchors.alignWhenCentered: false
       // A tooltip under an open menu is one label too many, and it would
       // stand over the very rows it describes.
-      tooltipText: menu.opened ? "" : "Detach the window, settings, key bindings"
+      tooltipText: menu.opened ? "" : "Detach the window, providers, key bindings, settings"
       // Keep the filled selected state while the menu or a settings page is open.
       selected: root.pageOpen || menu.opened
       contentForeground: root.foreground
@@ -158,18 +260,6 @@ Item {
         }
       }
 
-      // The widest label the menu is about to show, measured at the size it
-      // will be drawn: every row then takes the same width and the hover fill
-      // is not ragged. Measured against what is on screen rather than every
-      // label that could ever be, so an overlay's short menu is not held open
-      // to the width of the detached one's longest word.
-      TextMetrics {
-        id: widestLabel
-        text: root.detached ? "Back to overlay" : "Key bindings"
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.body
-      }
-
       QQC.Popup {
         id: menu
         palette: ControlPalette {}
@@ -177,22 +267,7 @@ Item {
         // pixels further right, and a menu growing that way would run off it.
         x: menuButton.width - width
         y: menuButton.height + Style.spacing.xs
-        readonly property real iconWidth: Math.ceil(Style.font.icon * 1.2)
-        readonly property real rowWidth: popupStyle.horizontalPadding * 2 + iconWidth
-          + Style.spacing.controlGap + Math.ceil(widestLabel.width)
-        // Detaching first, as the one reached for often; the settings page
-        // after it.
-        readonly property var rows: [
-          { id: "detach",
-            icon: root.detached ? "󰨟" : "󰏌",
-            label: root.detached ? "Back to overlay" : "Detach" },
-          { id: "settings",
-            icon: "󰒓",
-            label: "Settings" },
-          { id: "keys",
-            icon: "󰌌",
-            label: "Key bindings" }
-        ].filter(function(row) { return row.id !== "detach" || root.supportsOverlay })
+        onClosed: providerMenu.close()
 
         padding: popupStyle.padding + Border.width(popupStyle.borderSpec)
         background: BorderSurface {
@@ -200,70 +275,101 @@ Item {
           borderSpec: popupStyle.borderSpec
           radius: popupStyle.radius
         }
-        contentItem: Column {
+        // Detaching first, as the one reached for often; the settings page
+        // last. Every row as wide as the widest the menu is about to show,
+        // so the hover fill is not ragged — measured against what is on
+        // screen rather than every label that could ever be, so an overlay's
+        // short menu is not held open to the width of the detached one's
+        // longest word.
+        contentItem: ColumnLayout {
           // Flush, not spaced: a gap between rows makes each read as its own
           // button floating on the card. The hover fill is the only divider
-          // a two-row menu needs.
+          // the menu needs.
           spacing: 0
-          Repeater {
-            model: menu.rows
-            delegate: Rectangle {
-              id: menuRow
-              required property var modelData
-              width: menu.rowWidth
-              height: popupStyle.rowHeight
-              radius: popupStyle.rowRadius
-              color: rowMouse.containsMouse ? Style.hoverFillFor(root.foreground, root.accent) : "transparent"
 
-              // The row's ink, named once: the glyph and the label are one
-              // thing lighting up, not two that agree by accident. The glyph
-              // carries it a shade lighter — it labels the row, the word is
-              // the row.
-              readonly property color ink: rowMouse.containsMouse
-                ? Style.hoverStateColor(popupStyle.text, root.accent) : popupStyle.text
+          MenuRow {
+            objectName: "applicationMenu-detach"
+            visible: root.supportsOverlay
+            Layout.fillWidth: true
+            icon: root.detached ? "󰨟" : "󰏌"
+            label: root.detached ? "Back to overlay" : "Detach"
+            onEntered: providerMenu.close()
+            onClicked: {
+              menu.close()
+              root.detachToggled()
+            }
+          }
 
-              Text {
-                id: rowIcon
-                textFormat: Text.PlainText
-                anchors.left: parent.left
-                anchors.leftMargin: popupStyle.horizontalPadding
-                anchors.verticalCenter: parent.verticalCenter
-                width: menu.iconWidth
-                horizontalAlignment: Text.AlignHCenter
-                text: menuRow.modelData.icon
-                color: Util.alpha(menuRow.ink, 0.75)
-                font.family: Style.fontFamily
-                font.pixelSize: Style.font.icon
+          MenuRow {
+            objectName: "applicationMenu-providers"
+            visible: root.providers.length > 0
+            Layout.fillWidth: true
+            icon: "󰹕"
+            label: "Providers"
+            opensSubmenu: true
+            lit: providerMenu.opened
+            onEntered: providerMenu.open()
+            onClicked: providerMenu.open()
+
+            // Every note provider, ticked while it is on. A click turns one
+            // on or off and leaves the submenu open for the next.
+            QQC.Popup {
+              id: providerMenu
+              palette: ControlPalette {}
+              // On the menu's left, the one side with room: the menu stands
+              // at the window's right edge. Its first row is level with the
+              // row that opened it, and a press on that row leaves it open.
+              x: -menu.leftPadding - Style.spacing.xs - width
+              y: -topPadding
+              closePolicy: QQC.Popup.CloseOnEscape | QQC.Popup.CloseOnPressOutsideParent
+
+              padding: popupStyle.padding + Border.width(popupStyle.borderSpec)
+              background: BorderSurface {
+                color: popupStyle.fill
+                borderSpec: popupStyle.borderSpec
+                radius: popupStyle.radius
               }
+              contentItem: ColumnLayout {
+                spacing: 0
 
-              Text {
-                id: rowLabel
-                textFormat: Text.PlainText
-                anchors.left: rowIcon.right
-                anchors.leftMargin: Style.spacing.controlGap
-                anchors.verticalCenter: parent.verticalCenter
-                text: menuRow.modelData.label
-                color: menuRow.ink
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.body
-              }
-
-              MouseArea {
-                id: rowMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: {
-                  menu.close()
-                  if (menuRow.modelData.id === "detach") {
-                    root.detachToggled()
-                  } else if (menuRow.modelData.id === "settings") {
-                    root.settingsRequested()
-                  } else {
-                    root.keysRequested()
+                Repeater {
+                  model: root.providers
+                  delegate: MenuRow {
+                    id: providerRow
+                    required property var modelData
+                    objectName: "providerSwitch-" + providerRow.modelData.id
+                    Layout.fillWidth: true
+                    enabled: root.providersSwitchable
+                    icon: providerRow.modelData.enabled ? "󰄲" : "󰄱"
+                    label: providerRow.modelData.name
+                    onClicked: root.providerToggled(providerRow.modelData.id, !providerRow.modelData.enabled)
                   }
                 }
               }
+            }
+          }
+
+          MenuRow {
+            objectName: "applicationMenu-keys"
+            Layout.fillWidth: true
+            icon: "󰌌"
+            label: "Key bindings"
+            onEntered: providerMenu.close()
+            onClicked: {
+              menu.close()
+              root.keysRequested()
+            }
+          }
+
+          MenuRow {
+            objectName: "applicationMenu-settings"
+            Layout.fillWidth: true
+            icon: "󰒓"
+            label: "Settings"
+            onEntered: providerMenu.close()
+            onClicked: {
+              menu.close()
+              root.settingsRequested()
             }
           }
         }
