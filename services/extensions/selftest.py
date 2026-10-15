@@ -45,12 +45,12 @@ class Catalog(unittest.TestCase):
                    if item["packageId"] == "org.note-note.workspace"}
         self.assertEqual(actions, {"new-note": "newNote", "new-notebook": "newNotebook",
                                    "open-settings": "openSettings", "toggle-sidebar": "toggleList", "delete-note": "deleteNote"})
-        self.assertFalse([item for item in result["commands"] if item["workspaceAction"] and "url" in item],
+        self.assertFalse([item for item in result["commands"] if item["workspaceAction"] and "file" in item],
                          "a workspace action is the host's to run; it ships no handler")
         self.assertEqual([(item["packageId"], item["id"]) for item in result["tools"]],
                          [("org.note-note.calendar", tool) for tool in
                           ("insertMonth", "currentMonth", "nextMonth", "customMonth")])
-        self.assertTrue(all(item["builtin"] and item["url"].endswith(".qml") for item in result["tools"]))
+        self.assertTrue(all(item["builtin"] and item["file"].endswith(".qml") for item in result["tools"]))
         self.assertFalse(list((ROOT / "ui/tools").glob("*Month.qml")), "the calendar is its package's to supply")
         self.assertFalse((ROOT / "providers").exists())
 
@@ -60,7 +60,7 @@ class Catalog(unittest.TestCase):
         accepted = manifest.validate(value, path)["tools"][0]
         self.assertEqual((accepted["id"], accepted["localId"]), ("insertHello", "insertHello"),
                          "toolbar settings, shortcuts and editorTool name a tool unqualified")
-        self.assertTrue(accepted["url"].endswith("/InsertHello.qml"))
+        self.assertTrue(accepted["file"].endswith("/InsertHello.qml"))
         tool = value["contributes"]["tools"][0]
         for changes in ({"id": "insert-hello"}, {"id": "InsertHello"}, {"id": "a" * 65}, {"id": None},
                         {"path": None}, {"path": "../InsertHello.qml"}):
@@ -80,7 +80,7 @@ class Catalog(unittest.TestCase):
         handler = command.pop("handler")
         accepted = manifest.validate(value, path)["commands"][0]
         self.assertEqual(accepted["workspaceAction"], "newNote")
-        self.assertNotIn("url", accepted)
+        self.assertNotIn("file", accepted)
         for action in (None, 42, "", "newNote()", "../newNote", "a" * 65):
             command["workspaceAction"] = action
             with self.subTest(action=action), self.assertRaises(ValueError):
@@ -89,7 +89,7 @@ class Catalog(unittest.TestCase):
         with self.assertRaises(ValueError, msg="neither a handler nor a workspace action"):
             manifest.validate(value, path)
         command["handler"] = handler
-        self.assertTrue(manifest.validate(value, path)["commands"][0]["url"].endswith("/Greeting.qml"))
+        self.assertTrue(manifest.validate(value, path)["commands"][0]["file"].endswith("/Greeting.qml"))
 
     def test_plugin_keybindings_are_owned_without_loading_code(self):
         path = self.package("greeting")
@@ -212,9 +212,9 @@ class Catalog(unittest.TestCase):
         (legacy / "Not An Id").mkdir()
         (legacy / "empty").mkdir()
         result = manifest.discover(self.request)
-        self.assertEqual({item["id"]: item["url"] for item in result["providers"]},
-                         {"copied": (legacy / "copied/Provider.qml").as_uri(),
-                          "linked": (legacy / "linked/Provider.qml").as_uri()})
+        self.assertEqual({item["id"]: item["file"] for item in result["providers"]},
+                         {"copied": str(legacy / "copied/Provider.qml"),
+                          "linked": str(legacy / "linked/Provider.qml")})
         self.assertEqual([item["packageName"] for item in result["providers"]], ["copied", "linked"])
         self.assertEqual({item["packageId"] for item in result["diagnostics"]}, {"legacy.Not An Id", "legacy.empty"})
 

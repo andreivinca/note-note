@@ -55,7 +55,8 @@ def owned(package, local_id, relative=None):
                   "packageName": package["name"], "root": package["root"], "builtin": package["builtin"]}
     if relative is not None:
         descriptor["path"] = relative
-        descriptor["url"] = Path(packagefiles.resource_path(package["root"], relative)).as_uri()
+        # The checked file itself; the catalog in QML makes the URL it loads.
+        descriptor["file"] = packagefiles.resource_path(package["root"], relative)
     return descriptor
 
 
@@ -262,7 +263,7 @@ def legacy_providers(catalog, directory):
             diagnose(catalog, root, str(error), package_id)
             continue
         descriptor = {"id": name, "packageId": package_id, "packageName": name, "root": str(root),
-                      "url": Path(path).as_uri(), "builtin": False, "order": DEFAULT_ORDER}
+                      "file": path, "builtin": False, "order": DEFAULT_ORDER}
         admit(catalog, {"providers": [descriptor]}, root, package_id)
 
 

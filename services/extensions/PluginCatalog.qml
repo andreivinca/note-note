@@ -28,6 +28,13 @@ Item {
   signal loaded()
   ProcessRunner { id: runner }
 
+  // The discovery answers the files it checked; QML loads each by its URL.
+  function located(descriptors) {
+    return (descriptors || []).map(function(descriptor) {
+      return descriptor.file ? Object.assign({ url: Platform.fileUrl(descriptor.file) }, descriptor) : descriptor
+    })
+  }
+
   function nameOf(diagnostic) {
     return diagnostic.packageId || String(diagnostic.path || "").split("/").pop() || "the plugin catalog"
   }
@@ -37,11 +44,11 @@ Item {
       payload: JSON.stringify({ builtinRoot: Platform.localPath(Qt.resolvedUrl("../../plugins")),
         userRoot: Platform.configDir + "/plugins", themesRoot: Platform.configDir + "/themes",
         legacyRoot: Platform.providersDir, settings: settings }) }, function(result) {
-      catalog.commands = result.commands || []
+      catalog.commands = catalog.located(result.commands)
       catalog.keybindings = result.keybindings || []
-      catalog.themes = result.themes || []
-      catalog.providers = result.providers || []
-      catalog.tools = result.tools || []
+      catalog.themes = catalog.located(result.themes)
+      catalog.providers = catalog.located(result.providers)
+      catalog.tools = catalog.located(result.tools)
       catalog.diagnostics = result.error ? [{ stage: "discovery", level: "error", message: result.error }]
         : result.diagnostics || []
       catalog.diagnostics.forEach(function(diagnostic) {

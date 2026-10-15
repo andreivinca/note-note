@@ -23,8 +23,10 @@ def main():
         work = Path(temporary)
         config = work / "config/notenote"
         config.mkdir(parents=True)
-        for name in ("greeting", "colors"):
-            shutil.copytree(ROOT / "examples/plugins" / name, config / "plugins" / name)
+        # A folder name a URL has to escape: the catalog answers the file, and
+        # QML makes the URL it loads the package's command and tool by.
+        for name, folder in (("greeting", "greeting #1 ?%20 ș"), ("colors", "colors")):
+            shutil.copytree(ROOT / "examples/plugins" / name, config / "plugins" / folder)
         notes = work / "notes"
         notes.mkdir()
         note = "---\ntitle: Theme fixture\n---\nText ==marker== and `code`.\n\n> Quote and [link](https://example.org).\n\n| A | B |\n| --- | --- |\n| cell | nested |\n"
