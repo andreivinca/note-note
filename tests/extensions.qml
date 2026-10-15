@@ -236,13 +236,27 @@ Window {
       verify(shown("providerSwitch-" + id), "the submenu stays open")
     }
 
+    // Carries a tab by its face across the strip and lets go left of the
+    // middle of the tab it is to stand before.
+    function dragTab(key, before) {
+      var tab = findChild(workspace, "notebookTab-" + key)
+      var target = findChild(workspace, "notebookTab-" + before)
+      var from = tab.mapToItem(window.contentItem, tab.width / 2, tab.height / 2)
+      var to = target.mapToItem(window.contentItem, target.width / 4, target.height / 2)
+      mousePress(window.contentItem, from.x, from.y)
+      for (var i = 1; i <= 12; i++) {
+        mouseMove(window.contentItem, from.x + (to.x - from.x) * i / 12, from.y, -1, Qt.LeftButton)
+      }
+      mouseRelease(window.contentItem, to.x, from.y)
+    }
+
     function checkProvidersMenu(editor) {
       openProvidersMenu()
       var keys = menuItem("applicationMenu-keys"), settings = menuItem("applicationMenu-settings")
       verify(menuItem("applicationMenu-providers").y < keys.y && keys.y < settings.y,
              "Providers, Key bindings, then Settings last")
       compare(workspace.providerSwitches.map(function(entry) { return entry.name }).join(),
-              "Local notes,Sticky Notes,OneNote,Notion", "every provider, in tab order, on or off")
+              "Local notes,Sticky Notes,OneNote,Notion", "every provider, in the catalog's order, on or off")
       compare(workspace.providerSwitches.map(function(entry) { return entry.enabled }).join(),
               "true,false,false,false")
       verify(workspace.providerById("notion") === null)
@@ -251,9 +265,21 @@ Window {
       tryVerify(function() {
         return workspace.tabs.some(function(tab) { return tab.key === "notion/notion" })
       }, 10000, "Notion has its tab")
+      leaveThroughKeyBindings()
+
+      // A tab dragged first stays there, in the order the state keeps.
+      dragTab("notion/notion", workspace.tabs[0].key)
+      compare(workspace.tabs[0].key, "notion/notion", "a tab dragged before the first one goes first")
+      compare(workspace.tabOrder[0], "notion/notion")
+
+      // Turned off and on again, a provider has its tabs last.
+      openProvidersMenu()
       switchProvider("notion", false)
       verify(!workspace.tabs.some(function(tab) { return tab.key === "notion/notion" }))
       switchProvider("notion", true)
+      tryVerify(function() {
+        return workspace.tabs.length > 1 && workspace.tabs[workspace.tabs.length - 1].key === "notion/notion"
+      }, 10000, "a provider turned back on has its tab last")
       leaveThroughKeyBindings()
 
       // A right-click on a provider's tab hides it the same way.

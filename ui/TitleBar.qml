@@ -29,9 +29,9 @@ Item {
   // bindings. The bar only needs to know that the notes are not on screen,
   // not which page took them.
   property bool pageOpen: false
-  // The note providers the Providers submenu turns on and off, in tab order,
-  // as { id, name, enabled }. While they cannot be switched, the submenu
-  // dims them.
+  // The note providers the Providers submenu turns on and off, in the
+  // catalog's order, as { id, name, enabled }. While they cannot be
+  // switched, the submenu dims them.
   property var providers: []
   property bool providersSwitchable: true
   property color background: Color.menu.background
@@ -45,6 +45,8 @@ Item {
   property real cornerRadius: 0
 
   signal sectionActivated(string key)
+  // A tab was dragged before the tab `before`, or last when it is "".
+  signal tabMoved(string key, string before)
   signal filterEdited(string text)
   signal clearRequested()
   signal settingsRequested()
@@ -181,6 +183,7 @@ Item {
       fontFamily: root.fontFamily
       fontSize: root.tabFontSize
       onActivated: function(key) { root.sectionActivated(key) }
+      onMoved: function(key, before) { root.tabMoved(key, before) }
       onMenuRequested: function(tab) {
         var provider = root.providers.find(function(entry) {
           return entry.id === tab.provider

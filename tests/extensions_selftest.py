@@ -78,6 +78,9 @@ def main():
         assert (notes / "Theme.md").read_text().endswith("x\n")
         assert len(list(notes.glob("*.md"))) == 1, "the new note must be removed only after confirmation"
         assert len(list((notes / "Commandbook").glob("*.md"))) == 1
+        state = json.loads((work / "state" / ("omarchy" if shell else "notenote") / "note-note.json").read_text())
+        assert state["version"] == 5 and state["tabOrder"], "the state keeps the order the tabs were dragged into"
+        assert not any(key.startswith("notion/") for key in state["tabOrder"]), "a provider turned off gives up its tabs' places"
         restart = (ROOT / "tests/extensions_restart.qml").read_text()
         restart = restart.replace('import "app"', 'import "' + resources.as_uri() + '"')
         restart = restart.replace('import "app/', 'import "' + resources.as_uri() + '/')

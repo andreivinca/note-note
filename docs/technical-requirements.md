@@ -110,9 +110,10 @@ people write against: change it additively, never silently.
 - `version` is an opaque change marker (file mtime, `lastModifiedDateTime`,
   `last_edited_time`). The host reloads the open note when a listing reports a
   newer version and the note has no unsaved edits.
-- Host state (`~/.local/state/omarchy/note-note.json`, version 4): detached
+- Host state (`~/.local/state/omarchy/note-note.json`, version 5): detached
   flag, the open tab's section key, `lastNotes` (section key → the note last
-  chosen in that tab), and a `providers` object each provider owns. Older
+  chosen in that tab), `tabOrder` (the section keys in the order the tabs
+  were dragged into), and a `providers` object each provider owns. Older
   versions are read for what they have and rewritten whole on the next save;
   version 2's two fold lists are ignored.
 

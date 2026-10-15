@@ -208,6 +208,9 @@ Item {
   // resolved against the live sections here: a provider that has not listed yet
   // (OneNote is async) must not cost the user their tab.
   property string activeSection: ""
+  // The tab keys in the order the user dragged the tabs into, persisted. A
+  // tab it does not name comes after every one it does (Sidebar.placed).
+  property var tabOrder: []
   property var tabs: []
   // Per-tab search hit counts, keyed by tab key — beside `tabs`, not inside
   // them: the counts move on every keystroke, and a Repeater over a plain
@@ -787,40 +790,18 @@ Item {
 
   // Manifest descriptors name provider identities before activation. The
   // catalog has already rejected ambiguous IDs; disabled providers are never
-  // instantiated merely to discover their metadata.
-  // Tabs follow root.providers' order (eachSection walks it start to end).
-  // An id named in config.providers keeps that key's position — JSON.parse
-  // preserves the order string keys were written in — so reordering the
-  // config reorders the tabs; an id absent from config.providers (enabled by
-  // default, order never asked for) just keeps its natural discovery order,
-  // appended after every id the user did name.
-  function orderProviderIds(ids, cfg) {
-    var known = (cfg && cfg.providers) || {}, order = Object.keys(known), rank = {}
-    for (var i = 0; i < order.length; i++) {
-      rank[order[i]] = i
-    }
-    var ranked = [], rest = []
-    for (var j = 0; j < ids.length; j++) {
-      (rank.hasOwnProperty(ids[j]) ? ranked : rest).push(ids[j])
-    }
-    ranked.sort(function(a, b) {
-      return rank[a] - rank[b]
-    })
-    return ranked.concat(rest)
-  }
-
+  // instantiated merely to discover their metadata. They are created in the
+  // catalog's order, which is the tabs' own until the user drags one
+  // (tabOrder).
   function loadProviders(entries) {
     var urls = {}
     for (var e = 0; e < entries.length; e++) {
       urls[entries[e].id] = entries[e].url
     }
     root.providerUrls = urls
-    var ids = root.orderProviderIds(entries.map(function(x) {
-      return x.id
-    }), root.config)
-    for (var u = 0; u < ids.length; u++) {
-      if (root.providerEnabledIn(root.config, ids[u])) {
-        root.addProvider(ids[u])
+    for (var u = 0; u < entries.length; u++) {
+      if (root.providerEnabledIn(root.config, entries[u].id)) {
+        root.addProvider(entries[u].id)
       }
     }
     root.providersLoaded = true
@@ -862,17 +843,12 @@ Item {
   }
 
   // What the title bar's Providers submenu lists: every provider the catalog
-  // found, in tab order, whether it runs or not. One that is off was never
+  // found, in its order, whether it runs or not. One that is off was never
   // created to say its own name, so each goes by its package's.
-  readonly property var providerSwitches: {
-    var names = {}
-    pluginCatalog.providers.forEach(function(descriptor) {
-      names[descriptor.id] = descriptor.packageName
-    })
-    return root.orderProviderIds(Object.keys(names), root.config).map(function(id) {
-      return { id: id, name: names[id], enabled: root.providerEnabledIn(root.config, id) }
-    })
-  }
+  readonly property var providerSwitches: pluginCatalog.providers.map(function(descriptor) {
+    return { id: descriptor.id, name: descriptor.packageName,
+             enabled: root.providerEnabledIn(root.config, descriptor.id) }
+  })
 
   // Whether a provider can be switched just now. A switch saves the settings
   // in force with one provider turned on or off, so no other settings change
@@ -917,15 +893,21 @@ Item {
     provider.destroy()
   }
 
+  // Back in the catalog's order after a settings change, so a provider
+  // created again takes its tabs' places rather than the end.
   function reorderProviders() {
-    var byId = {}
-    for (var i = 0; i < root.providers.length; i++) {
-      byId[root.providers[i].id] = root.providers[i]
-    }
-    var ids = root.orderProviderIds(Object.keys(byId), root.config)
-    root.providers = ids.map(function(id) {
-      return byId[id]
+    var ids = pluginCatalog.providers.map(function(descriptor) {
+      return descriptor.id
     })
+    root.providers = root.providers.slice().sort(function(a, b) {
+      return ids.indexOf(a.id) - ids.indexOf(b.id)
+    })
+  }
+
+  // A provider turned off gives up its tabs' places, and they come last
+  // when it is turned on again.
+  function forgetTabsOf(provider) {
+    root.tabOrder = Sidebar.without(root.tabOrder, root.providerTabKeys(), provider.id)
   }
 
   // The one place `rows` is written, so the count means what it says.
@@ -1125,7 +1107,13 @@ Item {
     return Sidebar.ownKey(key)
   }
 
+  // Every tab, in the order the strip shows them.
   function sectionKeys() {
+    return Sidebar.arranged(root.tabOrder, root.providerTabKeys())
+  }
+
+  // Every tab, provider by provider.
+  function providerTabKeys() {
     var out = []
     eachSection(function(p, s, k) {
       out.push(k)
@@ -1133,10 +1121,15 @@ Item {
     return out
   }
 
+  // A tab dragged to stand before the tab `before`, or last.
+  function moveTab(key, before) {
+    root.tabOrder = Sidebar.moved(root.tabOrder, root.providerTabKeys(), key, before)
+    rebuildRows()
+    saveState()
+  }
+
   // What the rail actually opens: the stored tab while it exists, else the
-  // first section listed. Providers are registered local-first (loadProviders),
-  // so a missing or stale tab lands on the user's own files without the host
-  // naming any provider here.
+  // first tab on the strip.
   function activeKey() {
     var keys = sectionKeys()
     if (keys.indexOf(root.activeSection) >= 0) {
@@ -1370,11 +1363,15 @@ Item {
     var model = Sidebar.build(root.providers, active, root.filterText, root.contentHits)
     model.rows = root.projectReorders(model.rows)
     var sourceProv = active ? providerOfKey(active) : null
-    var tabs = model.tabs, hits = model.hits
+    var hits = model.hits, keys = sectionKeys()
     // The tabs themselves change rarely (a notebook made, a colour given); the
     // hit counts change per keystroke. Keeping the model still while only the
     // counts move is what keeps the rail from rebuilding its delegates.
-    var newTabs = decollide(tabs)
+    // Colours are told apart in the providers' order, so a drag moves a tab
+    // without changing any.
+    var newTabs = decollide(model.tabs).sort(function(a, b) {
+      return keys.indexOf(a.key) - keys.indexOf(b.key)
+    })
     if (JSON.stringify(newTabs) !== JSON.stringify(root.tabs)) {
       root.tabs = newTabs
     }
@@ -2355,14 +2352,17 @@ Item {
   function writeState() {
     root.stateWriteDue = false
     root.providerState = providerSnapshot()
-    // version 4: what each tab opens with, where 3 added the open tab itself
-    // and 2 kept two lists of folded sections. An older file simply has no
-    // `lastNotes`, and every tab opens empty until it has been used once.
+    // version 5: the order the tabs were dragged into, where 4 added what
+    // each tab opens with, 3 the open tab itself and 2 kept two lists of
+    // folded sections. An older file simply lacks the newer fields: without
+    // `tabOrder` the tabs stand in their providers' order, and without
+    // `lastNotes` every tab opens empty until it has been used once.
     var st = {
-      "version": 4,
+      "version": 5,
       "detached": root.detached,
       "active": root.activeSection,
       "lastNotes": root.lastNotes,
+      "tabOrder": root.tabOrder,
       "providers": root.providerState
     }
     if (root.listWidth > 0) {
@@ -2407,6 +2407,11 @@ Item {
           }
         }
         root.lastNotes = remembered
+      }
+      if (Array.isArray(s.tabOrder)) {
+        root.tabOrder = s.tabOrder.filter(function(key) {
+          return typeof key === "string"
+        })
       }
       if (s.providers) {
         root.providerState = s.providers
@@ -2734,6 +2739,9 @@ Item {
         onSectionActivated: function(key) {
           root.closePage()
           root.setActiveSection(key)
+        }
+        onTabMoved: function(key, before) {
+          root.moveTab(key, before)
         }
         onSettingsRequested: root.openPage("settings")
         onKeysRequested: root.openPage("keys")

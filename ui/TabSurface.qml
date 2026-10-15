@@ -17,6 +17,12 @@ Item {
     : Math.max(0, arc - bottomInset)
   readonly property real bottomY: selected ? height : Math.max(0, height - bottomInset)
   readonly property bool hovered: hover.hovered
+  // True while the tab is dragged. `dragOrigin` is where the pointer took
+  // hold and `dragPosition` where it is now, in scene coordinates, which
+  // the tab moving under it does not change.
+  readonly property bool dragged: drag.active
+  readonly property point dragOrigin: drag.centroid.scenePressPosition
+  readonly property point dragPosition: drag.centroid.scenePosition
   signal clicked()
   signal menuRequested()
 
@@ -42,6 +48,13 @@ Item {
     TapHandler {
       acceptedButtons: Qt.RightButton
       onTapped: surface.menuRequested()
+    }
+
+    // The strip moves the tab; this only says where the pointer took it.
+    DragHandler {
+      id: drag
+      target: null
+      cursorShape: Qt.ClosedHandCursor
     }
 
     ShapePath {

@@ -143,6 +143,9 @@ Item {
           if (host.providerOf(session.currentPath) === provider) {
             session.putAway()
           }
+          if (!change.enabled) {
+            host.forgetTabsOf(provider)
+          }
           host.retireProvider(provider)
         }
         if (change.enabled) {

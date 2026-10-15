@@ -10,6 +10,7 @@ Window {
   color: tabs.activeBackground
   property int activations: 0
   property string lastActivated: ""
+  property var moves: []
   readonly property real pixelRatio: Screen.devicePixelRatio
 
   Rectangle {
@@ -39,6 +40,16 @@ Window {
         window.activations++
         window.lastActivated = key
         activeKey = key
+      }
+      // Kept as the host keeps it: the tab taken out and put back before
+      // `before`, or last.
+      onMoved: function(key, before) {
+        window.moves = window.moves.concat([key + ">" + before])
+        var moving = sections.find(function(section) { return section.key === key })
+        var rest = sections.filter(function(section) { return section.key !== key })
+        var at = before ? rest.findIndex(function(section) { return section.key === before }) : rest.length
+        rest.splice(at, 0, moving)
+        sections = rest
       }
     }
   }
@@ -179,6 +190,106 @@ Window {
       tabs.width = 920
     }
 
+    function order() {
+      return tabs.sections.map(function(section) { return section.key }).join()
+    }
+
+    // Takes hold of a tab's face and carries it across the rail to `toX`,
+    // waiting there for `hold` ms before letting go.
+    function drag(key, toX, hold) {
+      var from = box(tab(key))
+      var x = from.x + from.width / 2, y = from.y + tabs.faceHeight / 2
+      mousePress(rail, x, y)
+      for (var i = 1; i <= 12; i++) {
+        mouseMove(rail, x + (toX - x) * i / 12, y, -1, Qt.LeftButton)
+      }
+      if (hold) {
+        wait(hold)
+      }
+      mouseRelease(rail, toX, y)
+      wait(50)
+    }
+
+    function checkDragging() {
+      select("middle")
+      var count = window.activations
+      window.moves = []
+      var right = box(tab("right"))
+      drag("left", right.x + right.width * 0.75)
+      equal(window.moves.join(), "left>", "a tab dragged past the last one goes last")
+      equal(order(), "middle,right,left", "the strip shows the order it is given back")
+      equal(window.activations, count, "a drag is not a click")
+
+      var middle = box(tab("middle"))
+      drag("left", middle.x + middle.width * 0.25)
+      equal(window.moves.join(), "left>,left>middle", "a tab dragged before the first one goes first")
+      equal(order(), "left,middle,right", "the tabs are back in their first order")
+
+      var left = box(tab("left"))
+      drag("left", left.x + left.width / 2 + 3)
+      equal(window.moves.length, 2, "a drag that ends where it began moves nothing")
+      equal(window.activations, count + 1, "a press that hardly moves is a click")
+
+      // Held beyond either end of the row, a dragged tab stops at the last
+      // slot or the first, and let go where it began it moves nothing.
+      var held = box(tab("middle"))
+      var hx = held.x + held.width / 2, hy = held.y + tabs.faceHeight / 2
+      var far = tabs.width - 2, near = 2
+      var dragged = tab("middle")
+      mousePress(rail, hx, hy)
+      for (var step = 1; step <= 12; step++) {
+        mouseMove(rail, hx + (far - hx) * step / 12, hy, -1, Qt.LeftButton)
+      }
+      tryVerify(function() {
+        return dragged.x > 0 && Math.abs(dragged.mapToItem(dragged.parent, 0, 0).x - dragged.x) < 0.5
+      }, 1000, "a tab held past the end stops at the last slot")
+      for (step = 1; step <= 12; step++) {
+        mouseMove(rail, far + (near - far) * step / 12, hy, -1, Qt.LeftButton)
+      }
+      tryVerify(function() {
+        return dragged.x === 0 && Math.abs(dragged.mapToItem(dragged.parent, 0, 0).x) < 0.5
+      }, 1000, "a tab held before the start stops at the first slot")
+      for (step = 1; step <= 6; step++) {
+        mouseMove(rail, near + (hx - near) * step / 6, hy, -1, Qt.LeftButton)
+      }
+      mouseRelease(rail, hx, hy)
+      equal(window.moves.length, 2, "a tab carried to both ends and back moves nothing")
+      equal(order(), "left,middle,right", "the order stays")
+
+      // The sections change under the drag: the tabs are built again and
+      // the drag has nothing left to drop.
+      var start = box(tab("left"))
+      var x = start.x + start.width / 2, y = start.y + tabs.faceHeight / 2
+      mousePress(rail, x, y)
+      for (var i = 1; i <= 6; i++) {
+        mouseMove(rail, x + i * 20, y, -1, Qt.LeftButton)
+      }
+      check(tabs.dragTab !== null, "the tab is being dragged")
+      tabs.sections = tabs.sections.slice()
+      mouseRelease(rail, x + 120, y)
+      check(tabs.dragTab === null, "a new set of tabs ends the drag")
+      equal(window.moves.length, 2, "a drag whose tabs were built again moves nothing")
+      equal(order(), "left,middle,right", "the order stays")
+    }
+
+    // An overflowing strip scrolls under a tab held at its end, rather than
+    // flicking away under the one being dragged.
+    function checkDraggingAcross() {
+      tabs.width = 320
+      select("left")
+      tryVerify(function() {
+        return box(tab("left")).x - tabs.tabRadius >= -0.5
+      }, 1000, "the strip starts at its first tab")
+      window.moves = []
+      drag("left", rail.x + tabs.width - 4, 1500)
+      equal(window.moves.join(), "left>", "a tab held at the end scrolls the strip to the last place")
+      equal(order(), "middle,right,left", "the overflowing strip shows the new order")
+      tabs.width = 920
+      var middle = box(tab("middle"))
+      drag("left", middle.x + middle.width * 0.25)
+      equal(order(), "left,middle,right", "the tabs are back in their first order")
+    }
+
     function run() {
       for (var size of [11, 13, 20]) {
         tabs.fontSize = size
@@ -186,6 +297,8 @@ Window {
         checkNeighbor("left", -1)
         checkNeighbor("right", 1)
         checkScrolling()
+        checkDragging()
+        checkDraggingAcross()
       }
       console.error("<<<TABSTRIP_DONE>>>")
       Qt.quit()

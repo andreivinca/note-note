@@ -267,8 +267,9 @@ def legacy_providers(catalog, directory):
 
 
 def one_of_a_kind(catalog):
-    """Providers whose identity nothing else claims, in tab order. A built-in
-    keeps its identity against any other claim; among others nobody wins."""
+    """Providers whose identity nothing else claims, in the order their tabs
+    stand in until the user drags one. A built-in keeps its identity against
+    any other claim; among others nobody wins."""
     claims = {}
     for descriptor in catalog["providers"]:
         claims.setdefault(descriptor["id"], []).append(descriptor)

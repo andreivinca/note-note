@@ -26,8 +26,7 @@ from the repository root's Omarchy `manifest.json`.
 A command names a `handler` or a `workspaceAction`, one of the two
 ([commands](commands.md)). A theme's name is the one its file states. A
 provider's optional `order` (0 to 9999, 1000 when left out) says where its tabs
-stand among the others while the settings name no order of their own; lower
-comes first. A tool is an editing-toolbar action with its menu entries,
+stand among the others until the user drags them elsewhere; lower comes first. A tool is an editing-toolbar action with its menu entries,
 shortcut and panel ([editing tools](editing-tools.md#tools-in-a-package)).
 
 Use only the kinds the package actually supplies. API and manifest versions are

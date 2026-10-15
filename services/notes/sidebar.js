@@ -16,6 +16,41 @@ function ownKey(key) {
   return key.substring(key.indexOf("/") + 1)
 }
 
+// The tabs' order is the keys the user dragged them into. All of it is
+// every key the order names, kept for a tab that is not there just now (a
+// provider still listing) as for the ones on screen, then each of `keys`,
+// the tabs there are in their providers' order, that it does not name: a
+// new notebook, or a provider turned back on, comes last.
+function placed(order, keys) {
+  return order.concat(keys.filter(function(key) {
+    return order.indexOf(key) < 0
+  }))
+}
+
+// The tabs there are, as the strip shows them.
+function arranged(order, keys) {
+  return placed(order, keys).filter(function(key) {
+    return keys.indexOf(key) >= 0
+  })
+}
+
+// The order with the tab `key` dragged before the tab `before`, or last.
+function moved(order, keys, key, before) {
+  var result = placed(order, keys).filter(function(other) {
+    return other !== key
+  })
+  var at = result.indexOf(before)
+  result.splice(at < 0 ? result.length : at, 0, key)
+  return result
+}
+
+// The order without a provider's tabs, which come last when it is back.
+function without(order, keys, providerId) {
+  return placed(order, keys).filter(function(key) {
+    return providerIdOf(key) !== providerId
+  })
+}
+
 function matchesQuery(row, query) {
   return (row.title || "").toLowerCase().indexOf(query) >= 0
       || (row.preview || "").toLowerCase().indexOf(query) >= 0

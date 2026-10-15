@@ -722,12 +722,14 @@ ShellRoot {
     property var providers: [configured]
     property bool opened: false
     property int retired: 0
+    property int forgotten: 0
     function providerById(id) { return configured }
     function providerOf(path) { return configured }
     function providerSnapshot() { return {} }
     function providerBusy(p) { return p.busy }
     function applyProviderSettings(p) { p.notebookTabs = config.providers.test.notebookTabs }
     function retireProvider(p) { retired++ }
+    function forgetTabsOf(p) { forgotten++ }
     function addProvider(id) { return configured }
     function reorderProviders() {}
     function rebuildRows() {}
@@ -835,6 +837,7 @@ ShellRoot {
     lifecycle.tryCommit()
     configFiles.callback({ ok: true })
     check("provider retires only after drain and confirmed settings write", host.retired === 1 && session.currentPath === "")
+    check("a provider turned off gives up its tabs' places", host.forgotten === 1)
   }
 
   // Whether the editor may change the note (`writable`, which the host binds
@@ -1124,6 +1127,17 @@ ShellRoot {
     check("a tab key is spelt in one place and read back by the same",
           Sidebar.sectionKey({ id: "p" }, { key: "s/t" }) === "p/s/t"
           && Sidebar.providerIdOf("p/s/t") === "p" && Sidebar.ownKey("p/s/t") === "s/t")
+    // The user dragged b/x first; a/z is not there just now, and a/y is new.
+    var tabOrder = ["b/x", "a/z", "a/w"], present = ["a/w", "a/y", "b/x"]
+    check("dragged tabs keep their order, and a tab the order does not name comes last",
+          Sidebar.arranged(tabOrder, present).join() === "b/x,a/w,a/y"
+          && Sidebar.arranged([], present).join() === present.join())
+    check("a drag places the tab before another or last, keeping the places of tabs not there",
+          Sidebar.moved(tabOrder, present, "a/y", "b/x").join() === "a/y,b/x,a/z,a/w"
+          && Sidebar.moved(tabOrder, present, "b/x", "").join() === "a/z,a/w,a/y,b/x")
+    check("a provider turned off gives up its tabs' places, there or not",
+          Sidebar.without(tabOrder, present, "a").join() === "b/x"
+          && Sidebar.arranged(Sidebar.without([], present, "b"), present).join() === "a/w,a/y,b/x")
     check("modification captions accept numeric and ISO dates and reject invalid dates",
           Sidebar.timestamp(today) === today && Sidebar.timestamp(new Date(today).toISOString()) === today
           && Sidebar.timestamp("invalid") === 0)
