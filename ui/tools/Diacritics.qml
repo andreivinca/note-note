@@ -23,8 +23,16 @@ Tool {
   readonly property var alphabet: Diacritics.alphabet(language)
   readonly property var characters: alphabet ? Array.from(alphabet.lower + alphabet.upper) : []
 
+  // The picker opens once the region is known, which the first opening asks
+  // for, so it opens on the timezone's language with its first letter
+  // focused, and only while the note and caret are the ones it was asked at.
   function execute() {
-    openPanel()
+    var context = tool.editor.capture()
+    tool.systemRegion.whenReady(function() {
+      if (tool.editor.current(context)) {
+        tool.openPanel()
+      }
+    })
   }
 
   function choose(character) {

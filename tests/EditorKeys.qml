@@ -1669,15 +1669,23 @@ Window {
     }), "the language choices do not name every alphabet")
     require(Diacritics.alphabet("constructor") === null, "an object property was taken for a language")
     var tool = editor.tools.find("diacritics")
-    keys.tryVerify(function() { return tool.systemRegion.ready }, 3000)
+    require(!tool.systemRegion.started, "the region was detected before the picker was first opened")
+    load({ source: "Text\n" })
+    editor.tool("diacritics")
+    var popup = diacriticsPopup()
     require(tool.systemRegion.timeZone === "Europe/Bucharest" && tool.countryCode === "RO",
             "the system timezone did not identify Romania: " + tool.systemRegion.timeZone + "/" + tool.countryCode
               + " ready=" + tool.systemRegion.ready + " error=" + tool.systemRegion.error)
     require(tool.language === "ro" && tool.characters.join("") === "ăâîșțĂÂÎȘȚ",
             "an English interface did not preselect the system timezone's Romanian letters")
+    require(keys.findChild(popup.contentItem, "diacritics-ă").activeFocus,
+            "the first opening did not focus the timezone language's first letter")
+    tool.cancelPanel()
   }
 
   function diacriticsPopup() {
+    // The first opening waits for the region, and the popup is built then.
+    keys.tryVerify(function() { return editor.tools.find("diacritics").panelOpen }, 3000)
     var holder = keys.findChild(editor, "editingPopupHolder-diacritics")
     require(holder, "diacritics popup holder missing")
     var popup = Array.from(holder.data).find(function(object) {
@@ -1873,7 +1881,9 @@ Window {
       for (var data of cases) {
         helperlessLoad(data.source, "b")
         var caret = helperlessEditor.cursorPosition()
-        require(helperlessEditor.tool("diacritics") && tool.choose("ș"), "diacritic rejected without the native helper")
+        require(helperlessEditor.tool("diacritics"), "diacritics unavailable without the native helper")
+        keys.tryVerify(function() { return tool.panelOpen }, 3000)
+        require(tool.choose("ș"), "diacritic rejected without the native helper")
         require(helperlessMarkdown() === data.expected, "helperless insertion changed the block: " + helperlessMarkdown())
         require(helperlessEditor.cursorPosition() === caret + 1, "helperless insertion did not advance the caret")
       }
