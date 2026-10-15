@@ -34,6 +34,14 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.0.46" date="2026-10-15">
+      <description>
+        <p>Drag a tab across the top to move it, and it stays where you put
+        it. A new notebook joins its source's tabs, and a source turned off
+        and on again has its tabs last. The order of the sources in the
+        settings file no longer decides the order of the tabs.</p>
+      </description>
+    </release>
     <release version="1.0.45" date="2026-10-15">
       <description>
         <p>Turn note sources on and off from the menu at the top right:
