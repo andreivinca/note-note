@@ -19,7 +19,12 @@ Controls.ComboBox {
   model: options
   textRole: "label"
   valueRole: "value"
-  currentIndex: indexOfValue(value)
+  // Found in `options` itself: the ComboBox's indexOfValue answers -1 until
+  // its model is in, and a binding on it is not asked again after, so a
+  // dropdown made with its value already set would show none.
+  currentIndex: options.findIndex(function(option) {
+    return String(option.value) === value
+  })
   font.family: fontFamily
   font.pixelSize: Style.font.body
   palette.text: foreground

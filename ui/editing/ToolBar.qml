@@ -208,13 +208,24 @@ Item {
     Repeater {
       model: bar.registry.actions
       delegate: Loader {
+        id: inlinePanel
         required property var modelData
+        // Built the first time the panel opens. Panels keep their controls
+        // while closed: closing from a control's signal must not destroy
+        // that control while its handler is running.
+        property bool opened: false
         width: strip.width - strip.leftPadding - strip.rightPadding
-        // Panels keep their controls while closed. Closing from a control's
-        // signal must not destroy that control while its handler is running.
-        active: !!modelData.panel && !modelData.panelPopup
+        active: opened && !!modelData.panel && !modelData.panelPopup
         visible: !modelData.panelPopup && modelData.panelOpen && bar.registry.canExecute(modelData)
         sourceComponent: modelData.panel
+        Connections {
+          target: inlinePanel.modelData
+          function onPanelOpenChanged() {
+            if (inlinePanel.modelData.panelOpen) {
+              inlinePanel.opened = true
+            }
+          }
+        }
       }
     }
   }
@@ -253,8 +264,20 @@ Item {
   Repeater {
     model: bar.registry.actions
     delegate: Loader {
+      id: popupPanel
       required property var modelData
-      active: !!modelData.panel && modelData.panelPopup
+      // The popup and its panel are built the first time the panel opens,
+      // and kept while closed, as the inline panels are.
+      property bool opened: false
+      active: opened && !!modelData.panel && modelData.panelPopup
+      Connections {
+        target: popupPanel.modelData
+        function onPanelOpenChanged() {
+          if (popupPanel.modelData.panelOpen) {
+            popupPanel.opened = true
+          }
+        }
+      }
       sourceComponent: Component {
         Item {
           objectName: "editingPopupHolder-" + modelData.toolId
@@ -272,12 +295,16 @@ Item {
             focus: true
             visible: tool.panelOpen && bar.registry.canExecute(tool)
             closePolicy: QQC.Popup.CloseOnEscape | QQC.Popup.CloseOnPressOutside
-            onOpened: {
+            // The panel takes focus once the popup is open and the panel is
+            // in, whichever comes last: a popup built open on its first use
+            // can open before its panel has loaded.
+            function focusPanel() {
               var panel = contentItem.item
-              if (panel && typeof panel.focusInput === "function") {
+              if (popup.opened && panel && typeof panel.focusInput === "function") {
                 panel.focusInput()
               }
             }
+            onOpened: popup.focusPanel()
             onClosed: {
               if (tool.panelOpen) {
                 tool.cancelPanel()
@@ -290,6 +317,7 @@ Item {
             }
             contentItem: Loader {
               sourceComponent: popup.tool.panel
+              onLoaded: popup.focusPanel()
             }
           }
         }
