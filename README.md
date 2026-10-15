@@ -208,8 +208,8 @@ byte-order mark open the same way; saving writes Unix (LF) line endings.
 Each source and notebook gets its own tab across the top; click one, or
 `Ctrl+Tab` through them. Use `Alt+1` through `Alt+9` to open the corresponding
 tab from left to right; numbers without a tab do nothing. Drag a tab to move
-it; the order is kept, and a new notebook, or a source turned off and on
-again, has its tabs last.
+it; the order is kept. A new notebook joins its source's tabs, and a
+source turned off and on again has its tabs last.
 Whether a source's notebooks spread into a tab
 each or fold inside a single tab is per source — the `notebookTabs`
 setting; your local folders spread by default, OneNote folds. Local notes offer

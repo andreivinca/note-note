@@ -1129,9 +1129,12 @@ ShellRoot {
           && Sidebar.providerIdOf("p/s/t") === "p" && Sidebar.ownKey("p/s/t") === "s/t")
     // The user dragged b/x first; a/z is not there just now, and a/y is new.
     var tabOrder = ["b/x", "a/z", "a/w"], present = ["a/w", "a/y", "b/x"]
-    check("dragged tabs keep their order, and a tab the order does not name comes last",
+    check("dragged tabs keep their order, and a tab the order does not name stands after its provider's last",
           Sidebar.arranged(tabOrder, present).join() === "b/x,a/w,a/y"
+          && Sidebar.arranged(["a/w", "b/x"], present).join() === "a/w,a/y,b/x"
           && Sidebar.arranged([], present).join() === present.join())
+    check("a tab whose provider the order does not name comes last",
+          Sidebar.arranged(["b/x"], ["a/w", "a/y", "b/x"]).join() === "b/x,a/w,a/y")
     check("a drag places the tab before another or last, keeping the places of tabs not there",
           Sidebar.moved(tabOrder, present, "a/y", "b/x").join() === "a/y,b/x,a/z,a/w"
           && Sidebar.moved(tabOrder, present, "b/x", "").join() === "a/z,a/w,a/y,b/x")

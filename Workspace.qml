@@ -209,7 +209,7 @@ Item {
   // (OneNote is async) must not cost the user their tab.
   property string activeSection: ""
   // The tab keys in the order the user dragged the tabs into, persisted. A
-  // tab it does not name comes after every one it does (Sidebar.placed).
+  // tab it does not name stands with its provider's (Sidebar.placed).
   property var tabOrder: []
   property var tabs: []
   // Per-tab search hit counts, keyed by tab key — beside `tabs`, not inside

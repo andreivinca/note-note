@@ -18,13 +18,24 @@ function ownKey(key) {
 
 // The tabs' order is the keys the user dragged them into. All of it is
 // every key the order names, kept for a tab that is not there just now (a
-// provider still listing) as for the ones on screen, then each of `keys`,
-// the tabs there are in their providers' order, that it does not name: a
-// new notebook, or a provider turned back on, comes last.
+// provider still listing) as for the ones on screen, with each of `keys`,
+// the tabs there are in their providers' order, that it does not name. Such
+// a tab, a new notebook or a provider's tab while it lists, stands after
+// its provider's last; one whose provider the order does not name, as a
+// provider turned back on, comes last.
 function placed(order, keys) {
-  return order.concat(keys.filter(function(key) {
-    return order.indexOf(key) < 0
-  }))
+  var result = order.slice()
+  keys.forEach(function(key) {
+    if (result.indexOf(key) >= 0) {
+      return
+    }
+    var at = result.length
+    while (at > 0 && providerIdOf(result[at - 1]) !== providerIdOf(key)) {
+      at--
+    }
+    result.splice(at > 0 ? at : result.length, 0, key)
+  })
+  return result
 }
 
 // The tabs there are, as the strip shows them.
