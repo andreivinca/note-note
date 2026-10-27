@@ -370,7 +370,8 @@ once the popup is open.
 `ToolForm.qml` supplies the shared popover: the tool's icon and label as a
 header, the spacing between fields, and a footer with the key hint and the one
 Insert button. There is no Cancel button; Escape or a click outside cancels, as
-for every popup. Set the form's `message` to say what blocks submitting, such
+for every popup. It is `ui/PopupForm.qml`, the card the app's name and
+confirmation dialogs are built from as well, so every form popup looks alike. Set the form's `message` to say what blocks submitting, such
 as an invalid value; it replaces the key hint until cleared. Form fields use
 `ChromeTextField` and `ChromeDropdown`, which share the search field's theme
 colors, borders, corner radius and height through `ChromeControlStyle`. Fields

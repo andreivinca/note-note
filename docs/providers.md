@@ -107,14 +107,14 @@ provider lists its rows again when that changes.
   deleted from the list no other way, so a provider that can delete gives
   its notes this item.
 - Any other item calls `rowAction(path, id, value, cb)`. With `rename: true`
-  the host first asks for the row's new name in a small dialog — "<item
-  title> “<row title>”", the field opening on the row's title — and `value`
-  is the new name; the old name again calls nothing. With `prompt`,
-  the host first asks for a name in the same dialog — "<item title> in
-  “<row title>”", the `prompt` as the field's placeholder — and `value` is
-  the name. `value` is `""` otherwise. With
-  `confirm`, the host asks that question first, the item's `title` on the
-  button that goes ahead.
+  the host first asks for the row's new name in a small dialog — the item's
+  `icon` beside "<item title> “<row title>”", the field opening on the row's
+  title — and `value` is the new name; the old name again calls nothing.
+  With `prompt`, the host first asks for a name in the same dialog — "<item
+  title> in “<row title>”", the `prompt` as the field's placeholder — and
+  `value` is the name. `value` is `""` otherwise. With `confirm`, the host
+  asks that question first, beside the item's `icon`, the item's `title` on
+  the button that goes ahead.
 - Before `rowAction` runs, the host writes the open note and holds it still
   until `cb({ error?, removed? })`: queue the action behind your accepted
   writes. Call `cb` exactly once: the note stays held until you do (`cb()`
@@ -203,27 +203,27 @@ Action and tree ids are plain strings and several providers use the same ones
 (`login`, `logout`, `refresh`): the host resolves a click against the open
 tab first, so a shared name never reaches another provider's row.
 
-`footerActions` supplies **every** button pinned to the bottom of the sidebar,
-in display order. Each descriptor is `{ path, title, icon?, inputPlaceholder?, prompt?, shortcut? }`.
-The app renders all of them with one shared, full-width row component, stacked
-vertically with identical height, padding, hover fill, radius and icon styling.
+`footerActions` supplies **every** button at the right of the sidebar's
+header, the row that shows the note count, in display order. Each descriptor
+is `{ path, title, icon?, prompt?, shortcut? }`. The app draws each one as an
+icon button, its `title` (and the shortcut's keys) the tooltip; one without an
+`icon` shows its `title` instead, so give every action an icon of its own.
 It does not add creation buttons based on provider identity or capabilities.
 Keep footer actions out of `rows`: they do not scroll, contribute to note
 counts, or become search matches. They remain available during search.
 
 A click calls the owning provider's `action(path, value, sectionKey)`, where
 `value` is normally `""` and `sectionKey` is the provider's own section key.
-When `inputPlaceholder` is supplied, the same row collects text first: Enter
-submits a nonempty trimmed value, and Escape cancels. With `prompt` instead,
-a small dialog asks for the name — "<title> in “<tab name>”", the `prompt` as
-the field's placeholder — as a row menu item's `prompt` does. No special
-notebook input exists in the host. Action ids need only be unique within the section;
+With `prompt`, a small dialog asks for a name first — headed by the action's
+`icon` and `title`, the `prompt` as the field's placeholder, Create on its
+button — and its nonempty, trimmed answer is the `value`. No special notebook input exists in the host. Action
+ids need only be unique within the section;
 the host carries ownership explicitly, so another provider's identical id
 cannot receive the click. Existing `action(path)` handlers can ignore the
 additional arguments.
 
 The optional `shortcut` names a shared keyboard action, currently `newNote`
-or `newNotebook`, connecting Ctrl+N or Ctrl+Shift+N to that same footer row.
+or `newNotebook`, connecting Ctrl+N or Ctrl+Shift+N to that same button.
 Creation handlers can call `host.newNote(id, target)` or
 `host.newNotebook(value, id)` to use the common save, creation and selection
 flow. Providers choose their own target and when to offer each action.
@@ -232,8 +232,8 @@ For example:
 ```qml
 footerActions: [
   { path: "add", title: "New Note", icon: "󰐕", shortcut: "newNote" },
-  { path: "collection", title: "New notebook", icon: "󰉗",
-    inputPlaceholder: "Notebook name", shortcut: "newNotebook" }
+  { path: "collection", title: "New notebook", icon: "󱘒",
+    prompt: "Notebook name", shortcut: "newNotebook" }
 ]
 ```
 
@@ -394,8 +394,8 @@ to the running instance and `rebuild()` is called.
   create target for a first note in it (the same string your `new` row carries),
   and the host makes that note when you give one. Have the section listed before
   you call back, or the tab it opens will be empty.
-- `action(id, value, sectionKey)` — footer actions include input and section
-  context; inline actions supply only the id. Extra arguments can be ignored.
+- `action(id, value, sectionKey)` — footer actions include the name a `prompt`
+  asked for and the section; inline actions supply only the id. Extra arguments can be ignored.
 - `rowAction(path, id, value, cb)` (optional) → `cb({ error?, removed?, pending? })` —
   an item of a row's `menu` (see "Row menus"); needed only by a provider
   whose menus hold more than `command` items.

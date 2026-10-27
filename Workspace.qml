@@ -90,8 +90,6 @@ Item {
   readonly property real chromeRadius: detached ? 0 : Math.max(0, Style.cornerRadius - Math.max(1, Style.space(2)))
   property color scrim: Color.menu.scrim
   property color accent: Color.accent
-  property color selectedBackground: Color.menu.selectedBackground
-  property color selectedText: Color.menu.selectedText
   // The document and chrome share a bundled sans-serif family in four faces.
   readonly property string noteFont: nimbusSans.name
   readonly property string interfaceFont: nimbusSans.name
@@ -255,8 +253,8 @@ Item {
   property string deletePath: ""
   // A row's menu item waiting on its confirmation: { row, item }.
   property var rowActionPending: null
-  // A name being asked for (`prompt`, `rename`): { message, placeholder,
-  // text, confirmText, run(name) }, the field opening on `text`.
+  // A name being asked for (`prompt`, `rename`): { message, icon,
+  // placeholder, text, confirmText, run(name) }, the field opening on `text`.
   property var promptPending: null
   property string missedSaveNotice: ""
   // ── state ───────────────────────────────────────────────────────────
@@ -1687,7 +1685,7 @@ Item {
       return action.path === id
     })
     if (footer) {
-      return list.activateFooterAction(footer.provider, footer.path)
+      return root.runFooterAction(footer, "")
     }
 
     var p = providerWithRow("action", id)
@@ -1698,8 +1696,9 @@ Item {
     return !!p
   }
 
-  // A footer button that names a `prompt` asks for the name first, in the
-  // place its tab is.
+  // A footer button that names a `prompt` asks for the name first. The dialog
+  // names only the action: the button sits under the open tab, and what the
+  // provider makes need not go in it — a new local notebook does not.
   function runFooterAction(action, value) {
     var current = root.footerActions.find(function(item) {
       return item.provider === action.provider && item.section === action.section && item.path === action.path
@@ -1710,10 +1709,7 @@ Item {
     }
 
     if (current.prompt && !value) {
-      var tab = root.tabs.find(function(candidate) {
-        return candidate.key === root.sectionKey(p, { key: current.section })
-      })
-      root.askName(current.title, tab ? tab.name : "", current.prompt, function(name) {
+      root.askName(current.icon, current.title, "", current.prompt, function(name) {
         p.action(current.path, name, current.section)
       })
     } else {
@@ -1730,11 +1726,7 @@ Item {
       return false
     }
 
-    if (action.inputPlaceholder) {
-      root.listCollapsed = false
-    }
-
-    return list.activateFooterAction(action.provider, action.path)
+    return root.runFooterAction(action, "")
   }
 
   function rowsOf(providerId) {
@@ -2014,12 +2006,6 @@ Item {
   }
 
   function startNewNotebook() {
-    // The name field lives on the full list, not the search panel — and a
-    // field inside a hidden panel would still steal the keyboard.
-    if (root.filterText) {
-      clearSearch()
-    }
-
     var p = activeProvider()
     if (root.activateFooterShortcut("newNotebook")) {
       return
@@ -2102,7 +2088,7 @@ Item {
     } else if (item.rename) {
       root.askRename(row, item)
     } else if (item.prompt) {
-      root.askName(item.title, row.title, item.prompt, function(name) {
+      root.askName(item.icon, item.title, row.title, item.prompt, function(name) {
         root.runRowAction(row, item, name)
       })
     } else if (item.confirm) {
@@ -2117,10 +2103,11 @@ Item {
     editor.focusEditor()
   }
 
-  // "<title> in “<place>”", the name typed going to `run`.
-  function askName(title, place, placeholder, run) {
-    root.promptPending = { message: place ? title + " in “" + place + "”" : title,
-                           placeholder: placeholder, text: "", confirmText: title, run: run }
+  // "<title> in “<place>”" beside the action's icon, the name typed going to
+  // `run`. The title says what is made, so the button only says to make it.
+  function askName(icon, title, place, placeholder, run) {
+    root.promptPending = { message: place ? title + " in “" + place + "”" : title, icon: icon || "",
+                           placeholder: placeholder, text: "", confirmText: "Create", run: run }
   }
 
   // "<title> “<row title>”", the field opening on the row's title to change
@@ -2131,8 +2118,8 @@ Item {
         root.runRowAction(row, item, name)
       }
     }
-    root.promptPending = { message: item.title + " “" + row.title + "”", placeholder: row.title,
-                           text: row.title, confirmText: item.title, run: run }
+    root.promptPending = { message: item.title + " “" + row.title + "”", icon: item.icon || "",
+                           placeholder: row.title, text: row.title, confirmText: item.title, run: run }
   }
 
   function cancelPrompt() {
@@ -2772,6 +2759,7 @@ Item {
           height: parent.height
           model: root.rows
           footerActions: root.footerActions
+          keybindings: shortcutRegistry
           currentPath: root.currentPath
           treeCursor: root.treeCursor
           filtering: root.filterText.length > 0
@@ -3072,15 +3060,12 @@ Item {
       anchors.fill: parent
       opened: root.deleteConfirmOpen
       z: 10
+      iconText: "󰆴"
       message: "Delete this note?"
       confirmText: "Delete"
-      background: root.background
-      foreground: root.foreground
+      accent: root.accent
       scrim: root.scrim
-      selectedBackground: root.selectedBackground
-      selectedText: root.selectedText
       fontFamily: root.interfaceFont
-      cornerRadius: Style.cornerRadius
       onCanceled: root.cancelDelete()
       onConfirmed: root.confirmDelete()
     }
@@ -3090,15 +3075,12 @@ Item {
       anchors.fill: parent
       opened: root.rowActionPending !== null
       z: 10
+      iconText: root.rowActionPending ? root.rowActionPending.item.icon || "" : ""
       message: root.rowActionPending ? root.rowActionPending.item.confirm : ""
       confirmText: root.rowActionPending ? root.rowActionPending.item.title : ""
-      background: root.background
-      foreground: root.foreground
+      accent: root.accent
       scrim: root.scrim
-      selectedBackground: root.selectedBackground
-      selectedText: root.selectedText
       fontFamily: root.interfaceFont
-      cornerRadius: Style.cornerRadius
       onCanceled: root.cancelRowAction()
       onConfirmed: root.confirmRowAction()
     }
@@ -3108,12 +3090,9 @@ Item {
       anchors.fill: parent
       prompt: root.promptPending
       z: 10
-      background: root.background
-      foreground: root.foreground
       accent: root.accent
       scrim: root.scrim
       fontFamily: root.interfaceFont
-      cornerRadius: Style.cornerRadius
       onCanceled: root.cancelPrompt()
       onSubmitted: function(name) {
         root.submitPrompt(name)

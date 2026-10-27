@@ -84,8 +84,7 @@ function timestamp(value) {
 // Reads provider snapshots; never selects, loads, saves, or mutates a provider.
 function footerAction(provider, key, action) {
   return { provider: provider.id, section: key, path: action.path, title: action.title,
-           icon: action.icon || "", inputPlaceholder: action.inputPlaceholder || "",
-           prompt: action.prompt || "", shortcut: action.shortcut || "" }
+           icon: action.icon || "", prompt: action.prompt || "", shortcut: action.shortcut || "" }
 }
 
 function build(providers, active, query, contentHits) {

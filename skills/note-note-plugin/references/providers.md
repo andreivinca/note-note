@@ -258,7 +258,7 @@ root.sections = [{
   notes: [ /* optional: every note, for search, when rows hide some (folded trees) */ ],
   footerActions: [
     { path: "add", title: "New Note", icon: "󰐕", shortcut: "newNote" },
-    { path: "notebook", title: "New notebook", icon: "󰉗", inputPlaceholder: "Notebook name", shortcut: "newNotebook" }
+    { path: "notebook", title: "New notebook", icon: "󱘒", prompt: "Notebook name", shortcut: "newNotebook" }
   ]
 }]
 root.updated()
@@ -312,10 +312,9 @@ in `writeBusy`. Future tree/section ordering uses the same UI and hook.
 Legacy `canReorder` and `setOrder()` remain compatible but lack save callbacks;
 an explicit `reorder`, `null` included, overrides them.
 
-Footer actions are buttons pinned under the list: a click calls
-`action(path, value, sectionKey)`; with `inputPlaceholder` the row first
-collects a line of text, passed as `value`, and with `prompt` a small dialog
-asks for it instead. `shortcut` ties Ctrl+N
+Footer actions are icon buttons at the right of the list's header, the title
+as the tooltip: a click calls `action(path, value, sectionKey)`; with `prompt`
+a small dialog first asks for a name, passed as `value`. `shortcut` ties Ctrl+N
 (`newNote`) or Ctrl+Shift+N (`newNotebook`) to the button. Creation handlers
 call `host.newNote(id, target)` or `host.newNotebook(value, id)` to use the
 app's own create-and-open flow.

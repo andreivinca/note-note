@@ -96,8 +96,8 @@ Item {
   property var sections: []
   // Available before the first notebook exists as well as on every tab.
   readonly property var footerActions: [
-    { path: "newNotebook", title: "New notebook", icon: "󰉗",
-      inputPlaceholder: "Notebook name", shortcut: "newNotebook" }
+    { path: "newNotebook", title: "New notebook", icon: "󱘒",
+      prompt: "Notebook name", shortcut: "newNotebook" }
   ]
 
   // A notebook's footer: in its own tab, New section makes a section in it;

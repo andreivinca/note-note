@@ -29,7 +29,10 @@ Item {
   property bool movingDrag: false
   onModelChanged: root.cancelDrag()
   onFilteringChanged: root.cancelDrag()
+  // The provider's buttons, drawn as icons at the right of the header.
   property var footerActions: []
+  // Shortcut hints for those buttons' tooltips.
+  property var keybindings: null
   property string currentPath: ""
   // The keyboard cursor when it rests on a section row instead of the open
   // note: that tree row's path, "" otherwise (see the host's treeCursor).
@@ -240,21 +243,6 @@ Item {
     }
   }
 
-  function activateFooterAction(provider, path) {
-    for (var i = 0; i < footerButtons.count; i++) {
-      var button = footerButtons.itemAt(i)
-      if (button.modelData.provider === provider && button.modelData.path === path) {
-        if (button.editable) {
-          button.startEditing()
-        } else {
-          root.footerActionRequested(button.modelData, "")
-        }
-        return true
-      }
-    }
-    return false
-  }
-
   // Different font sizes share the toolbar's center by their visible letters,
   // independent of baseline spacing or the header's bottom divider.
   component HeaderLabel: Text {
@@ -295,12 +283,44 @@ Item {
         objectName: "notebookHeaderCount"
         anchors.left: parent.left
         anchors.leftMargin: root.pagePadding + root.textInset
-        anchors.right: parent.right
-        anchors.rightMargin: root.pagePadding + root.textInset
+        anchors.right: headerActions.left
+        anchors.rightMargin: Style.spacing.sm
         elide: Text.ElideRight
         text: root.noteCount + (root.noteCount === 1 ? " note" : " notes")
         color: Style.secondaryText(root.foreground, 0.45)
         font.pixelSize: Style.font.bodySmall
+      }
+
+      // Providers supply every button here; each shows its icon, its title
+      // the tooltip, or the title itself when it has no icon. The last one
+      // ends where the rows' pills end.
+      Row {
+        id: headerActions
+        anchors.right: parent.right
+        anchors.rightMargin: root.pagePadding + Style.spacing.xxs
+        y: (root.headerContentHeight - height) / 2
+        spacing: Style.spacing.xxs
+
+        Repeater {
+          model: root.footerActions
+          delegate: ChromeButton {
+            required property var modelData
+            objectName: "footerAction-" + modelData.provider + "-" + modelData.path
+            iconText: modelData.icon
+            text: modelData.icon ? "" : modelData.title
+            tooltipText: modelData.title
+              + (root.keybindings && modelData.shortcut ? root.keybindings.hint("app/" + modelData.shortcut) : "")
+            Accessible.name: modelData.title
+            contentForeground: root.foreground
+            surfaceColor: panel.fill
+            accent: root.accent
+            fontFamily: root.fontFamily
+            fontSize: Style.font.bodySmall
+            height: Style.spacing.controlHeight
+            width: Math.max(implicitWidth, height)
+            onClicked: root.footerActionRequested(modelData, "")
+          }
+        }
       }
       Rectangle {
         anchors.bottom: parent.bottom
@@ -316,13 +336,10 @@ Item {
       anchors.margins: root.pagePadding
       anchors.topMargin: root.headerHeight + root.pagePadding
 
-      // Search and the note tree share the area above the fixed footer.
+      // Search and the note tree share the area under the header.
       SearchResults {
         id: searchPanel
-        anchors.top: parent.top
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: footer.top
+        anchors.fill: parent
         visible: root.filtering
         model: root.filtering ? root.model : []
         loading: root.searchBusy
@@ -346,10 +363,7 @@ Item {
 
       Item {
         id: listArea
-        anchors.top: parent.top
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: footer.top
+        anchors.fill: parent
         visible: !root.filtering
 
         // The rows live behind a DelegateModel so a drag can reorder them
@@ -625,65 +639,19 @@ Item {
           font.pixelSize: Style.font.body
         }
       }
-
-      // Providers supply every footer action; all share one row component.
-      Column {
-        id: footer
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-
-        Item {
-          visible: footerButtons.count > 0
-          width: parent.width
-          height: Style.spacing.hairline + Style.spacing.sm
-
-          Rectangle {
-            x: -root.pagePadding
-            width: parent.width + root.pagePadding * 2
-            height: Style.spacing.hairline
-            color: Util.alpha(root.foreground, 0.1)
-          }
-        }
-
-        Repeater {
-          id: footerButtons
-          model: root.footerActions
-          delegate: SidebarAction {
-            required property var modelData
-            objectName: "footerAction-" + modelData.provider + "-" + modelData.path
-            width: footer.width
-            height: Style.space(32)
-            text: modelData.title
-            iconText: modelData.icon || ""
-            editable: !!modelData.inputPlaceholder
-            placeholderText: modelData.inputPlaceholder || ""
-            foreground: root.foreground
-            accent: root.accent
-            iconColor: root.accentInk
-            fontFamily: root.fontFamily
-            textInset: root.textInset
-            rowGap: root.rowGap
-            rowRadius: root.rowRadius
-            onClicked: root.footerActionRequested(modelData, "")
-            onSubmitted: function(value) { root.footerActionRequested(modelData, value) }
-          }
-        }
-      }
     }
 
     // The track rides the panel's own edge, not the page margin: a bar held a
     // margin's width inside the edge reads as a stray line beside the list
     // rather than as the list's end. It keeps a hair of clearance so it does
     // not touch the separator beyond it. It still spans only the rows it
-    // scrolls, excluding the shared footer below them.
+    // scrolls.
     Rectangle {
       id: scrollTrack
       anchors.right: parent.right
       anchors.rightMargin: Style.spacing.xs
       anchors.top: contentArea.top
       anchors.bottom: contentArea.bottom
-      anchors.bottomMargin: footer.height
       width: Style.space(3)
       visible: !root.filtering && listArea.scrollable
       color: "transparent"

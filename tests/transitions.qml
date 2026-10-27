@@ -347,7 +347,7 @@ ShellRoot {
       action: function(id) { calls.push("first:" + id) } }
     var second = { id: "second", name: "Second", sections: [{ key: "s", name: "Second", rows: [],
       footerActions: [{ path: "logout", title: "Sign out of second" },
-                      { path: "rename", title: "Name", inputPlaceholder: "Enter a name" }] }],
+                      { path: "rename", title: "Name", prompt: "Enter a name" }] }],
       action: function(id, value, section) {
         calls.push("second:" + id)
         if (id === "rename") {
@@ -361,7 +361,12 @@ ShellRoot {
     check("footer clicks reach the active provider despite duplicate action ids",
           app.runAction("logout") && calls.join(",") === "second:logout")
     var staleAction = app.footerActions[0]
-    app.runFooterAction(app.footerActions[1], "Travel")
+    app.runFooterAction(app.footerActions[1], "")
+    check("a footer prompt is titled by its action alone, not the tab it sits under",
+          !!app.promptPending && app.promptPending.message === "Name"
+          && app.promptPending.placeholder === "Enter a name" && app.promptPending.confirmText === "Create",
+          JSON.stringify(app.promptPending))
+    app.submitPrompt("Travel")
     check("arbitrary provider input actions receive their value and section",
           calls.slice(-2).join(",") === "second:rename,Travel:s")
     calls = ["second:logout"]
@@ -371,7 +376,7 @@ ShellRoot {
     check("switching tabs switches footer action ownership", calls.join(",") === "second:logout,first:logout")
     check("a retired footer cannot invoke a different tab's matching action", !app.runFooterAction(staleAction, ""))
     var empty = { id: "empty", name: "Empty", sections: [],
-      footerActions: [{ path: "first", title: "First notebook", inputPlaceholder: "Notebook name", shortcut: "newNotebook" }],
+      footerActions: [{ path: "first", title: "First notebook", prompt: "Notebook name", shortcut: "newNotebook" }],
       action: function(id, value) { calls.push(id + ":" + value) } }
     app.providers = [empty]
     app.rebuildRows()
@@ -1088,7 +1093,7 @@ ShellRoot {
           JSON.stringify(ToolbarSettings.editorDefaults({ toolbar: ["bold"], future: 42 }).toolbar) === JSON.stringify(ToolbarSettings.defaults())
           && ToolbarSettings.editorDefaults({ toolbar: ["bold"], future: 42 }).future === 42)
     var source = [{ id: "test", canReorder: true, sections: [{ key: "s", name: "Section", rows: [],
-      footerActions: [{ path: "logout", title: "Sign out", inputPlaceholder: "Confirm", shortcut: "custom" }],
+      footerActions: [{ path: "logout", title: "Sign out", prompt: "Confirm", shortcut: "custom" }],
       notes: [{ kind: "note", path: "test:A", title: "Hidden note" }] }] }]
     var before = JSON.stringify(source)
     var model = Sidebar.build(source, "test/s", "hidden", {})
@@ -1097,7 +1102,7 @@ ShellRoot {
           model.footerActions[0].path === "logout" && model.tabs[0].count === 1)
     check("sidebar preserves provider action ownership and input metadata",
           model.footerActions[0].provider === "test" && model.footerActions[0].section === "s"
-          && model.footerActions[0].inputPlaceholder === "Confirm" && model.footerActions[0].shortcut === "custom")
+          && model.footerActions[0].prompt === "Confirm" && model.footerActions[0].shortcut === "custom")
     check("creation capability does not inject hardcoded footer buttons",
           Sidebar.build([{ id: "custom", canCreate: true, canCreateSection: true,
             sections: [{ key: "s", rows: [] }] }], "custom/s", "", {}).footerActions.length === 0)
@@ -1877,7 +1882,7 @@ ShellRoot {
     var folders = localFactory.createObject(test, { host: creationHost })
     folders.rebuild()
     check("empty local provider supplies its first notebook action",
-          folders.sections.length === 0 && folders.footerActions[0].inputPlaceholder === "Notebook name")
+          folders.sections.length === 0 && folders.footerActions[0].prompt === "Notebook name")
     folders.notebooks = [{ key: "Work", name: "Work" }, { key: "Other", name: "Other" }]
     folders.notes = [{ key: "Other", path: creationHost.currentPath, title: "Other note" }]
     folders.rebuild()

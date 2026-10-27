@@ -431,14 +431,13 @@ Window {
       tryVerify(function() { return !workspace.loadingNote }, 10000)
 
       workspace.setFilter("Theme")
-      workspace.listCollapsed = true
       invokeWorkspaceCommand("new-notebook")
-      compare(workspace.filterText, "")
-      verify(!workspace.listCollapsed)
-      var input = findChild(workspace, "footerAction-local-newNotebook")
-      verify(input.editing && focusInside(input), "the existing notebook name field keeps focus")
+      var field = findChild(workspace, "promptField")
+      verify(!!workspace.promptPending && workspace.promptPending.message === "New notebook"
+             && focusInside(field), "the name dialog asks for the notebook and has the keyboard")
       keyClick(Qt.Key_Escape)
-      verify(!input.editing)
+      verify(!workspace.promptPending)
+      compare(workspace.filterText, "Theme", "a notebook not made leaves the search alone")
       verify(!provider.notebooks.some(function(book) { return book.key === "Commandbook" }))
       invokeWorkspaceCommand("new-notebook")
       for (var letter of "Commandbook") {
@@ -450,6 +449,7 @@ Window {
           return note.path === workspace.currentPath && note.key === "Commandbook"
         }) && !workspace.loadingNote
       }, 10000)
+      compare(workspace.filterText, "")
       verify(focusInside(editor))
       tryVerify(function() { return workspace.writesSettled }, 10000)
     }

@@ -105,18 +105,17 @@ Window {
     sections: [{ key: "custom/test", name: "Test", count: 2 }]
     footerActions: [
       { provider: "custom", section: "test", path: "create", title: "New Note", icon: "+" },
-      { provider: "custom", section: "test", path: "notebook", title: "New notebook", icon: "󰉗", inputPlaceholder: "Notebook name" },
+      { provider: "custom", section: "test", path: "notebook", title: "New notebook", icon: "󱘒", prompt: "Notebook name" },
       { provider: "custom", section: "test", path: "logout", title: "Sign out", icon: "󰍃" }
     ]
     property int created: 0
-    property string notebook: ""
+    property var requested: []
     onNewRequested: created++
     onFooterActionRequested: function(action, value) {
       if (action.path === "create") {
         created++
-      } else if (action.path === "notebook") {
-        notebook = value
       }
+      requested = requested.concat([action.path + ":" + value])
     }
   }
 
@@ -133,24 +132,26 @@ Window {
     var newNote = keys.findChild(notebookPreview, "footerAction-custom-create")
     var newNotebook = keys.findChild(notebookPreview, "footerAction-custom-notebook")
     var signOut = keys.findChild(notebookPreview, "footerAction-custom-logout")
-    require(newNote.width === notebookPreview.width - notebookPreview.pagePadding * 2 && newNote.width === newNotebook.width
-            && newNote.width === signOut.width && newNote.height === newNotebook.height
-            && newNote.height === signOut.height, "footer actions do not share full-width row geometry")
-    require(newNotebook.y === newNote.y + newNote.height && signOut.y === newNotebook.y + newNotebook.height,
-            "footer actions are not stacked vertically: " + JSON.stringify([
-              [newNote.y, newNote.height], [newNotebook.y, newNotebook.height], [signOut.y, signOut.height]]))
+    var count = keys.findChild(notebookPreview, "notebookHeaderCount")
+    var place = function(item) {
+      var at = item.mapToItem(notebookPreview, 0, 0)
+      return { left: at.x, right: at.x + item.width, top: at.y, bottom: at.y + item.height }
+    }
+    var a = place(newNote), b = place(newNotebook), c = place(signOut)
+    require(a.top === b.top && b.top === c.top && a.bottom === c.bottom && c.bottom <= notebookPreview.headerHeight,
+            "header actions do not share the header's row: " + JSON.stringify([a, b, c]))
+    require(a.right <= b.left && b.right <= c.left && c.right <= notebookPreview.width - notebookPreview.pagePadding
+            && place(count).right <= a.left,
+            "header actions are not in order at the right of the note count: " + JSON.stringify([place(count), a, b, c]))
+    require(newNote.iconText === "+" && newNote.text === "" && newNote.tooltipText === "New Note"
+            && signOut.tooltipText === "Sign out", "header actions are not icons named by their tooltips")
     keys.mouseClick(newNote)
-    require(notebookPreview.created === 1, "footer did not request a new note")
+    require(notebookPreview.created === 1, "header did not request a new note")
     keys.mouseClick(newNotebook)
-    typeText("Travel")
-    keys.keyClick(Qt.Key_Return)
-    require(notebookPreview.notebook === "Travel", "new notebook field did not accept its name")
+    require(notebookPreview.requested.join(",") === "create:,notebook:",
+            "a header action did not reach its provider: " + JSON.stringify(notebookPreview.requested))
     notebookPreview.filtering = true
-    require(notebookPreview.activateFooterAction("custom", "notebook"), "input action cannot be activated during search")
-    typeText("Cancelled")
-    keys.keyClick(Qt.Key_Escape)
-    require(notebookPreview.notebook === "Travel" && !newNotebook.editing, "Escape submitted a footer input")
-    require(newNote.visible && newNotebook.visible && signOut.visible, "search hid provider footer actions")
+    require(newNote.visible && newNotebook.visible && signOut.visible, "search hid provider header actions")
     notebookPreview.filtering = false
 
     // Repeated shorter snapshots retire delegates while row bindings run.
