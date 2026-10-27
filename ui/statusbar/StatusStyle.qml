@@ -6,8 +6,8 @@ import "../../design"
 QtObject {
   id: root
 
-  property color foreground: Color.menu.text
-  property color accent: Color.accent
+  property color foreground: Colors.menu.text
+  property color accent: Colors.accent
   property string fontFamily: Style.font.menuFamily
   property real fontSize: Style.font.caption
   property real iconSize: Style.font.iconSmall

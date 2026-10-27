@@ -20,9 +20,9 @@ Item {
   // Counts the palettes published, so one can be told from the next.
   property int revision: 0
   // Every token, always: a palette is replaced whole, never filled in.
-  property var colors: Color.baseline
+  property var colors: Colors.baseline
   property var diagnostics: []
-  readonly property var system: Color.baseline
+  readonly property var system: Colors.baseline
   readonly property var candidate: previewId && catalog.entries[previewId]
     ? catalog.entries[previewId].value.colors : committedColors
   readonly property bool followsSystem: !candidate || Object.keys(candidate).every(function(key) {

@@ -1346,7 +1346,7 @@ ShellRoot {
       check("a script answer for another account is refused", result.error === "the signed-in account changed")
       stubAccount.cacheSession = ""
       stickyStub.runScript(["list"], "", { done: function(again) {
-        check("a script answer for the same account is taken", !again.error && Array.isArray(again.sections))
+        check("a script answer for the same account is taken", !again.error && again.sections instanceof Array)
         test.processes--
       } })
     } })

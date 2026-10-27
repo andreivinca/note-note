@@ -13,8 +13,8 @@ FocusScope {
   property string iconText: ""
   property string message: ""
   property string confirmText: "Confirm"
-  property color accent: Color.accent
-  property color scrim: Color.menu.scrim
+  property color accent: Colors.accent
+  property color scrim: Colors.menu.scrim
   property string fontFamily: Style.font.menuFamily
   property int selectedIndex: 0
   signal canceled()
@@ -89,7 +89,7 @@ FocusScope {
       fontFamily: dialog.fontFamily
       cancelButton.selected: dialog.selectedIndex === 0
       submitButton.selected: dialog.selectedIndex === 1
-      submitButton.foreground: Color.urgent
+      submitButton.foreground: Colors.urgent
       onCanceled: dialog.canceled()
       onSubmitted: dialog.confirmed()
     }

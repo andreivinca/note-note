@@ -13,8 +13,8 @@ QtObject {
   readonly property string fontFamily: source ? source.fontFamily : Qt.application.font.family
   readonly property var font: source ? source.font : desktopFont
   readonly property var spacing: source ? source.spacing : desktopSpacing
-  readonly property color hoverFill: hoverFillFor(Color.foreground, Color.accent)
-  readonly property color selectionFill: Color.token("editor.selectionBackground")
+  readonly property color hoverFill: hoverFillFor(Colors.foreground, Colors.accent)
+  readonly property color selectionFill: Colors.token("editor.selectionBackground")
   // Keep the standalone baseline aligned with the shell's default type
   // scale and spacing so packaging does not change the workspace density.
   property QtObject desktopFont: QtObject {
@@ -49,10 +49,10 @@ QtObject {
     return source ? source.space(value) : value
   }
   function secondaryOpacity(opacity) {
-    if (Color.theme && !Color.theme.followsSystem) {
+    if (Colors.theme && !Colors.theme.followsSystem) {
       return opacity
     }
-    return Resolve.secondaryOpacity(Color.background, opacity)
+    return Resolve.secondaryOpacity(Colors.background, opacity)
   }
   function secondaryText(foreground, opacity) {
     return Util.alpha(foreground, secondaryOpacity(opacity))

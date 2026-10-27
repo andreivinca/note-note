@@ -377,7 +377,7 @@ LaneProvider {
     if (!obj) {
       return
     }
-    if (Array.isArray(obj.expanded)) {
+    if (obj.expanded instanceof Array) {
       root.expanded = obj.expanded
     }
     if (typeof obj.lastNotebook === "string") {
@@ -931,7 +931,7 @@ LaneProvider {
             discoveryRetry.interval = Math.max(100, Math.ceil(r.retryAfter * 1000))
             discoveryRetry.restart()
           }
-          if (Array.isArray(r.listingWarnings) && r.listingWarnings.length) {
+          if (r.listingWarnings instanceof Array && r.listingWarnings.length) {
             root.statusRequested("OneNote: " + r.listingWarnings.join("; "))
           }
         }
@@ -947,13 +947,13 @@ LaneProvider {
       return
     }
     root.inventoryRevision++
-    if (Array.isArray(result.notebooks)) {
+    if (result.notebooks instanceof Array) {
       root.onNotebooks = result.notebooks
     }
-    if (Array.isArray(result.sections)) {
+    if (result.sections instanceof Array) {
       root.onSections = root.listedSections(result.sections)
     }
-    if (Array.isArray(result.pages)) {
+    if (result.pages instanceof Array) {
       var pages = result.pages
       for (var id in root.pendingPages) {
         pages = root.appendPage(pages, root.pendingPages[id].page)
@@ -1035,10 +1035,10 @@ LaneProvider {
         root.statusRequested("OneNote section order: " + result.error)
         return
       }
-      if (Array.isArray(result.sections)) {
+      if (result.sections instanceof Array) {
         root.onSections = root.listedSections(result.sections)
       }
-      if (Array.isArray(result.sectionOrderWarnings) && result.sectionOrderWarnings.length) {
+      if (result.sectionOrderWarnings instanceof Array && result.sectionOrderWarnings.length) {
         root.statusRequested("OneNote section order: " + result.sectionOrderWarnings.join("; "))
       }
       root.rebuild()
@@ -1581,7 +1581,7 @@ LaneProvider {
   // An error, a pause or an answer without its two lists leaves every
   // section untracked until the next answer: each is polled as before.
   function noteChanges(r) {
-    if (r.error || r.deferred || !Array.isArray(r.tracked) || !Array.isArray(r.changed)) {
+    if (r.error || r.deferred || !(r.tracked instanceof Array) || !(r.changed instanceof Array)) {
       root.trackedSections = ({})
       return
     }

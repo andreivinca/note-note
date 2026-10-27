@@ -34,9 +34,9 @@ Item {
   // switched, the submenu dims them.
   property var providers: []
   property bool providersSwitchable: true
-  property color background: Color.menu.background
-  property color foreground: Color.menu.text
-  property color accent: Color.accent
+  property color background: Colors.menu.background
+  property color foreground: Colors.menu.text
+  property color accent: Colors.accent
   property string fontFamily: Style.font.menuFamily
   property int tabFontSize: Style.font.bodySmall
   // The bar sits flush against the top of whatever hosts it. In the overlay
@@ -57,7 +57,7 @@ Item {
   height: tabStrip.railHeight
 
   // The background and overflow fades share this fill.
-  readonly property color fill: Color.token("titlebar.background")
+  readonly property color fill: Colors.token("titlebar.background")
 
   ChromePopupStyle {
     id: popupStyle

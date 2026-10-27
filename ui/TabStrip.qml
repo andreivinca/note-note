@@ -15,11 +15,11 @@ Item {
   property string activeKey: ""
   property bool filtering: false
   // The exact fill behind the strip, for the overflow fades to fade into.
-  property color background: Color.menu.background
-  property color activeBackground: Color.token("tab.activeBackground")
-  property color activeForeground: Color.token("tab.activeForeground")
-  property color inactiveForeground: Color.token("tab.inactiveForeground")
-  property color foreground: Color.menu.text
+  property color background: Colors.menu.background
+  property color activeBackground: Colors.token("tab.activeBackground")
+  property color activeForeground: Colors.token("tab.activeForeground")
+  property color inactiveForeground: Colors.token("tab.inactiveForeground")
+  property color foreground: Colors.menu.text
   property string fontFamily: Style.font.menuFamily
   property int fontSize: Style.font.bodySmall
   // Tab geometry scales with typography, independently of shell spacing.

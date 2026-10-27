@@ -149,7 +149,7 @@ LaneProvider {
           if (/not signed in|expired/.test(r.error) && root.ms) {
             root.ms.refresh()
           }
-        } else if (Array.isArray(r.notes)) {
+        } else if (r.notes instanceof Array) {
           root.notes = r.notes
         }
         root.rebuild()
@@ -310,7 +310,7 @@ LaneProvider {
     raw: true
     onFinished: function(result) {
       var res = root.parse(result.text || "")
-      if (!res.error && Array.isArray(res.notes)) {
+      if (!res.error && res.notes instanceof Array) {
         root.notes = res.notes
       }
       root.rebuild()

@@ -13,7 +13,7 @@ Rectangle {
   required property real buttonHeight
   property bool panelOpen: false
   property bool separatorVisible: true
-  property color surfaceColor: Color.token("toolbar.background")
+  property color surfaceColor: Colors.token("toolbar.background")
   readonly property var editor: registry.editor
   property real panelPadding: Style.spacing.xs
   readonly property real naturalButtonHeight: {

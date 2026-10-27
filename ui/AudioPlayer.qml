@@ -16,9 +16,9 @@ Item {
   property url audioSource
   property string recordingTitle: "Audio recording"
   property bool playbackAllowed: true
-  property color foreground: Color.menu.text
-  property color backgroundColor: Color.menu.background
-  property color accent: Color.accent
+  property color foreground: Colors.menu.text
+  property color backgroundColor: Colors.menu.background
+  property color accent: Colors.accent
   // The answer to fetchRequested: { url } with a private file:// URL, or
   // { error } when it could not be fetched; null before anyone asked.
   property var fetched: null

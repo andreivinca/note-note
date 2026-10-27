@@ -50,7 +50,7 @@ Item {
   property string activeKey: ""
   property real headerHeight: Style.space(45)
   property real headerContentHeight: headerHeight - Style.spacing.hairline
-  property color background: Color.menu.background
+  property color background: Colors.menu.background
   readonly property bool hasTree: root.model.some(function(row) { return row.kind === "tree" })
   readonly property int noteCount: {
     for (var i = 0; i < root.sections.length; i++) {
@@ -69,8 +69,8 @@ Item {
     return ""
   }
   readonly property color activeBase: root.accent
-  property color foreground: Color.menu.text
-  property color accent: Color.accent
+  property color foreground: Colors.menu.text
+  property color accent: Colors.accent
   // The accent written as ink: the theme's text pulled toward its accent. It
   // the theme's to choose and may sit anywhere; starting from the foreground
   // is what guarantees it reads on that theme's background — a dark theme's
@@ -117,7 +117,7 @@ Item {
   // Rows draw as rounded pills; the search panel's rows measure the same way.
   readonly property real rowRadius: Math.min(Style.cornerRadius, Style.space(6))
 
-  property color page: Color.token("sidebar.background")
+  property color page: Colors.token("sidebar.background")
   readonly property color selectionFill: Qt.tint(page, Util.alpha(root.accent, 0.22))
 
   // Whichever list is on screen: the search panel replaces the main list

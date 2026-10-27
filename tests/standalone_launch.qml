@@ -32,7 +32,7 @@ Native.Main {
         window.check(workspace.visible && workspace.width === window.width && workspace.height === window.height,
                      "workspace must fill the visible window")
         window.check(SystemTheme.source === "omarchy", "standalone must detect the Omarchy theme fixture")
-        window.check(Design.Color.background.toString() === "#182736", "shared UI must use the system background")
+        window.check(Design.Colors.background.toString() === "#182736", "shared UI must use the system background")
         window.check(window.palette.window.toString() === "#182736", "native controls must use the system background")
         window.check(window.palette.accent.toString() === "#6090d0", "native controls must use the system accent")
         var hello = workspace.providerById("hello")

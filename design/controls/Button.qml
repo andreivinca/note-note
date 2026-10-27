@@ -11,9 +11,9 @@ Controls.AbstractButton {
   property bool active: false
   property bool focusable: false
   property bool bordered: false
-  property color foreground: Color.foreground
+  property color foreground: Colors.foreground
   property color backgroundColor: "transparent"
-  property color accent: Color.accent
+  property color accent: Colors.accent
   property color hoverColor: Style.hoverFillFor(foreground, accent)
   property color pressedColor: Style.pressedFillFor(foreground, accent)
   property color selectedColor: Style.selectedFillFor(foreground, accent)

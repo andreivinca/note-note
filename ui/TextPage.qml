@@ -57,9 +57,9 @@ Item {
   // has to be read twice to know whether it went well.
   property string noticeText: ""
   property bool noticeIsError: false
-  property color background: Color.menu.background
-  property color foreground: Color.menu.text
-  property color accent: Color.accent
+  property color background: Colors.menu.background
+  property color foreground: Colors.menu.text
+  property color accent: Colors.accent
   property string fontFamily: Style.font.menuFamily
   // The page sits flush along the bottom of whatever hosts it, in the place
   // the view bar holds when there is a note to describe. In the overlay that
@@ -246,7 +246,7 @@ Item {
         anchors.rightMargin: Style.spacing.lg
         anchors.verticalCenter: parent.verticalCenter
         text: root.noticeText
-        color: root.noticeIsError ? Color.urgent : Style.selectedStateColor(root.foreground, root.accent)
+        color: root.noticeIsError ? Colors.urgent : Style.selectedStateColor(root.foreground, root.accent)
         font.family: root.fontFamily
         font.pixelSize: Style.font.bodySmall
         wrapMode: Text.WordWrap

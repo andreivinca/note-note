@@ -37,7 +37,7 @@ FocusScope {
   anchors.fill: parent
   readonly property var current: currentIndex >= 0 && currentIndex < matches.length ? matches[currentIndex] : null
   readonly property string unavailableReason: current && current.enabled === false ? current.reason || "" : ""
-  readonly property color ink: Color.token("palette.foreground")
+  readonly property color ink: Colors.token("palette.foreground")
 
   Connections {
     target: pickerRoot.registry
@@ -248,7 +248,7 @@ FocusScope {
     implicitHeight: content.implicitHeight + padding * 2
     height: Math.max(0, Math.min(parent.height - y - Style.space(12), implicitHeight))
     radius: popupStyle.radius
-    color: Color.token("palette.background")
+    color: Colors.token("palette.background")
     border.width: Border.width(popupStyle.borderSpec)
     border.color: popupStyle.borderSpec.color
     clip: true
@@ -318,13 +318,13 @@ FocusScope {
           required property int index
           readonly property bool selected: index === pickerRoot.currentIndex
           readonly property string detail: modelData.detail || ""
-          readonly property color ink: selected ? Color.token("palette.selectionForeground")
+          readonly property color ink: selected ? Colors.token("palette.selectionForeground")
             : pickerRoot.ink
           readonly property color fill: {
             if (selected) {
-              return Color.token("palette.selectionBackground")
+              return Colors.token("palette.selectionBackground")
             }
-            return hovered ? Style.hoverFillFor(pickerRoot.ink, Color.accent) : "transparent"
+            return hovered ? Style.hoverFillFor(pickerRoot.ink, Colors.accent) : "transparent"
           }
           objectName: "commandChoice-" + modelData.id
           width: results.width

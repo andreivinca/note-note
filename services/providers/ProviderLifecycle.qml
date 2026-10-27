@@ -65,7 +65,7 @@ Item {
     var merged = settings.merge(parsed)
     var changes = Plan.plan(host.config, merged, Object.keys(host.providerUrls), function(id) {
       var provider = host.providerById(id)
-      return provider && Array.isArray(provider.liveSettings) ? provider.liveSettings : []
+      return provider && provider.liveSettings instanceof Array ? provider.liveSettings : []
     })
     for (var i = 0; i < changes.length; i++) {
       if (changes[i].replace && changes[i].enabled) {

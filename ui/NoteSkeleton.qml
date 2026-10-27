@@ -4,7 +4,7 @@ import "../design"
 Item {
   id: root
 
-  property color foreground: Color.menu.text
+  property color foreground: Colors.menu.text
   property int titleSize: bodyFontSize * 2
   property int bodyFontSize: Style.font.title
   readonly property color fill: Util.alpha(root.foreground, 0.12)

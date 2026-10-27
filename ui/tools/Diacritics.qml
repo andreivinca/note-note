@@ -100,7 +100,7 @@ Tool {
               text: modelData
               Accessible.name: "Insert " + modelData
               focusable: true
-              foreground: Color.token("popup.foreground")
+              foreground: Colors.token("popup.foreground")
               accent: tool.editor.accent
               fontFamily: tool.editor.noteFontFamily
               fontSize: Math.round(Style.font.body * 1.4)

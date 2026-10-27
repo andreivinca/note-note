@@ -9,7 +9,7 @@ Column {
   property bool hasTitle: true
   property string preview: ""
   property var modified: ""
-  property color foreground: Color.menu.text
+  property color foreground: Colors.menu.text
   property string fontFamily: Style.font.menuFamily
   property int fontSize: Style.font.body
   spacing: Style.space(1)
@@ -41,7 +41,7 @@ Column {
           ? Qt.formatTime(date, "HH:mm") : Qt.formatDate(date, "d MMM")
       }
       textFormat: Text.PlainText
-      color: Color.token("text.secondary")
+      color: Colors.token("text.secondary")
       font.family: root.fontFamily
       font.pixelSize: root.fontSize - 1
     }

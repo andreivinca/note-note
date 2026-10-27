@@ -18,11 +18,11 @@ Item {
   property string status: ""
   property string currentPath: ""
   property string notebook: ""
-  property color foreground: Color.menu.text
-  property color accent: Color.accent
+  property color foreground: Colors.menu.text
+  property color accent: Colors.accent
   property color selectionAccent: accent
-  property color selectedBackground: Color.menu.selectedBackground
-  property color selectedText: Color.menu.selectedText
+  property color selectedBackground: Colors.menu.selectedBackground
+  property color selectedText: Colors.menu.selectedText
   property string fontFamily: Style.font.menuFamily
   property int noteFontSize: Style.font.body
   // row -> string shown in the row (NoteList.titleFor).

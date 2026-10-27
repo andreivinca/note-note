@@ -37,7 +37,7 @@ function ids(rows, group) {
 // and nothing else: the only shape a reorder request may take. Providers
 // check their own membership with it before writing.
 function isPermutation(current, order) {
-  if (!Array.isArray(order) || order.length !== current.length) {
+  if (!(order instanceof Array) || order.length !== current.length) {
     return false
   }
   var unique = new Set(order)
@@ -69,7 +69,7 @@ function pushRange(positions, from, to) {
 // Null unless `order` is a complete, unique permutation of the group; a
 // stale or partial list cannot remove items.
 function arrangement(rows, group, order) {
-  if (!group || !Array.isArray(order) || !order.length) {
+  if (!group || !(order instanceof Array) || !order.length) {
     return null
   }
   var blocks = Object.create(null), slots = [], members = []

@@ -9,7 +9,7 @@ Item {
   property var keybindings: null
   property string sourceName: ""
   property url sourceLogo: ""
-  property color sourceInk: Color.menu.text
+  property color sourceInk: Colors.menu.text
   property color sourceBase: "transparent"
   property string crumb: ""
   property string storage: ""
@@ -38,9 +38,9 @@ Item {
   // The toggle's label follows whether the sidebar is folded away.
   property bool listCollapsed: false
   signal listToggled()
-  property color background: Color.menu.background
-  property color foreground: Color.menu.text
-  property color accent: Color.accent
+  property color background: Colors.menu.background
+  property color foreground: Colors.menu.text
+  property color accent: Colors.accent
   property string fontFamily: Style.font.menuFamily
   // One size for every caption on the bar.
   property int fontSize: Style.font.caption

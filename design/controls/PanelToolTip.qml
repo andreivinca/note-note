@@ -4,9 +4,9 @@ import ".."
 
 Controls.ToolTip {
   id: tip
-  property color panelForeground: Color.token("tooltip.foreground")
-  property color panelBackground: Color.token("tooltip.background")
-  property color panelBorder: Color.menu.border
+  property color panelForeground: Colors.token("tooltip.foreground")
+  property color panelBackground: Colors.token("tooltip.background")
+  property color panelBorder: Colors.menu.border
   property string fontFamily: Style.font.family
   property real fontSize: Style.font.bodySmall
   delay: 400

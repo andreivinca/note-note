@@ -6,8 +6,8 @@ import ".."
 // shades of `foreground`, so it reads on whatever surface holds it.
 Controls.TextField {
   id: field
-  property color foreground: Color.foreground
-  property color accent: Color.accent
+  property color foreground: Colors.foreground
+  property color accent: Colors.accent
   property bool password: false
   property bool hasCursor: false
   property real horizontalPadding: Style.spacing.controlPaddingX

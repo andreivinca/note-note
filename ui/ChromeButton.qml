@@ -4,8 +4,8 @@ import "../design/controls" as Controls
 
 // Rounded chrome buttons use a quiet surface and brighter ink when selected.
 Controls.Button {
-  property color surfaceColor: Color.token("toolbar.background")
-  property color contentForeground: Color.token("button.foreground")
+  property color surfaceColor: Colors.token("toolbar.background")
+  property color contentForeground: Colors.token("button.foreground")
   radius: Style.controlRadius
   foreground: Style.secondaryText(contentForeground, 0.72)
   selectedForeground: contentForeground

@@ -51,6 +51,6 @@ Item {
   function install() {
     Platform.backend = backend
     Design.Style.source = Shell.Style
-    Design.Color.source = Shell.Color
+    Design.Colors.source = Shell.Color
   }
 }

@@ -2,6 +2,9 @@ pragma Singleton
 import QtQuick
 import "resolve.js" as Resolve
 
+// Colors, not Color: Qt 6.12 gives QtQuick a Color singleton of its own, and
+// in a file that imports QtQuick it wins over one of that name from here,
+// whatever the order of the imports.
 QtObject {
   id: colors
   // The plugin supplies shell colors directly. The standalone resolver

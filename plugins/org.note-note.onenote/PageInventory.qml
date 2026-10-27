@@ -74,7 +74,7 @@ Item {
       return false
     }
     root.serial = result.pageListSerial || 0
-    if (!Array.isArray(result.pendingSections)) {
+    if (!(result.pendingSections instanceof Array)) {
       return true
     }
     root.pendingSections = result.pendingSections

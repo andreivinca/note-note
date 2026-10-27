@@ -32,11 +32,11 @@ Item {
   property bool readOnly: false
   // Tool ids the current provider supports (see PROVIDERS.md); null = all.
   property var enabledTools: null
-  property color foreground: Color.menu.text
-  property color accent: Color.accent
+  property color foreground: Colors.menu.text
+  property color accent: Colors.accent
   // The surface the note sits on — what the checkbox cover paints in, so
   // the native marker glyph vanishes under it (block decorations, below).
-  property color background: Color.menu.background
+  property color background: Colors.menu.background
   property string fontFamily: Style.font.menuFamily
   // The body must NOT be fixed-pitch: Qt's Markdown writer serialises any
   // monospace text as a code span and drops bold/italic/underline.
@@ -73,9 +73,9 @@ Item {
   onPlainChanged: Qt.callLater(root.configureLinkDisplay)
   onLinkColourChanged: Qt.callLater(root.configureLinkDisplay)
   onHighlightInkChanged: Qt.callLater(root.configureLinkDisplay)
-  readonly property color displayHighlight: Color.token("editor.highlightBackground")
-  readonly property color displayCodeBackground: Color.token("editor.inlineCodeBackground")
-  readonly property color displayCodeForeground: Color.token("editor.codeForeground")
+  readonly property color displayHighlight: Colors.token("editor.highlightBackground")
+  readonly property color displayCodeBackground: Colors.token("editor.inlineCodeBackground")
+  readonly property color displayCodeForeground: Colors.token("editor.codeForeground")
   onDisplayHighlightChanged: Qt.callLater(root.configureLinkDisplay)
   onDisplayCodeBackgroundChanged: Qt.callLater(root.configureLinkDisplay)
   onDisplayCodeForegroundChanged: Qt.callLater(root.configureLinkDisplay)
@@ -1065,8 +1065,8 @@ Item {
   // eye sees. The marker itself stays in the document — it carries the
   // state, and a click on it is Qt's own toggle.
   property var checkBoxes: []
-  readonly property color quoteBarColour: Color.token("editor.quoteBorder")
-  readonly property color codeSlabColour: Color.token("editor.codeBackground")
+  readonly property color quoteBarColour: Colors.token("editor.quoteBorder")
+  readonly property color codeSlabColour: Colors.token("editor.codeBackground")
   Timer { id: decorTimer; interval: 120; onTriggered: root.updateDecorations() }
   // With the native inspector the pass is cheap — real block formats, no
   // serialisation — so it runs synchronously and the bars and slabs move in
@@ -2090,7 +2090,7 @@ Item {
           readOnly: true
           color: root.foreground
           selectionColor: Style.selectionFill
-          selectedTextColor: Color.token("editor.selectionForeground")
+          selectedTextColor: Colors.token("editor.selectionForeground")
           // Rich text in, rich text out. Markdown cannot hold a highlight,
           // an empty paragraph or an indent, so the document keeps HTML and
           // services/markdown converts at both ends.

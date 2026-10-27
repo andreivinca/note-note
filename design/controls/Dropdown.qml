@@ -11,8 +11,8 @@ Controls.ComboBox {
   property string value: ""
   property string label: ""
   property bool showLabel: false
-  property color foreground: Color.foreground
-  property color accent: Color.accent
+  property color foreground: Colors.foreground
+  property color accent: Colors.accent
   property string fontFamily: Style.font.family
   readonly property bool popupOpen: popup.opened
   signal selected(string value)

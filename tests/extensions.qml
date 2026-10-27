@@ -466,20 +466,20 @@ Window {
       var custom = Resolve.resolve(light, { "text.secondary": "#80606060" })
       compare(custom["text.secondary"], "#80606060")
 
-      var previousSource = Color.source
-      var previousTheme = Color.theme
+      var previousSource = Colors.source
+      var previousTheme = Colors.theme
       try {
-        Color.source = { menu: { background: "#faf4ed", text: "#575279", border: "#cecacd",
+        Colors.source = { menu: { background: "#faf4ed", text: "#575279", border: "#cecacd",
           scrim: "#80000000", selectedBackground: "#dce4e3", selectedText: "#575279" },
           accent: "#56949f", urgent: "#b4637a", popups: { text: "#575279" } }
-        Color.theme = null
+        Colors.theme = null
         compare(Style.secondaryOpacity(0.48), 0.85)
         capture(backend.env("NOTE_NOTE_TEST_LIGHT_SCREENSHOT"))
-        Color.theme = { followsSystem: false, colors: light }
+        Colors.theme = { followsSystem: false, colors: light }
         compare(Style.secondaryOpacity(0.48), 0.48)
       } finally {
-        Color.source = previousSource
-        Color.theme = previousTheme
+        Colors.source = previousSource
+        Colors.theme = previousTheme
       }
     }
 

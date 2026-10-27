@@ -34,7 +34,7 @@ Item {
   function parse(text) {
     try {
       var result = JSON.parse(text)
-      if (result && typeof result === "object" && !Array.isArray(result)) {
+      if (result && typeof result === "object" && !(result instanceof Array)) {
         return result
       }
     } catch (error) {

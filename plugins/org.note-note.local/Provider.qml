@@ -264,10 +264,10 @@ Item {
   function storageLabel(path) { return baseName(fileOf(path)) }
   function createTargetFor(path) { var n = noteAt(path); return n ? "section:" + n.key : (root.notebooks.length ? "section:" + root.notebooks[root.notebooks.length - 1].key : "") }
   function restoreState(obj) {
-    if (obj && Array.isArray(obj.folded)) {
+    if (obj && obj.folded instanceof Array) {
       root.folded = obj.folded
     }
-    if (obj && Array.isArray(obj.opened)) {
+    if (obj && obj.opened instanceof Array) {
       root.opened = obj.opened
     }
   }

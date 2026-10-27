@@ -77,7 +77,7 @@ function previousDefaults() {
 }
 
 function validate(layout) {
-  if (!Array.isArray(layout)) {
+  if (!(layout instanceof Array)) {
     return "editor.toolbar must be an array of groups"
   }
   var seen = Object.create(null)
@@ -95,8 +95,8 @@ function validate(layout) {
     if (typeof entry === "string") {
       return claim(entry)
     }
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)
-        || !Array.isArray(entry.items)) {
+    if (!entry || typeof entry !== "object" || entry instanceof Array
+        || !(entry.items instanceof Array)) {
       return "Toolbar entries must be tool ids or {\"dropdown\": \"id\", \"items\": [...]}"
     }
     var error = claim(entry.dropdown)
@@ -107,7 +107,7 @@ function validate(layout) {
   }
   for (var g = 0; g < layout.length; g++) {
     var group = layout[g]
-    if (!Array.isArray(group)) {
+    if (!(group instanceof Array)) {
       return "Each editor.toolbar group must be an array"
     }
     for (var i = 0; i < group.length; i++) {
@@ -121,7 +121,7 @@ function validate(layout) {
 }
 
 function editorDefaults(settings) {
-  var result = settings && typeof settings === "object" && !Array.isArray(settings)
+  var result = settings && typeof settings === "object" && !(settings instanceof Array)
     ? Object.assign({}, settings) : {}
   var savedLayout = JSON.stringify(result.toolbar)
   if (validate(result.toolbar) || previousDefaults().some(function(layout) {

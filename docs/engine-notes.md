@@ -14,6 +14,21 @@ Qt's property-change signals (`Duplicate signal name`), and
 with the shell contract's `opened` bool, and a tab delegate's `active` would
 collide with names Qt owns — the sidebar's are `activeSection` and `current`.
 
+**Qt 6.12 hands an array through a `var` signal as a sequence.** A
+`signal finished(var result)` carries its argument as a `QVariant`, and from
+Qt 6.12 an array in it — or in an object in it, at any depth — comes back as
+a sequence, not a JavaScript array: every array method works and
+`instanceof Array` holds, but `Array.isArray` answers `false`. Every script's
+answer reaches its provider that way (`ProcessTask.finished`), so a check
+written with `Array.isArray` threw away whole listings, and a drag's new order
+(`reorderFinished`). Ask `value instanceof Array`, true of both on every Qt;
+neither the app nor its tests has an `Array.isArray` left.
+
+**Qt 6.12's QtQuick has a `Color` singleton of its own.** In a file that
+imports QtQuick it wins over an application singleton of that name, in
+whatever order the imports come — even for a file in the singleton's own
+directory. Ours is `Colors` (design/Colors.qml) for that reason.
+
 **The JS engine has no regex lookbehind.** `"a|b".split(/(?<!\\)\|/)` silently
 returns the whole string as one element instead of throwing. Protect escaped
 characters by substitution instead.

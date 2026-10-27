@@ -7,7 +7,7 @@
 // helper (config_io.py) checks only that the text is strict JSON.
 
 function isObject(value) {
-  return !!value && typeof value === "object" && !Array.isArray(value)
+  return !!value && typeof value === "object" && !(value instanceof Array)
 }
 
 function defaults(ids, providerDefaults) {

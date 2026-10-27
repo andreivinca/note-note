@@ -14,7 +14,7 @@ QQC.Menu {
   palette: ControlPalette {}
   // The row the menu was opened on; its `menu` is what the menu lists.
   property var row: null
-  property color accent: Color.accent
+  property color accent: Colors.accent
   property string fontFamily: Style.font.menuFamily
   readonly property var items: menu.row ? menu.row.menu || [] : []
   readonly property ChromePopupStyle popupStyle: ChromePopupStyle {}

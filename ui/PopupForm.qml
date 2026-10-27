@@ -22,8 +22,8 @@ QQC.Control {
   property string message: ""
   property string confirmText: ""
   property string cancelText: ""
-  property color foreground: Color.token("popup.foreground")
-  property color accent: Color.accent
+  property color foreground: Colors.token("popup.foreground")
+  property color accent: Colors.accent
   property string fontFamily: Style.font.menuFamily
   signal submitted()
   signal canceled()
@@ -76,7 +76,7 @@ QQC.Control {
         Layout.fillWidth: true
         text: form.message || form.hint
         textFormat: Text.PlainText
-        color: form.message ? Color.urgent : form.foreground
+        color: form.message ? Colors.urgent : form.foreground
         opacity: form.message ? 1 : 0.6
         font.family: form.fontFamily
         font.pixelSize: Style.font.caption

@@ -78,9 +78,9 @@ Item {
   property alias loadingPath: session.loadingPath
   // Shares the [menu] surface tokens, so a theme that styles the launcher
   // styles this too.
-  property color background: Color.menu.background
-  property color foreground: Color.menu.text
-  property color borderColor: Color.menu.border
+  property color background: Colors.menu.background
+  property color foreground: Colors.menu.text
+  property color borderColor: Colors.menu.border
   // The overlay card paints its rounded background and border under the
   // content, and clips nothing: chrome that sits flush in a corner would
   // square it off. So the flush pieces round their own corners to nest
@@ -88,8 +88,8 @@ Item {
   // inset by. Zero when detached: there the window is square and the
   // compositor does the rounding.
   readonly property real chromeRadius: detached ? 0 : Math.max(0, Style.cornerRadius - Math.max(1, Style.space(2)))
-  property color scrim: Color.menu.scrim
-  property color accent: Color.accent
+  property color scrim: Colors.menu.scrim
+  property color accent: Colors.accent
   // The document and chrome share a bundled sans-serif family in four faces.
   readonly property string noteFont: nimbusSans.name
   readonly property string interfaceFont: nimbusSans.name
@@ -106,24 +106,24 @@ Item {
   // services.microsoft.create(providerId, scopes, clientId).
   property var accounts: []
   // Links use the theme accent blended with its text color for readable ink.
-  readonly property string linkColour: Color.token("editor.link").toString()
+  readonly property string linkColour: Colors.token("editor.link").toString()
   // A quote keeps the theme's own ink at reduced strength; the editor draws
   // the classic bar beside it and the rounded slab behind a code block
   // (NoteEditor, block decorations). The document's own code background is
   // only the dialect's marker for "this block is code", so it is passed
   // fully transparent — presence is all anything reads back, and Qt Quick
   // paints even a faint one unevenly (first block only, measured on 6.11).
-  readonly property string quoteInkColour: Color.token("editor.quoteForeground").toString()
+  readonly property string quoteInkColour: Colors.token("editor.quoteForeground").toString()
   readonly property string codeBackgroundColour: "transparent"
   // Native display styling paints the inline-code chip. A script-only host
   // cannot, so there the chip's colour is written into the document; such a
   // host keeps the System theme, so that colour is the system's.
   readonly property string codeChipColour: editor.canColorText
-    ? "transparent" : Color.token("editor.inlineCodeBackground").toString()
+    ? "transparent" : Colors.token("editor.inlineCodeBackground").toString()
   readonly property var services: ({
     "platform": Platform,
     "style": Style,
-    "colors": Color,
+    "colors": Colors,
     "processes": {
       "create": function(owner) {
         return processRunnerComponent.createObject(owner)
@@ -640,7 +640,7 @@ Item {
   // only miss it.
   function applyProviderSettings(p) {
     var entry = (root.config.providers || {})[p.id] || {}
-    var keys = Array.isArray(p.settings) ? p.settings : []
+    var keys = p.settings instanceof Array ? p.settings : []
     for (var i = 0; i < keys.length; i++) {
       var k = keys[i]
       if (!(k in entry)) {
@@ -659,7 +659,7 @@ Item {
   // provider's own property, and the config file shows it from here.
   property var providerDefaults: ({})
   function recordProviderDefaults(p) {
-    var keys = Array.isArray(p.settings) ? p.settings : [], defaults = {}
+    var keys = p.settings instanceof Array ? p.settings : [], defaults = {}
     for (var i = 0; i < keys.length; i++) {
       defaults[keys[i]] = p[keys[i]]
     }
@@ -2395,7 +2395,7 @@ Item {
         }
         root.lastNotes = remembered
       }
-      if (Array.isArray(s.tabOrder)) {
+      if (s.tabOrder instanceof Array) {
         root.tabOrder = s.tabOrder.filter(function(key) {
           return typeof key === "string"
         })
@@ -2481,7 +2481,7 @@ Item {
     quoteInk: root.quoteInkColour
     codeBackground: root.codeBackgroundColour
     codeChip: root.codeChipColour
-    highlightInk: Color.token("editor.highlightForeground")
+    highlightInk: Colors.token("editor.highlightForeground")
   }
 
   // Pasting a picture into a note; only providers that can store one take it.
@@ -2566,10 +2566,10 @@ Item {
     id: themeService
     catalog: themeCatalog
     supportsCustom: editor.canColorText
-    Component.onCompleted: Color.theme = themeService
+    Component.onCompleted: Colors.theme = themeService
     Component.onDestruction: {
-      if (Color.theme === themeService) {
-        Color.theme = null
+      if (Colors.theme === themeService) {
+        Colors.theme = null
       }
     }
   }
@@ -2770,7 +2770,7 @@ Item {
           headerHeight: editor.toolbarHeight
           headerContentHeight: editor.toolbarRowHeight
           background: root.background
-          foreground: Color.token("sidebar.foreground")
+          foreground: Colors.token("sidebar.foreground")
           accent: root.accent
           fontFamily: root.interfaceFont
           noteFontSize: root.chromeFontSize
@@ -2915,9 +2915,9 @@ Item {
               }
               return ""
             }
-            foreground: Color.token("editor.foreground")
+            foreground: Colors.token("editor.foreground")
             accent: root.accent
-            background: Color.token("editor.background")
+            background: Colors.token("editor.background")
             fontFamily: root.interfaceFont
             noteFontFamily: root.noteFont
             bodyFontSize: root.noteFontSize
@@ -2976,8 +2976,8 @@ Item {
             hoveredLink: editor.hoveredLink
             wordCount: editor.wordCount
             countVisible: root.currentPath !== "" && !editor.showingNotice
-            background: Color.token("statusbar.background")
-            foreground: Color.token("statusbar.foreground")
+            background: Colors.token("statusbar.background")
+            foreground: Colors.token("statusbar.foreground")
             accent: root.accent
             fontFamily: root.interfaceFont
             fontSize: root.captionFontSize

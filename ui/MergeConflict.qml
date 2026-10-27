@@ -32,7 +32,7 @@ FocusScope {
     spacing: Style.spacing.sm
     Text {
       text: "This note has conflicting edits"
-      color: Color.menu.text
+      color: Colors.menu.text
       font.pixelSize: Style.font.title
       font.bold: true
       width: parent.width
@@ -40,7 +40,7 @@ FocusScope {
     }
     Text {
       text: "Choose what to keep for each conflict. Your draft is saved on this device."
-      color: Color.menu.text
+      color: Colors.menu.text
       font.pixelSize: Style.font.body
       width: parent.width
       wrapMode: Text.Wrap
@@ -68,7 +68,7 @@ FocusScope {
           spacing: Style.spacing.sm
           Text {
             text: part.modelData.field === "title" ? "Title" : "Passage"
-            color: Color.menu.text
+            color: Colors.menu.text
             font.pixelSize: Style.font.body
             font.bold: true
           }
@@ -84,7 +84,7 @@ FocusScope {
               spacing: Style.spacing.xxs
               Text {
                 text: modelData.label
-                color: Color.menu.text
+                color: Colors.menu.text
                 font.pixelSize: Style.font.caption
               }
               QQC.TextArea {
@@ -95,7 +95,7 @@ FocusScope {
                 textFormat: TextEdit.PlainText
                 text: part.modelData[parent.modelData.key] || "(empty)"
                 wrapMode: TextEdit.Wrap
-                color: Color.menu.text
+                color: Colors.menu.text
                 font.pixelSize: Style.font.body
                 background: Rectangle {
                   color: Qt.rgba(0, 0, 0, 0.12)
@@ -117,8 +117,8 @@ FocusScope {
                 required property var modelData
                 objectName: "choose-" + part.modelData.id + "-" + modelData.key
                 text: (root.choices[part.modelData.id] === modelData.key ? "✓ " : "") + modelData.label
-                foreground: Color.menu.text
-                accent: Color.accent
+                foreground: Colors.menu.text
+                accent: Colors.accent
                 bordered: true
                 focusable: true
                 onClicked: root.choose(part.modelData.id, modelData.key)
@@ -140,8 +140,8 @@ FocusScope {
       text: "Save resolved note"
       enabled: root.complete && typeof root.resolve === "function"
       opacity: enabled ? 1 : 0.45
-      foreground: Color.menu.text
-      accent: Color.accent
+      foreground: Colors.menu.text
+      accent: Colors.accent
       bordered: true
       focusable: true
       onClicked: root.resolve(root.choices)
@@ -150,8 +150,8 @@ FocusScope {
       objectName: "retryMerge"
       text: "Retry merge"
       enabled: typeof root.retry === "function"
-      foreground: Color.menu.text
-      accent: Color.accent
+      foreground: Colors.menu.text
+      accent: Colors.accent
       bordered: true
       focusable: true
       onClicked: root.retry()
@@ -160,8 +160,8 @@ FocusScope {
       objectName: "continueEditing"
       text: "Continue editing"
       enabled: typeof root.continueEditing === "function"
-      foreground: Color.menu.text
-      accent: Color.accent
+      foreground: Colors.menu.text
+      accent: Colors.accent
       bordered: true
       focusable: true
       onClicked: root.continueEditing()

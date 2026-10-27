@@ -70,7 +70,7 @@ Tool {
                 radius: width / 2
                 color: swatch.modelData.color
                 border.width: 1
-                border.color: Util.alpha(Color.popups.text, 0.35)
+                border.color: Util.alpha(Colors.popups.text, 0.35)
               }
             }
             Keys.onPressed: function(event) {
@@ -100,7 +100,7 @@ Tool {
       Rectangle {
         width: parent.width
         height: 1
-        color: Util.alpha(Color.popups.text, 0.15)
+        color: Util.alpha(Colors.popups.text, 0.15)
       }
       QQC.ItemDelegate {
         id: reset
@@ -115,13 +115,13 @@ Tool {
           id: resetLabel
           text: reset.text
           font: reset.font
-          color: Color.popups.text
+          color: Colors.popups.text
           verticalAlignment: Text.AlignVCenter
         }
         background: Rectangle {
           radius: Style.cornerRadius
           color: reset.hovered || reset.activeFocus
-            ? Style.hoverFillFor(Color.popups.text, colorTool.editor.accent) : "transparent"
+            ? Style.hoverFillFor(Colors.popups.text, colorTool.editor.accent) : "transparent"
         }
         onClicked: colorTool.choose("")
         Keys.onUpPressed: swatches.itemAt(swatches.count - 1).forceActiveFocus()

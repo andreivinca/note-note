@@ -17,10 +17,10 @@ var maxKeys = 8
 // ---- the user's overrides, as the settings hold them ---------------------
 
 function overrideProblem(entry) {
-  if (!entry || typeof entry !== "object" || Array.isArray(entry)
+  if (!entry || typeof entry !== "object" || entry instanceof Array
       || typeof entry.command !== "string" || entry.command.length > 256
       || !/^[a-z][a-z0-9.-]*\/[a-zA-Z][a-zA-Z0-9-]*$/.test(entry.command)
-      || !Array.isArray(entry.keys) || entry.keys.length > maxKeys) {
+      || !(entry.keys instanceof Array) || entry.keys.length > maxKeys) {
     return "Each keybinding needs a qualified command ID and a keys array (at most " + maxKeys + " keys): "
       + JSON.stringify(entry)
   }
@@ -41,7 +41,7 @@ function validateOverrides(value) {
   if (value === undefined) {
     return ""
   }
-  if (!Array.isArray(value) || value.length > maxOverrides) {
+  if (!(value instanceof Array) || value.length > maxOverrides) {
     return "keybindings must be an array of at most " + maxOverrides + " overrides"
   }
   var seen = Object.create(null)

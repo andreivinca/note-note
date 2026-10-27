@@ -7,8 +7,8 @@ import ".." as AppUi
 Item {
   id: bar
   required property var registry
-  property color background: Color.menu.background
-  property color fill: Color.token("toolbar.background")
+  property color background: Colors.menu.background
+  property color fill: Colors.token("toolbar.background")
   property bool toolsVisible: true
   readonly property real groupPadding: Style.spacing.xs
   readonly property real groupSpacing: Style.spacing.lg

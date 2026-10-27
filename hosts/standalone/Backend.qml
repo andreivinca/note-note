@@ -28,7 +28,7 @@ Item {
     callback(Desktop.clipboard(format))
   }
   function install() {
-    Design.Color.systemTheme = SystemTheme
+    Design.Colors.systemTheme = SystemTheme
     Platform.backend = backend
   }
 }

@@ -13,8 +13,8 @@ FocusScope {
   // text, confirmText }. The field opens on `text` — a rename's old name, to
   // change or add to — and shows `placeholder` while it is empty.
   property var prompt: null
-  property color accent: Color.accent
-  property color scrim: Color.menu.scrim
+  property color accent: Colors.accent
+  property color scrim: Colors.menu.scrim
   property string fontFamily: Style.font.menuFamily
   signal canceled()
   signal submitted(string name)

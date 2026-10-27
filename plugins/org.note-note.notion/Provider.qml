@@ -150,7 +150,7 @@ LaneProvider {
         }
         if (r.error) {
           root.statusRequested("Notion: " + r.error)
-        } else if (Array.isArray(r.pages)) {
+        } else if (r.pages instanceof Array) {
           root.pages = r.pages
         }
         root.rebuild()
@@ -348,7 +348,7 @@ LaneProvider {
         return
       }
       var res = root.parse(result.text || "")
-      if (!res.error && Array.isArray(res.pages)) {
+      if (!res.error && res.pages instanceof Array) {
         root.pages = res.pages
       }
       root.rebuild()
@@ -437,7 +437,7 @@ LaneProvider {
               + "2. Copy its Internal Integration Secret and paste it below.\n"
               + "3. In Notion, open each page you want here → ··· → Connections → add the integration. Sub-pages come along.\n\n"
               + "The secret is stored only on this machine, readable by you alone."
-          color: Color.menu.text
+          color: Colors.menu.text
           font.family: Style.font.menuFamily
           font.pixelSize: Style.font.body
         }
@@ -446,8 +446,8 @@ LaneProvider {
           width: Style.space(420)
           placeholderText: "ntn_… or secret_…"
           password: true
-          foreground: Color.menu.text
-          accent: Color.accent
+          foreground: Colors.menu.text
+          accent: Colors.accent
           font.family: Style.font.menuFamily
           focus: true
           Keys.onReturnPressed: root.submitToken(text)
@@ -456,7 +456,7 @@ LaneProvider {
           textFormat: Text.PlainText
           visible: root.setupError.length > 0
           text: root.setupError
-          color: Color.urgent
+          color: Colors.urgent
           font.family: Style.font.menuFamily
           font.pixelSize: Style.font.bodySmall
         }
@@ -467,15 +467,15 @@ LaneProvider {
             iconText: "󰆓"
             bordered: true
             enabled: !root.setupBusy
-            foreground: Color.menu.text
-            accent: Color.accent
+            foreground: Colors.menu.text
+            accent: Colors.accent
             onClicked: root.submitToken(tokenField.text)
           }
           Button {
             text: "Cancel"
             bordered: true
-            foreground: Color.menu.text
-            accent: Color.accent
+            foreground: Colors.menu.text
+            accent: Colors.accent
             onClicked: root.viewCleared()
           }
           // Confirmed inline, unlike the sign-out confirms elsewhere: this
@@ -486,16 +486,16 @@ LaneProvider {
             text: "Remove integration"
             iconText: "󰍃"
             bordered: true
-            foreground: Color.menu.text
-            accent: Color.accent
+            foreground: Colors.menu.text
+            accent: Colors.accent
             onClicked: view.confirmingRemove = true
           }
           Button {
             visible: root.configured && view.confirmingRemove
             text: "Really remove it?"
             bordered: true
-            foreground: Color.urgent
-            accent: Color.accent
+            foreground: Colors.urgent
+            accent: Colors.accent
             onClicked: {
               root.viewCleared()
               root.removeIntegration()
@@ -505,8 +505,8 @@ LaneProvider {
             visible: root.configured && view.confirmingRemove
             text: "Keep it"
             bordered: true
-            foreground: Color.menu.text
-            accent: Color.accent
+            foreground: Colors.menu.text
+            accent: Colors.accent
             onClicked: view.confirmingRemove = false
           }
         }

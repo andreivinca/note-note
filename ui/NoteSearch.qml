@@ -5,9 +5,9 @@ import "../design"
 Item {
   id: root
   property string filterText: ""
-  property color background: Color.menu.background
-  property color foreground: Color.menu.text
-  property color accent: Color.accent
+  property color background: Colors.menu.background
+  property color foreground: Colors.menu.text
+  property color accent: Colors.accent
   property string fontFamily: Style.font.menuFamily
   property var shortcutHandler: null
   property var keybindings: null
@@ -69,7 +69,7 @@ Item {
       iconText: "󰅖"
       tooltipText: "Clear the search" + (root.keybindings ? root.keybindings.hint("app/back") : "")
       contentForeground: root.foreground
-      surfaceColor: Color.token("input.background")
+      surfaceColor: Colors.token("input.background")
       accent: root.accent
       iconSize: Style.font.iconSmall
       horizontalPadding: Style.spacing.xs
