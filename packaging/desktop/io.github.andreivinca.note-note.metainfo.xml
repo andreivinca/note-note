@@ -34,6 +34,19 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.0.47" date="2026-10-27">
+      <description>
+        <p>New Note, New section, New notebook and a source's other actions
+        are now small buttons beside the note count, at the top of the list;
+        hover one to see what it does and its shortcut. Naming a notebook or
+        a section, renaming, and confirming a delete open the same compact
+        card as Insert link.</p>
+        <p>Note Note runs on Qt 6.12 again. There the native app and the
+        Omarchy plugin had lost their colours, OneNote, Sticky Notes and
+        Notion showed no notes, and a dragged note did not keep its new
+        place.</p>
+      </description>
+    </release>
     <release version="1.0.46" date="2026-10-15">
       <description>
         <p>Drag a tab across the top to move it, and it stays where you put
