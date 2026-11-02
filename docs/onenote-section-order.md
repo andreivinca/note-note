@@ -91,6 +91,10 @@ app-registration permission edit (tenant consent policies still apply).
   malformed, unsupported, cyclic or excessive structures.
 - `plugins/org.note-note.onenote/section_order.py`: verifies personal notebook package
   identity, walks ordered section-group folders, and joins only live IDs.
+  It orders sections alone, inside their groups too; the groups themselves
+  are listed A–Z after their holder's sections, since the folder-to-group
+  ID mapping has not been live-verified and the workaround is not broadened
+  to it.
   Downloads metadata from signed Microsoft URLs without the bearer token,
   redirects or logging credentials. Parsed entries are reused by TOC eTag;
   no note bodies or manual order are stored by this feature.

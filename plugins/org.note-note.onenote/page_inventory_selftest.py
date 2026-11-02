@@ -55,7 +55,7 @@ class ListingTests(unittest.TestCase):
 
     def test_hundreds_of_sections_publish_before_any_page_requests(self):
         sections = [section("s%d" % i) for i in range(400)]
-        with patch.object(onenote.notebook_inventory, "discover", return_value=([], sections, [])), \
+        with patch.object(onenote.notebook_inventory, "discover", return_value=([], [], sections, [])), \
                 patch.object(onenote, "graph", side_effect=AssertionError("page request at startup")), \
                 patch.object(onenote, "http", side_effect=AssertionError("listing pool at startup")):
             onenote.cmd_onenote_list(False, incremental=True)
@@ -178,7 +178,7 @@ class ListingTests(unittest.TestCase):
         self.assertEqual(onenote.load_listing()["fetched"], discovered)
         changed = dict(section("other"), modified="2")
         with patch.object(onenote.notebook_inventory, "discover",
-                          return_value=([], [section("s"), changed], [])) as discover:
+                          return_value=([], [], [section("s"), changed], [])) as discover:
             onenote.cmd_onenote_list(False, max_age=600, incremental=True)
         discover.assert_called_once()
         self.assertEqual(self.output.call_args.args[0]["pendingSections"], ["other"])
@@ -188,7 +188,7 @@ class ListingTests(unittest.TestCase):
         self.save()
         continuation = ROOT + "/sections/s/pages?$skip=100"
         self.step((200, {"value": [{"id": "first"}], "@odata.nextLink": continuation}))
-        with patch.object(onenote.notebook_inventory, "discover", return_value=([], [section("s")], [])):
+        with patch.object(onenote.notebook_inventory, "discover", return_value=([], [], [section("s")], [])):
             onenote.cmd_onenote_list(False, incremental=True)
             self.assertEqual(onenote.load_listing()["sectionProgress"]["s"]["url"], continuation)
             onenote.cmd_onenote_list(False, force=True, incremental=True)
@@ -243,7 +243,7 @@ class ListingTests(unittest.TestCase):
             cache.update(sections=[section("s"), section("created")],
                          pageRevision="mutation", pageListSerial=1)
             onenote.save_listing(cache)
-            return [], [section("s")], []
+            return [], [], [section("s")], []
 
         with patch.object(onenote.notebook_inventory, "discover", side_effect=discover):
             onenote.cmd_onenote_list(False, incremental=True)
@@ -327,7 +327,7 @@ class ListingTests(unittest.TestCase):
                 onenote.save_listing(cache)
             return 200, {"value": []}
 
-        with patch.object(onenote.notebook_inventory, "discover", return_value=([], [section("s")], [])), \
+        with patch.object(onenote.notebook_inventory, "discover", return_value=([], [], [section("s")], [])), \
                 patch.object(onenote, "access_token", return_value="test-token"), \
                 patch.object(onenote, "http", side_effect=http):
             with self.assertRaises(onenote.msgraph.GraphError) as error:
@@ -345,7 +345,7 @@ class ListingTests(unittest.TestCase):
             simultaneous.wait()
             return 200, {"value": [{"id": sid + "-page"}]}
 
-        with patch.object(onenote.notebook_inventory, "discover", return_value=([], sections, [])), \
+        with patch.object(onenote.notebook_inventory, "discover", return_value=([], [], sections, [])), \
                 patch.object(onenote, "access_token", return_value="test-token"), \
                 patch.object(onenote, "http", side_effect=http) as requests:
             onenote.cmd_onenote_list(False)
@@ -379,7 +379,7 @@ class ListingTests(unittest.TestCase):
             with self.subTest(continuation=continuation):
                 self.save(pages=[page("old")])
                 response = {"value": [{"id": "new"}], "@odata.nextLink": continuation}
-                with patch.object(onenote.notebook_inventory, "discover", return_value=([], [section("s")], [])), \
+                with patch.object(onenote.notebook_inventory, "discover", return_value=([], [], [section("s")], [])), \
                         patch.object(onenote, "access_token", return_value="test-token"), \
                         patch.object(onenote, "http", return_value=(200, response)) as http:
                     onenote.cmd_onenote_list(False)

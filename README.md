@@ -216,15 +216,22 @@ setting; your local folders spread by default, OneNote folds. Local notes offer
 **New Note** and **New notebook** as icons beside the note count, and **New
 section** in a notebook's own tab: the folders inside a notebook are its
 sections, to any depth, listed before its notes and folded until you open them.
-OneNote offers **New section** in a notebook's own tab and **New Note** only
-inside each section. New section and New notebook ask for the name in a small
-dialog. Providers supply all of these actions, including creation and account
+OneNote offers **New section** and **New section group** in a notebook's own
+tab and **New Note** only inside each section. OneNote section groups are
+folded rows after a notebook's sections, A–Z, each marked with a folders
+icon, holding their sections and groups to any depth, and **New section** on
+a group's row makes one inside it; the app makes groups directly in a
+notebook only. New section, New section group and New notebook ask for the
+name in a small dialog. Providers supply all of these actions, including creation and account
 controls; each is an icon button with its name as the tooltip.
 Lists keep their provider’s note order. Drag local notes to reorder them. Notebook trees keep
 their provider’s hierarchy and order, and show how many notes each holds.
 Right-click a note to delete it. Right-click a section — or a notebook, when
-notebooks share one tab — to make a section inside it, rename it or delete
-it. OneNote sections are renamed and deleted in personal notebooks you can
+notebooks share one tab, or a OneNote section group — to make a section
+inside it, rename it or delete it; a OneNote notebook's row also makes a
+section group. A OneNote section group is renamed and deleted on the same
+terms as its sections, a deleted one going to the OneDrive recycle bin with
+everything in it. OneNote sections are renamed and deleted in personal notebooks you can
 edit; a deleted one goes to the OneDrive recycle bin. Every OneNote section
 also has **Refresh**, which lists its pages again now: otherwise the open
 page's section is listed every minute, and the others only when OneNote
@@ -321,8 +328,10 @@ not a supported Graph ordering API: it uses a custom TOC parser and an
 unguaranteed Graph/OneDrive ID mapping. See the
 [risk assessment](docs/onenote-section-order.md#risk-classification).
 It currently supports personal OneDrive notebook
-packages with a unique readable `.onetoc2` per folder. Section groups are
-flattened in their remote order. If metadata is unavailable, malformed,
+packages with a unique readable `.onetoc2` per folder. It orders sections,
+inside their section groups too; the groups themselves are listed A–Z after
+their holder's sections, since their folder positions are not joined to
+Graph's groups. If metadata is unavailable, malformed,
 ambiguous or no longer matches Graph, the affected notebook's sections are
 sorted alphabetically and a warning is shown. Stale custom ordering is not
 used as a fallback. Page ordering still comes directly from Graph.

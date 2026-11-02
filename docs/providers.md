@@ -92,6 +92,9 @@ id), `tree` (path = tree id, `expanded`).
 Tree rows can supply `count`, a nonnegative note count displayed in a badge after the
 title, including when collapsed. Count all notes in the group, including subpages,
 and omit notes hidden by pending deletion. Omit `count` when unavailable.
+A tree row can also supply `icon`, a glyph shown before its title, where one
+kind of tree row has to be told from another: OneNote marks its section
+groups with one, and its sections have none.
 
 ### Row menus
 
@@ -144,13 +147,22 @@ delete their folder; a folder holding anything but notes is not deleted,
 and the delete is offered only while the listing read everything — a tree
 deeper than 16 levels or wider than 4096 folders lists as partial, and its
 folders cannot be deleted from the app. OneNote's
-notebook rows, in its one-tab shape, make a section; its section rows list
+notebook rows, in its one-tab shape, make a section or a section group, as
+its tab's two buttons do otherwise, and its group rows make a section, and
+rename or delete the group with everything in it on a section's terms: a
+notebook lists its sections, then its groups A–Z, each a marked tree row
+holding sections — and, made in OneNote, groups of its own, to any depth —
+with a count of every page inside it; the app itself makes groups directly
+in a notebook alone. OneNote's section rows list
 the section's pages again (Refresh) in any notebook, and rename and delete
 one in personal notebooks the account can edit. Graph's OneNote API can
 neither rename nor delete a section, but such a section is a
 `.one` file in its owner's OneDrive, named after the section: renaming the
 file renames the section in every OneNote app, and deleting it sends the
-section to the OneDrive recycle bin. A new section is listed at once and takes
+section to the OneDrive recycle bin. A section group is the folder holding
+its sections' files and its groups' folders, renamed and deleted the same
+way, a deleted one going to the recycle bin with everything in it. A new
+section is listed at once and takes
 pages once OneNote has made it; a deleted one leaves the list at once and
 comes back if OneNote keeps it.
 

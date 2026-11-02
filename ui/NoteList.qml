@@ -385,6 +385,7 @@ Item {
             readonly property bool isAction: modelData.kind === "action"
             readonly property bool isTree: modelData.kind === "tree"
             readonly property bool hasCount: isTree && typeof modelData.count === "number" && modelData.count >= 0
+            readonly property bool hasIcon: isTree && !!modelData.icon
             readonly property bool hasMenu: (modelData.menu || []).length > 0
             // One step of indent is the parent's icon column plus the gap
             // after it, so a child's icon starts under its parent's label —
@@ -469,11 +470,22 @@ Item {
                   font.family: Style.fontFamily
                   font.pixelSize: Style.font.iconSmall
                 }
+                // A tree row's own icon, where its provider gives one to tell
+                // one kind of row from another: a OneNote section group's.
+                Text {
+                  id: treeIcon
+                  visible: slot.hasIcon
+                  text: slot.hasIcon ? slot.modelData.icon : ""
+                  color: Util.alpha(root.foreground, 0.75)
+                  font.family: Style.fontFamily
+                  font.pixelSize: Style.font.iconSmall
+                }
                 // Only as wide as the title, so the count follows it; a title
                 // too long for the row elides, which leaves the count at the
                 // row's right edge.
                 Text {
                   width: Math.max(0, Math.min(implicitWidth, parent.width - Style.font.iconSmall - parent.spacing
+                                              - (slot.hasIcon ? treeIcon.width + parent.spacing : 0)
                                               - (slot.hasCount ? treeCount.width + parent.spacing : 0)))
                   text: slot.isNew ? "New note…" : slot.modelData.title
                   textFormat: Text.PlainText

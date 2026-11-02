@@ -91,6 +91,31 @@ def section_item(section, graph=msgraph.graph):
     return path
 
 
+def group_item(group, graph=msgraph.graph):
+    """The section group's folder, as a Graph item path, once Graph confirms
+    it is that folder: named after the group, in the group's holder — the
+    notebook's package, or its parent group's folder. A group's ID maps to
+    its folder as a section's does to its file (PERSONAL_ID); the name and
+    the holder are checked besides, this mapping having been seen live less."""
+    item_id = personal_item(group["id"])
+    holder_id = personal_item(group.get("parentGroupId") or group.get("notebookId"))
+    drive_id = item_id.split("!", 1)[0]
+    path = "/drives/%s/items/%s" % (drive_id, urllib.parse.quote(item_id, safe=""))
+    status, metadata = graph("GET", path + "?$select=id,name,folder,parentReference")
+    if status == 404:
+        raise SectionGone("This section group is no longer in OneDrive — it was deleted or moved")
+    parent = metadata.get("parentReference") if isinstance(metadata, dict) else None
+    if (status != 200 or not isinstance(parent, dict)
+            or str(metadata.get("id", "")).casefold() != item_id.casefold()
+            or str(parent.get("driveId", "")).casefold() != drive_id.casefold()
+            or parent.get("driveType") != "personal"
+            or str(parent.get("id", "")).casefold() != holder_id.casefold()
+            or "folder" not in metadata
+            or str(metadata.get("name", "")).casefold() != str(group.get("name", "")).casefold()):
+        raise WebError("The OneNote section group could not be verified as a writable OneDrive folder")
+    return path
+
+
 def preview_url(url):
     try:
         parsed = urllib.parse.urlsplit(url)

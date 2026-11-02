@@ -505,6 +505,15 @@ class is set: extended property `String 0x001A` = `IPM.StickyNote`.
 
 - Notebook inventory starts from `/me/onenote/notebooks`, expands sections
   and section groups, and follows their relationship links for nested content.
+  Each group is kept as a record of its own, and each section and group names
+  the group it was listed under (`parentGroupId`): an expanded child listed
+  with `$select` carries no `parentSectionGroup` of its own. A section is
+  made in a group at `/sectionGroups/{id}/sections`, and a group in a
+  notebook at `/notebooks/{id}/sectionGroups` (`Notes.ReadWrite` both).
+  Graph renames and deletes neither sections nor groups: a group is the
+  OneDrive folder holding its sections' files, named after the group, and
+  is renamed and deleted as a section's file is, once `web_session.group_item`
+  has verified a folder of that name in the group's holder.
   Cache each resource's `self`, `pagesUrl` and `contentUrl` to preserve the
   location Microsoft supplies for shared content. The notebook and section
   collections are documented as

@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """OneNote provider (Notes.ReadWrite; optional OneDrive ordering permissions).
 
-  onenote.py list [--cached|--max-age S|--force] [--incremental] -> {"sections":[{id,name,notebook,notebookId,modified}],
+  onenote.py list [--cached|--max-age S|--force] [--incremental] -> {"notebooks":[{id,name,userRole}],
+                                           "sectionGroups":[{id,name,notebook,notebookId,parentGroupId?}],
+                                           "sections":[{id,name,notebook,notebookId,parentGroupId?,modified}],
                                            "pages":[{id,sectionId,title,modified}]}
+                                           parentGroupId: the section group the section or group sits in;
+                                           none for one directly in its notebook
                                            --cached: cache only; --max-age S: cache if younger than S seconds;
                                            --force: fetch every section, ignoring the per-section timestamps
                                            --incremental: return the tree before fetching page lists
@@ -15,7 +19,11 @@
   onenote.py update <id> <file>         -> reads {"title","body","view","resolution"?}
   onenote.py create <sectionId> <file>  -> {"ok":true,"page":{...}}
   onenote.py delete <id>
-  onenote.py create-section <notebookId> <file|->  -> {"ok":true,"section":{...}}
+  onenote.py create-section <notebookId|groupId> <file|->  -> {"ok":true,"section":{...}}
+  onenote.py create-section-group <notebookId> <file|->  -> {"ok":true,"group":{...}}
+  onenote.py rename-group <groupId> <file|->  -> {"ok":true,"name":...}: renames the group's OneDrive folder
+  onenote.py delete-group <groupId>     -> {"ok":true,"pages":[...]}: deletes the group's OneDrive folder, with
+                                           everything in it
   onenote.py search-sync <file|->      -> reconcile {"pages":[...]} with the text cache
   onenote.py search-step <file|->      -> index one due page, with {"preferredSections":[...]}
   onenote.py search <file|->           -> local matches for {"query":"..."}
@@ -80,7 +88,7 @@ ONENOTE_CHANGES = os.path.join(CACHE_DIR, "note-note-onenote-changes.json")
 MAX_REMEMBERED_LEVELS = 4   # pages: the page check reads the open one
 # This provider's limits: what it will read from Graph and keep around.
 MAX_SECTIONS = 500
-INVENTORY_VERSION = 2
+INVENTORY_VERSION = 3   # invalidates an inventory from before section groups were listed
 PAGE_METADATA_VERSION = 1
 # Seconds after this app wrote a section's page order before any refresh
 # lists the section again. Graph shows a written order a few seconds after
@@ -171,7 +179,7 @@ def notebook_record(collection, resource_id):
     resource = find(collection, resource_id)
     if collection == "pages":
         resource = find("sections", resource.get("sectionId"))
-    if collection in ("pages", "sections"):
+    if collection in ("pages", "sections", "sectionGroups"):
         resource = find("notebooks", resource.get("notebookId"))
     return resource
 
@@ -186,11 +194,12 @@ def require_writable(collection, resource_id):
         fail(READ_ONLY_REASON)
 
 
-def require_revision_access(section_id, not_writable, not_granted):
-    """Fail unless this section can be written under the current sign-in —
-    through OneNote's web revision service (web_session.py) or as its file:
-    both need a personal notebook this account may edit, and Files.ReadWrite."""
-    if not web_session.writable_notebook(notebook_record("sections", section_id)):
+def require_revision_access(collection, resource_id, not_writable, not_granted):
+    """Fail unless the section, or section group, can be written under the
+    current sign-in — through OneNote's web revision service
+    (web_session.py) or as its file or folder: both need a personal notebook
+    this account may edit, and Files.ReadWrite."""
+    if not web_session.writable_notebook(notebook_record(collection, resource_id)):
         fail(not_writable)
     if not web_session.write_granted():
         fail(not_granted)
@@ -543,9 +552,10 @@ class Listing:
     Refresh row — ignores the stamps and fetches everything.
     """
 
-    def __init__(self, cache, sections, notebooks=None):
+    def __init__(self, cache, sections, notebooks=None, groups=None):
         self.sections = sections
         self.notebooks = cache.get("notebooks", []) if notebooks is None else notebooks
+        self.groups = cache.get("sectionGroups", []) if groups is None else groups
         self.by_section = {}
         for pg in (cache.get("pages") or []):
             self.by_section.setdefault(pg.get("sectionId", ""), []).append(pg)
@@ -633,7 +643,8 @@ class Listing:
         self.progress = {key: value for key, value in self.progress.items() if key in live}
         complete = complete and self.complete()
         self.serial += 1
-        save_listing({"sections": self.sections, "notebooks": self.notebooks, "pages": self.pages(),
+        save_listing({"sections": self.sections, "notebooks": self.notebooks, "sectionGroups": self.groups,
+                      "pages": self.pages(),
                       "sectionPages": self.seen, "fetched": self.fetched,
                       "sectionProgress": self.progress, "listingWarnings": self.warnings,
                       "notebookProgress": self.notebook_progress,
@@ -686,7 +697,7 @@ class Listing:
         pending = self.pending()
         retries = {sid: self.progress.get(sid, {}).get("retryAt", 0) for sid in pending}
         return {"sections": remembered_order(self.sections, load_order()), "notebooks": self.notebooks,
-                "pages": self.pages(), "inventoryReady": True,
+                "sectionGroups": self.groups, "pages": self.pages(), "inventoryReady": True,
                 "inventoryComplete": self.complete(),
                 "pendingSections": pending, "partialSections": self.partial(),
                 "outdatedSections": self.outdated(),
@@ -727,6 +738,7 @@ def cmd_onenote_list(cached, max_age=0, force=False, incremental=False):
         sections = c.get("sections", [])
         answer = Listing(c, sections).answer() if inventory_ready else {}
         answer.update(sections=remembered_order(sections, order), notebooks=c.get("notebooks", []),
+                      sectionGroups=c.get("sectionGroups", []),
                       pages=c.get("pages", []), cached=True, inventoryReady=inventory_ready,
                       inventoryComplete=c.get("inventoryComplete", False),
                       sectionOrderPending=bool(sections) and not order_matches(order))
@@ -735,6 +747,10 @@ def cmd_onenote_list(cached, max_age=0, force=False, incremental=False):
     cache = c if isinstance(c, dict) else {}
     revision = cache.get("pageRevision", "")
     discovery_progress = cache.get("notebookProgress") if incremental and not force else None
+    # A checkpoint is resumed only when it is of this layout: an older one
+    # cannot say what it had found.
+    if discovery_progress and discovery_progress.get("inventoryVersion") != INVENTORY_VERSION:
+        discovery_progress = None
     refresh_pages = force or bool(discovery_progress and discovery_progress.get("force"))
 
     def checkpoint(progress):
@@ -743,12 +759,13 @@ def cmd_onenote_list(cached, max_age=0, force=False, incremental=False):
             if latest.get("pageRevision", "") != revision:
                 raise msgraph.GraphError("The notebook inventory changed — retry the listing", kind="transient")
             progress["force"] = refresh_pages
+            progress["inventoryVersion"] = INVENTORY_VERSION
             latest["notebookProgress"] = progress
             save_listing(latest)
 
     try:
         with msgraph.background_requests() if incremental else contextlib.nullcontext():
-            notebooks, sections, warnings = notebook_inventory.discover(
+            notebooks, groups, sections, warnings = notebook_inventory.discover(
                 graph, MAX_SECTIONS, MAX_LIST_BODY,
                 progress=discovery_progress,
                 checkpoint=checkpoint if incremental else None,
@@ -759,10 +776,12 @@ def cmd_onenote_list(cached, max_age=0, force=False, incremental=False):
             progress = latest.get("notebookProgress") or {}
             sections = retain_missing(progress.get("sections", []), latest.get("sections", []))[:MAX_SECTIONS]
             notebooks = retain_missing(progress.get("notebooks", []), latest.get("notebooks", []))[:MAX_SECTIONS]
-            listing = Listing(latest, sections, notebooks)
+            groups = retain_missing(progress.get("sectionGroups", []), latest.get("sectionGroups", []))[:MAX_SECTIONS]
+            listing = Listing(latest, sections, notebooks, groups)
             if progress.get("notebooks"):
                 listing.warnings = progress.get("warnings", []) + ["Notebook discovery is incomplete"]
                 if (sections != latest.get("sections", []) or notebooks != latest.get("notebooks", [])
+                        or groups != latest.get("sectionGroups", [])
                         or listing.warnings != latest.get("listingWarnings", [])):
                     listing.prepare_sections()
                     listing.revision = uuid.uuid4().hex
@@ -775,6 +794,7 @@ def cmd_onenote_list(cached, max_age=0, force=False, incremental=False):
              kind="transient" if error.status in TRANSIENT_STATUSES else None)
     if warnings:
         notebooks = retain_missing(notebooks, cache.get("notebooks", []))[:MAX_SECTIONS]
+        groups = retain_missing(groups, cache.get("sectionGroups", []))[:MAX_SECTIONS]
         sections = retain_missing(sections, cache.get("sections", []))
     sections = remembered_order(sections[:MAX_SECTIONS], order)
     discovered = time.time()
@@ -785,7 +805,7 @@ def cmd_onenote_list(cached, max_age=0, force=False, incremental=False):
                 answer = Listing(latest, latest.get("sections", [])).answer()
                 out(dict(answer, deferred=True, retryAfter=0.1))
                 return
-            listing = Listing(latest, sections, notebooks)
+            listing = Listing(latest, sections, notebooks, groups)
             listing.fetched = discovered
             listing.warnings = warnings
             listing.notebook_progress = None
@@ -795,7 +815,7 @@ def cmd_onenote_list(cached, max_age=0, force=False, incremental=False):
             out(dict(listing.answer(), cached=False, sectionOrderPending=bool(sections)))
         return
     token = access_token()
-    listing = Listing(cache, sections, notebooks)
+    listing = Listing(cache, sections, notebooks, groups)
     listing.fetched = discovered
     listing.warnings = warnings
     listing.notebook_progress = None
@@ -846,7 +866,8 @@ def cmd_onenote_list(cached, max_age=0, force=False, incremental=False):
 
     complete = listing.complete()
     listing.commit(complete)
-    out({"sections": sections, "notebooks": notebooks, "pages": listing.pages(), "cached": False,
+    out({"sections": sections, "notebooks": notebooks, "sectionGroups": groups, "pages": listing.pages(),
+         "cached": False,
          "listingWarnings": warnings,
          "inventoryComplete": complete and listing.within_limits(),
          "sectionOrderPending": bool(sections)})
@@ -1729,7 +1750,7 @@ def remove_blank_lines(page_id, runs):
     web revision service removes it, on the same terms as page order
     (docs/onenote-blank-lines.md)."""
     section_id = cached_resource("pages", page_id).get("sectionId")
-    require_revision_access(section_id,
+    require_revision_access("sections", section_id,
                             "OneNote's API cannot remove blank lines between paragraphs in this notebook; "
                             "remove them in OneNote — your draft was kept",
                             "Sign in to OneNote again to let Note Note remove blank lines — your draft was kept")
@@ -1742,7 +1763,7 @@ def remove_blank_lines(page_id, runs):
 def write_lists(page_id, current, desired, expected_revision=""):
     """One native revision for list changes, followed by a verified read."""
     section_id = cached_resource("pages", page_id).get("sectionId")
-    require_revision_access(section_id,
+    require_revision_access("sections", section_id,
                             "This notebook does not expose native list editing — your draft was kept",
                             "Sign in to OneNote again to allow native list editing — your draft was kept")
     try:
@@ -1968,19 +1989,25 @@ def cmd_onenote_create(section_id, path):
     out({"ok": True, "page": page, "note": note, "pageListSerial": c["pageListSerial"]})
 
 
-def cmd_onenote_create_section(notebook_id, path):
+def cmd_onenote_create_section(holder_id, path):
+    """A section in a notebook, or in a section group of one: Graph makes a
+    group's sections at the group's own endpoint."""
+    group = cached_resource("sectionGroups", holder_id)
+    notebook_id = group["notebookId"] if group else holder_id
     require_writable("notebooks", notebook_id)
     payload = read_payload(path) or {}
     name = (payload.get("name") or "").strip()
     if not name:
         fail("a section needs a name")
+    holder = resource_url("sectionGroups" if group else "notebooks", holder_id)
     # Not repeatable either, for the same reason a page create is not.
-    status, res = graph("POST", resource_url("notebooks", notebook_id) + "/sections",
-                        {"displayName": name[:50]}, retry_policy=msgraph.RetryPolicy.NEVER)
+    status, res = graph("POST", holder + "/sections", {"displayName": name[:50]},
+                        retry_policy=msgraph.RetryPolicy.NEVER)
     if status not in (200, 201) or "id" not in res:
         fail(graph_err(res, status))
     notebook = cached_resource("notebooks", notebook_id)
-    section = notebook_inventory.section_record(res, {"id": notebook_id, "displayName": notebook.get("name", "")})
+    section = notebook_inventory.section_record(res, {"id": notebook_id, "displayName": notebook.get("name", "")},
+                                                group.get("id", ""))
     section["name"] = res.get("displayName", name)
     with listing_lock():
         c = load_listing()
@@ -1993,6 +2020,31 @@ def cmd_onenote_create_section(notebook_id, path):
             invalidate_page_lists(c)
             save_listing(c)
     out({"ok": True, "section": section, "pageListSerial": (c or {}).get("pageListSerial", 0)})
+
+
+def cmd_onenote_create_section_group(notebook_id, path):
+    """A section group directly in a notebook: the one level of groups the
+    app makes (Provider.qml, notebookMenu)."""
+    require_writable("notebooks", notebook_id)
+    payload = read_payload(path) or {}
+    name = (payload.get("name") or "").strip()
+    if not name:
+        fail("a section group needs a name")
+    # Not repeatable either, for the same reason a page create is not.
+    status, res = graph("POST", resource_url("notebooks", notebook_id) + "/sectionGroups",
+                        {"displayName": name[:50]}, retry_policy=msgraph.RetryPolicy.NEVER)
+    if status not in (200, 201) or "id" not in res:
+        fail(graph_err(res, status))
+    notebook = cached_resource("notebooks", notebook_id)
+    group = notebook_inventory.group_record(res, {"id": notebook_id, "displayName": notebook.get("name", "")}, "")
+    group["name"] = res.get("displayName", name)
+    with listing_lock():
+        c = load_listing()
+        if c:
+            c["sectionGroups"] = c.get("sectionGroups", []) + [group]
+            invalidate_page_lists(c)
+            save_listing(c)
+    out({"ok": True, "group": group, "pageListSerial": (c or {}).get("pageListSerial", 0)})
 
 
 # A section of a personal notebook is a .one file in its owner's OneDrive,
@@ -2009,6 +2061,38 @@ SECTION_FILE_NOT_GRANTED = "Sign in to OneNote again to let Note Note rename and
 SECTION_NOT_LISTED = "This section is not in the list Note Note last read from OneNote; refresh the list and try again"
 # What OneNote refuses in a section name.
 SECTION_NAME_REFUSED = '\\/*?"|<>:%#'
+# A section group of a personal notebook is the folder in its owner's
+# OneDrive that holds its sections' files and its groups' folders, and
+# OneNote names the group after the folder: renaming the folder renames the
+# group, and deleting it sends the group, with everything in it, to the
+# recycle bin. Offered on the sections' terms.
+GROUP_FOLDER_UNAVAILABLE = "Section groups can be renamed and deleted only in personal notebooks you can edit"
+GROUP_NOT_LISTED = "This section group is not in the list Note Note last read from OneNote; refresh the list and try again"
+
+
+def take_sections(c, section_ids):
+    """Takes the sections off the cached listing `c`, with their pages and
+    their listing state; returns the page IDs."""
+    pages = [p["id"] for p in c.get("pages", []) if p.get("sectionId") in section_ids]
+    c["sections"] = [sct for sct in c.get("sections", []) if sct.get("id") not in section_ids]
+    c["pages"] = [p for p in c.get("pages", []) if p.get("sectionId") not in section_ids]
+    for section_id in section_ids:
+        c.get("sectionPages", {}).pop(section_id, None)
+        c.get("sectionProgress", {}).pop(section_id, None)
+    invalidate_page_lists(c)
+    return pages
+
+
+def discard_pages(pages):
+    """Takes pages that are gone out of the search index, and their merge
+    journals with them."""
+    for page_id in pages:
+        try:
+            content_index().remove(page_id)
+        except (OSError, ValueError):
+            pass
+        with merge_store(page_id) as journal:
+            journal.discard()
 
 
 def forget_section(section_id):
@@ -2017,20 +2101,46 @@ def forget_section(section_id):
     the listing's new serial."""
     with listing_lock():
         c = load_listing({"sections": [], "pages": []})
-        pages = [p["id"] for p in c.get("pages", []) if p.get("sectionId") == section_id]
-        c["sections"] = [sct for sct in c.get("sections", []) if sct.get("id") != section_id]
-        c["pages"] = [p for p in c.get("pages", []) if p.get("sectionId") != section_id]
-        c.get("sectionPages", {}).pop(section_id, None)
-        invalidate_page_lists(c, section_id)
+        pages = take_sections(c, {section_id})
         save_listing(c)
-    for page_id in pages:
-        try:
-            content_index().remove(page_id)
-        except (OSError, ValueError):
-            pass
-        with merge_store(page_id) as journal:
-            journal.discard()
+    discard_pages(pages)
     return pages, c["pageListSerial"]
+
+
+def groups_within(groups, group_id):
+    """The IDs of the group and of every group in it, at any depth."""
+    within = {group_id}
+    holders = [group_id]
+    while holders:
+        holder = holders.pop()
+        for group in groups:
+            if group.get("parentGroupId") == holder and group["id"] not in within:
+                within.add(group["id"])
+                holders.append(group["id"])
+    return within
+
+
+def forget_group(group_id):
+    """Takes a section group that is gone off the cached listing, with the
+    groups and sections in it and their pages, as forget_section does.
+    Returns the page IDs and the listing's new serial."""
+    with listing_lock():
+        c = load_listing({"sectionGroups": [], "sections": [], "pages": []})
+        within = groups_within(c.get("sectionGroups", []), group_id)
+        sections = {sct["id"] for sct in c.get("sections", []) if sct.get("parentGroupId") in within}
+        pages = take_sections(c, sections)
+        c["sectionGroups"] = [group for group in c.get("sectionGroups", []) if group["id"] not in within]
+        save_listing(c)
+    discard_pages(pages)
+    return pages, c["pageListSerial"]
+
+
+def answer_group_gone(group_id):
+    """A section group whose folder Graph no longer finds: deleted or moved
+    since the list on screen was made, and the list learns it now."""
+    pages, serial = forget_group(group_id)
+    out({"error": "This section group is no longer in OneDrive, so it was taken off the list",
+         "gone": True, "pages": pages, "pageListSerial": serial})
 
 
 def answer_section_gone(section_id):
@@ -2051,7 +2161,7 @@ def cmd_onenote_rename_section(section_id, path):
     section = cached_resource("sections", section_id)
     if not section:
         fail(SECTION_NOT_LISTED)
-    require_revision_access(section_id, SECTION_FILE_UNAVAILABLE, SECTION_FILE_NOT_GRANTED)
+    require_revision_access("sections", section_id, SECTION_FILE_UNAVAILABLE, SECTION_FILE_NOT_GRANTED)
     try:
         item = web_session.section_item(section, graph)
     except web_session.SectionGone:
@@ -2079,7 +2189,7 @@ def cmd_onenote_delete_section(section_id):
     section = cached_resource("sections", section_id)
     if not section:
         fail(SECTION_NOT_LISTED)
-    require_revision_access(section_id, SECTION_FILE_UNAVAILABLE, SECTION_FILE_NOT_GRANTED)
+    require_revision_access("sections", section_id, SECTION_FILE_UNAVAILABLE, SECTION_FILE_NOT_GRANTED)
     # A section whose file is already gone from OneDrive is deleted all the
     # same.
     try:
@@ -2096,6 +2206,63 @@ def cmd_onenote_delete_section(section_id):
             except ValueError:
                 fail("Graph error %s" % status)
     pages, serial = forget_section(section_id)
+    out({"ok": True, "pages": pages, "pageListSerial": serial})
+
+
+def cmd_onenote_rename_group(group_id, path):
+    name = ((read_payload(path) or {}).get("name") or "").strip()[:50].strip()
+    if not name:
+        fail("a section group needs a name")
+    if any(character in SECTION_NAME_REFUSED for character in name):
+        fail("A section group name cannot contain any of %s" % " ".join(SECTION_NAME_REFUSED))
+    group = cached_resource("sectionGroups", group_id)
+    if not group:
+        fail(GROUP_NOT_LISTED)
+    require_revision_access("sectionGroups", group_id, GROUP_FOLDER_UNAVAILABLE, SECTION_FILE_NOT_GRANTED)
+    try:
+        item = web_session.group_item(group, graph)
+    except web_session.SectionGone:
+        answer_group_gone(group_id)
+        return
+    except web_session.WebError as error:
+        fail(str(error))
+    status, res = graph("PATCH", item, {"name": name}, retry_policy=msgraph.RetryPolicy.NEVER)
+    if status == 409:
+        fail("This notebook already has a section group called “%s”" % name)
+    if status != 200:
+        fail(graph_err(res, status))
+    with listing_lock():
+        c = load_listing()
+        if c:
+            for other in c.get("sectionGroups", []):
+                if other.get("id") == group_id:
+                    other["name"] = name
+            invalidate_page_lists(c)
+            save_listing(c)
+    out({"ok": True, "name": name, "pageListSerial": (c or {}).get("pageListSerial", 0)})
+
+
+def cmd_onenote_delete_group(group_id):
+    group = cached_resource("sectionGroups", group_id)
+    if not group:
+        fail(GROUP_NOT_LISTED)
+    require_revision_access("sectionGroups", group_id, GROUP_FOLDER_UNAVAILABLE, SECTION_FILE_NOT_GRANTED)
+    # A group whose folder is already gone from OneDrive is deleted all the
+    # same.
+    try:
+        item = web_session.group_item(group, graph)
+    except web_session.SectionGone:
+        item = None
+    except web_session.WebError as error:
+        fail(str(error))
+    if item:
+        status, res = graph_raw("DELETE", item)
+        if status not in (204, 200, 404):
+            try:
+                fail(graph_err(json.loads(res), status))
+            except ValueError:
+                fail("Graph error %s" % status)
+    pages, serial = forget_group(group_id)
     out({"ok": True, "pages": pages, "pageListSerial": serial})
 
 
@@ -2144,7 +2311,7 @@ def cmd_reorder_pages(payload_path):
                (web_session.RATE_KEY, web_session.RATE_WINDOWS))
     if any(ratelimit.background_delay(key, windows) > 0 for key, windows in budgets):
         fail("The order was not saved — OneNote's requests are kept for notes right now")
-    require_revision_access(section_id, "Page ordering is available only in personal notebooks you can edit",
+    require_revision_access("sections", section_id, "Page ordering is available only in personal notebooks you can edit",
                             "Sign in to OneNote again to allow page ordering")
     fresh = collect_section_pages(section, lambda url: graph("GET", url, max_bytes=MAX_LIST_BODY))
     if fresh.get("error"):
@@ -2214,10 +2381,16 @@ def main(argv):
         cmd_onenote_delete(argv[2])
     elif cmd == "create-section" and len(argv) >= 4:
         cmd_onenote_create_section(argv[2], argv[3])
+    elif cmd == "create-section-group" and len(argv) >= 4:
+        cmd_onenote_create_section_group(argv[2], argv[3])
     elif cmd == "rename-section" and len(argv) >= 4:
         cmd_onenote_rename_section(argv[2], argv[3])
     elif cmd == "delete-section" and len(argv) >= 3:
         cmd_onenote_delete_section(argv[2])
+    elif cmd == "rename-group" and len(argv) >= 4:
+        cmd_onenote_rename_group(argv[2], argv[3])
+    elif cmd == "delete-group" and len(argv) >= 3:
+        cmd_onenote_delete_group(argv[2])
     elif cmd == "search-sync" and len(argv) >= 3:
         cmd_search_sync(argv[2])
     elif cmd == "search-step" and len(argv) >= 3:
@@ -2235,7 +2408,7 @@ def main(argv):
                 pass
         out({"ok": True})
     else:
-        fail("usage: onenote.py list [--cached|--max-age S|--force]|section-order|reorder-pages <file|->|page <id>|changes|recording <src> <title>|update <id> <file>|create <sectionId> <file>|delete <id>|create-section <notebookId> <file>|rename-section <sectionId> <file>|delete-section <sectionId>|clear-cache", 2)
+        fail("usage: onenote.py list [--cached|--max-age S|--force]|section-order|reorder-pages <file|->|page <id>|changes|recording <src> <title>|update <id> <file>|create <sectionId> <file>|delete <id>|create-section <notebookId|groupId> <file>|create-section-group <notebookId> <file>|rename-section <sectionId> <file>|delete-section <sectionId>|rename-group <groupId> <file>|delete-group <groupId>|clear-cache", 2)
 
 
 def run(argv):

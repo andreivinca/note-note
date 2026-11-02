@@ -1,4 +1,10 @@
-"""Discover notebooks and their direct and nested section relationships.
+"""Discover notebooks, their section groups and their sections.
+
+A notebook holds sections and section groups, and a group holds sections
+and groups of its own, to any depth. Every group is kept as a record of its
+own — an empty one cannot be told from its sections — and every section and
+group says which group it sits in: the one it was listed under, which an
+expanded child listed with `$select` does not say itself.
 
 Graph's notebook relationships retain the location of shared content.
 Personal shared notebooks missing from the main list are resolved through
@@ -73,17 +79,37 @@ def graph_url(url):
     return url
 
 
-def section_record(section, notebook=None):
+def section_record(section, notebook=None, group_id=None):
+    """`notebook` and `group_id` are what the section was listed under — the
+    group "" when it sits directly in its notebook — or, left out, the
+    parents Graph's own relationships name."""
     parent = notebook or section.get("parentNotebook") or {}
+    if group_id is None:
+        group_id = (section.get("parentSectionGroup") or {}).get("id", "")
     result = {"id": section["id"], "name": section.get("displayName", ""),
               "notebook": parent.get("displayName", ""), "notebookId": parent.get("id", ""),
               "modified": section.get("lastModifiedDateTime", "")}
+    if group_id:
+        result["parentGroupId"] = group_id
     for field in ("self", "pagesUrl"):
         url = graph_url(section.get(field))
         if url:
             result[field] = url
     if "pagesUrl" not in result and "self" in result:
         result["pagesUrl"] = result["self"] + "/pages"
+    return result
+
+
+def group_record(group, notebook, group_id):
+    """A section group of `notebook`, listed under the group `group_id` ("" for
+    one directly in the notebook)."""
+    result = {"id": group["id"], "name": group.get("displayName", ""),
+              "notebook": notebook.get("displayName", ""), "notebookId": notebook.get("id", "")}
+    if group_id:
+        result["parentGroupId"] = group_id
+    url = graph_url(group.get("self"))
+    if url:
+        result["self"] = url
     return result
 
 
@@ -101,8 +127,8 @@ class Discovery:
         self.state = progress or {
             "tasks": [{"kind": "notebooks", "url": url, "label": "Notebooks", "required": True},
                       {"kind": "recent", "url": RECENT_NOTEBOOKS, "label": "Recent notebooks"}],
-            "notebooks": [], "sections": [], "warnings": [],
-            "links": [], "groups": [], "visited": [], "recentChecks": 0,
+            "notebooks": [], "sectionGroups": [], "sections": [], "warnings": [],
+            "links": [], "visited": [], "recentChecks": 0,
         }
         # Recent links are history, not evidence that a notebook still exists.
         # Verify cached notebooks by ID as well, so an unavailable history link
@@ -114,7 +140,7 @@ class Discovery:
         self.book_ids = {book["id"].casefold() for book in self.state["notebooks"]}
         self.checked_book_ids = set(self.state.get("checkedNotebooks", []))
         self.section_ids = {section["id"] for section in self.state["sections"]}
-        self.group_ids = set(self.state["groups"])
+        self.group_ids = {group["id"] for group in self.state["sectionGroups"]}
         self.links = set(self.state["links"])
         self.visited = set(self.state["visited"])
 
@@ -139,9 +165,11 @@ class Discovery:
             return [dict(task, url=endpoint)]
         return []
 
-    def relationships(self, parent, notebook):
-        return [{"kind": "relationship", "field": field, "parent": parent,
-                 "notebook": notebook, "label": notebook.get("displayName", "Notebook")}
+    def relationships(self, parent, notebook, group_id):
+        """The tasks that list what `parent` holds: the notebook itself, or
+        the group `group_id` of it."""
+        return [{"kind": "relationship", "field": field, "parent": parent, "notebook": notebook,
+                 "group": group_id, "label": notebook.get("displayName", "Notebook")}
                 for field in ("sections", "sectionGroups")]
 
     def add_notebook(self, notebook):
@@ -159,9 +187,9 @@ class Discovery:
         if endpoint:
             book["self"] = endpoint
         self.state["notebooks"].append(book)
-        return self.relationships(notebook, {"id": book["id"], "displayName": book["name"]})
+        return self.relationships(notebook, {"id": book["id"], "displayName": book["name"]}, "")
 
-    def sections(self, values, notebook):
+    def sections(self, values, task):
         for value in values:
             if value["id"] in self.section_ids:
                 continue
@@ -169,7 +197,7 @@ class Discovery:
                 self.warn("Sections", "the section listing limit was reached")
                 return
             self.section_ids.add(value["id"])
-            self.state["sections"].append(section_record(value, notebook))
+            self.state["sections"].append(section_record(value, task["notebook"], task["group"]))
 
     def groups(self, values, task):
         tasks = []
@@ -180,7 +208,8 @@ class Discovery:
                 self.warn(task["label"], "the section group listing limit was reached")
                 break
             self.group_ids.add(group["id"])
-            tasks.extend(self.relationships(group, task["notebook"]))
+            self.state["sectionGroups"].append(group_record(group, task["notebook"], task["group"]))
+            tasks.extend(self.relationships(group, task["notebook"], group["id"]))
         return tasks
 
     def relationship(self, task):
@@ -189,7 +218,7 @@ class Discovery:
         follow = []
         if isinstance(values, list):
             if field == "sections":
-                self.sections(values, task["notebook"])
+                self.sections(values, task)
             else:
                 follow = self.groups(values, task)
             url = parent.get(field + "@odata.nextLink")
@@ -199,7 +228,7 @@ class Discovery:
             endpoint = graph_url(url)
             if endpoint:
                 follow.append({"kind": field, "url": endpoint, "label": task["label"],
-                               "notebook": task["notebook"]})
+                               "notebook": task["notebook"], "group": task["group"]})
             else:
                 self.warn(task["label"], "Microsoft returned an invalid relationship link")
         self.prepend(follow)
@@ -254,7 +283,7 @@ class Discovery:
             for notebook in response.get("value", []):
                 follow.extend(self.add_notebook(notebook))
         elif kind == "sections":
-            self.sections(response.get("value", []), task["notebook"])
+            self.sections(response.get("value", []), task)
         elif kind == "sectionGroups":
             follow = self.groups(response.get("value", []), task)
         elif kind == "recent":
@@ -323,16 +352,18 @@ class Discovery:
             self.response(task, response)
 
     def progress(self):
-        self.state.update(links=sorted(self.links), groups=sorted(self.group_ids), visited=sorted(self.visited),
+        self.state.update(links=sorted(self.links), visited=sorted(self.visited),
                           checkedNotebooks=sorted(self.checked_book_ids))
         return self.state
 
 
 def discover(graph, limit, max_bytes, progress=None, checkpoint=None, cached_notebooks=()):
-    """List notebooks and walk their direct and nested section relationships."""
+    """List notebooks and walk their section groups and sections, at any
+    depth: (notebooks, groups, sections, warnings)."""
     discovery = Discovery(limit, progress, cached_notebooks)
     while discovery.state["tasks"]:
         if checkpoint and "url" in discovery.state["tasks"][0]:
             checkpoint(discovery.progress())
         discovery.step(graph, max_bytes)
-    return discovery.state["notebooks"], discovery.state["sections"], discovery.state["warnings"]
+    state = discovery.state
+    return state["notebooks"], state["sectionGroups"], state["sections"], state["warnings"]

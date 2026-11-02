@@ -372,10 +372,10 @@ class CommandTests(unittest.TestCase):
                 stack.enter_context(patch.object(web, "write_granted", return_value=True))
                 stack.enter_context(contextlib.redirect_stdout(output))
                 if allowed:
-                    onenote.require_revision_access("s", "not writable", "not granted")
+                    onenote.require_revision_access("sections", "s", "not writable", "not granted")
                 else:
                     with self.assertRaises(SystemExit):
-                        onenote.require_revision_access("s", "not writable", "not granted")
+                        onenote.require_revision_access("sections", "s", "not writable", "not granted")
             self.assertEqual(output.getvalue() == "", allowed)
 
     def test_revisions_require_the_write_grant(self):
@@ -387,7 +387,7 @@ class CommandTests(unittest.TestCase):
             stack.enter_context(patch.object(web, "write_granted", return_value=False))
             stack.enter_context(contextlib.redirect_stdout(output))
             with self.assertRaises(SystemExit):
-                onenote.require_revision_access("s", "not writable", "not granted")
+                onenote.require_revision_access("sections", "s", "not writable", "not granted")
         self.assertEqual(json.loads(output.getvalue())["error"], "not granted")
 
     def test_a_created_page_is_recorded_as_a_top_level_page(self):

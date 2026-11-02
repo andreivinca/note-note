@@ -10,9 +10,14 @@ This path is read-only. Replace it when a supported ordering API is available.
 See docs/onenote-section-order.md for assumptions, evidence and limitations.
 
 For verified personal notebooks, IDs identify OneDrive package items. Groups are
-folders within that package, each with its own TOC. The UI is flat, so walk
-groups in their remote position and keep their sections together. No manual
-positions, note contents, signed URLs or raw TOC files are stored locally.
+folders within that package, each with its own TOC. The walk goes into each
+group in its remote position and returns one sequence of section IDs: the
+sections' relative order is all the listing takes from it, which keeps each
+group's sections in their TOC order among themselves. The groups themselves
+are listed A–Z after their holder's sections (Provider.qml): a folder's
+position is not joined to Graph's group, a mapping no live check has
+verified, and this workaround is not broadened to it. No manual positions,
+note contents, signed URLs or raw TOC files are stored locally.
 
 A folder may hold more than one TOC: an old desktop client leaves a localized
 "Open Notebook.onetoc2" beside the ".onetoc2" current clients write, and only

@@ -6,9 +6,10 @@ import "../../services/notes/ordering.js" as Ordering
 import "../../design"
 import "../../design/controls"
 
-// OneNote: notebooks → sections → pages. A binder tab per notebook by
-// default, or one tab holding the whole tree when notebookTabs is false.
-// Pages are fetched on demand as
+// OneNote: notebooks → sections → pages, with section groups holding
+// sections and groups of their own, to any depth. A binder tab per
+// notebook by default, or one tab holding the whole tree when notebookTabs
+// is false. Pages are fetched on demand as
 // Markdown (onenote.py + onenote_md.py) and written back as OneNote HTML.
 LaneProvider {
   id: root
@@ -70,8 +71,11 @@ LaneProvider {
   signal noteDeletionFinished(string path, var result)
   signal searchChanged()
 
-  property var onSections: []    // [{ id, name, notebook, notebookId }]
+  property var onSections: []    // [{ id, name, notebook, notebookId, parentGroupId? }]
   property var onNotebooks: []
+  // The section groups: [{ id, name, notebook, notebookId, parentGroupId? }].
+  // A section or group without parentGroupId sits directly in its notebook.
+  property var onGroups: []
   // Canonical page order includes pending deletions; visible rows hide them
   // until the remote result settles, so rollback retains their positions.
   property var pages: []         // [{ id, sectionId, title, modified }]
@@ -85,7 +89,9 @@ LaneProvider {
   property var pageAliases: ({})   // draft id -> Graph id, for callbacks captured before creation
   property var pendingDeletes: ({}) // page id -> hidden row and its original order
   property var creatingSections: ({}) // stand-in id -> section listed before OneNote has made it
+  property var creatingGroups: ({})   // stand-in id -> section group listed before OneNote has made it
   property var deletingSections: ({}) // section id -> true while its delete runs, the section hidden
+  property var deletingGroups: ({})   // section group id -> true while its delete runs, the group hidden with everything in it
   property var pageOrderWrites: ({}) // section id -> the newest order asked for it, until its write answers
   property var heldPageOrders: ({})  // section id -> an order waiting for its pages being made or deleted
   property int nextDraft: 0
@@ -148,9 +154,67 @@ LaneProvider {
     }
     return listed
   }
+  function listedGroups(groups) {
+    var listed = groups.slice()
+    for (var id in root.creatingGroups) {
+      listed.push(root.creatingGroups[id])
+    }
+    return listed
+  }
+  function groupAt(id) {
+    for (var i = 0; i < root.onGroups.length; i++) {
+      if (root.onGroups[i].id === id) {
+        return root.onGroups[i]
+      }
+    }
+    return null
+  }
+  // The group a section or group sits in, "" for one directly in its
+  // notebook. One whose group is not listed sits there too: a listing cut
+  // short keeps what it had read, and nothing it keeps goes unlisted.
+  function parentOf(record) {
+    var id = record.parentGroupId || ""
+    return root.groupAt(id) ? id : ""
+  }
+  // The groups a section or group sits in, outermost first.
+  function groupsAbove(record) {
+    var groups = []
+    var group = root.groupAt(root.parentOf(record))
+    while (group) {
+      groups.unshift(group)
+      group = root.groupAt(root.parentOf(group))
+    }
+    return groups
+  }
+  // The groups in the group, at any depth.
+  function groupsWithin(groupId) {
+    return root.onGroups.filter(function(group) {
+      return root.groupsAbove(group).some(function(above) {
+        return above.id === groupId
+      })
+    })
+  }
+  // The tree ids from a section's notebook down to the section itself:
+  // what is opened to put its pages on screen.
+  function treePathOf(sec) {
+    return [sec.notebookId].concat(root.groupsAbove(sec).map(function(group) {
+      return group.id
+    }), [sec.id])
+  }
   function sectionName(id) {
     var s = sectionAt(id)
-    return s ? "OneNote › " + (s.notebook ? s.notebook + " › " : "") + s.name : "OneNote"
+    if (!s) {
+      return "OneNote"
+    }
+    var names = ["OneNote"]
+    if (s.notebook) {
+      names.push(s.notebook)
+    }
+    root.groupsAbove(s).forEach(function(group) {
+      names.push(group.name)
+    })
+    names.push(s.name)
+    return names.join(" › ")
   }
 
   // The account rows every shape starts from: null when the tree can show,
@@ -233,6 +297,33 @@ LaneProvider {
       return section && section.notebookId === bookId
     })
   }
+  // The pages of every section in the group, at any depth.
+  function groupPages(groupId, pages) {
+    return pages.filter(function(page) {
+      var section = root.sectionAt(page.sectionId)
+      return !!section && root.groupsAbove(section).some(function(group) {
+        return group.id === groupId
+      })
+    })
+  }
+  // Whether a section is off the list while it, or a group it sits in, is
+  // being deleted.
+  function sectionHidden(sectionId) {
+    if (root.deletingSections[sectionId]) {
+      return true
+    }
+    var section = root.sectionAt(sectionId)
+    return !!section && root.groupsAbove(section).some(function(group) {
+      return !!root.deletingGroups[group.id]
+    })
+  }
+  // The pages the rows show and count: not one being deleted, alone, with
+  // its section or with a group above it.
+  function visiblePages() {
+    return root.pages.filter(function(page) {
+      return !root.pendingDeletes[page.id] && !root.sectionHidden(page.sectionId)
+    })
+  }
 
   // A section is a .one file in its owner's OneDrive, which its page order,
   // rename and delete write: a personal notebook this account owns, or one
@@ -268,14 +359,17 @@ LaneProvider {
   // be written: the app's own delete.
   readonly property var noteMenu: [{ id: "delete", title: "Delete", icon: "󰆴", command: "deleteNote" }]
 
-  // One notebook's sections with their pages and New Note rows when open,
-  // starting at `level`: 0 when the notebook is a tab
-  // of its own, 1 when it sits under its own tree row.
-  function bookRows(bookId, level) {
+  // One notebook's sections and groups in `groupId` — "" for the ones
+  // directly in the notebook — with the open sections' pages and New Note
+  // rows and the open groups' contents, starting at `level`: 0 when the
+  // notebook is a tab of its own, 1 when it sits under its own tree row.
+  // The sections first, in the order the section-order pass left; then
+  // the groups, A–Z, after their holder's sections as OneNote lists them.
+  function bookRows(bookId, groupId, level) {
     var rows = []
     for (var k = 0; k < root.onSections.length; k++) {
       var sec = root.onSections[k]
-      if (sec.notebookId !== bookId || root.deletingSections[sec.id]) {
+      if (sec.notebookId !== bookId || root.parentOf(sec) !== groupId || root.deletingSections[sec.id]) {
         continue
       }
       var secOpen = root.expanded.indexOf(sec.id) >= 0
@@ -304,30 +398,64 @@ LaneProvider {
         rows.push({ kind: "new", path: "section:" + sec.id, level: level + 1 })
       }
     }
+    var groups = root.onGroups.filter(function(group) {
+      return group.notebookId === bookId && root.parentOf(group) === groupId && !root.deletingGroups[group.id]
+    })
+    groups.sort(function(a, b) { return a.name.localeCompare(b.name) })
+    for (var g = 0; g < groups.length; g++) {
+      var group = groups[g]
+      var groupOpen = root.expanded.indexOf(group.id) >= 0
+      rows.push({ kind: "tree", path: group.id, title: group.name, icon: "󰉓", level: level, expanded: groupOpen,
+                  count: root.groupPages(group.id, root.visiblePages()).length, menu: root.groupMenu(group) })
+      if (groupOpen) {
+        rows = rows.concat(root.bookRows(bookId, group.id, level + 1))
+      }
+    }
     return rows
   }
   function noteList(pgs) { return pgs.map(function(p) { return { path: pathOf(p.id), title: p.title, preview: "", modified: p.modified || "" } }) }
-  // A notebook's tab has its New section button; the one tab holding every
-  // notebook has New section on each notebook row's menu instead.
+  // A notebook's tab has its New section and New section group buttons;
+  // the one tab holding every notebook has both on each notebook row's
+  // menu instead (notebookMenu). A group's row has New section in either
+  // shape (groupMenu).
   function accountActions(bookId) {
     var actions = []
     if (bookId && root.bookWritable(bookId)) {
-      actions.push({ path: "newSection", title: "New section", icon: "󰉗", prompt: "Section name" })
+      actions.push({ path: "newSection", title: "New section", icon: "󰉗", prompt: "Section name" },
+                   { path: "newSectionGroup", title: "New section group", icon: "󱥐", prompt: "Section group name" })
     }
     actions.push({ path: "logout", title: "Sign out" + (ms.account ? " (" + ms.account + ")" : ""), icon: "󰍃" })
     return actions
   }
 
-  readonly property var notebookMenu: [{ id: "newSection", title: "New section", icon: "󰉗", prompt: "Section name" }]
+  // The menu of a notebook's row, in the one tab holding every notebook:
+  // what its tab's buttons offer otherwise.
+  readonly property var notebookMenu: [
+    { id: "newSection", title: "New section", icon: "󰉗", prompt: "Section name" },
+    { id: "newSectionGroup", title: "New section group", icon: "󱥐", prompt: "Section group name" }]
+  // A group's row makes sections in the group once OneNote has made it,
+  // and renames or deletes the group where its folder can be written
+  // (sectionFileWritable), as a section's row does its file. The app makes
+  // groups one level down only, so none is made in a group.
+  function groupMenu(group) {
+    if (root.creatingGroups[group.id] || !root.bookWritable(group.notebookId)) {
+      return []
+    }
+    var menu = [{ id: "newSection", title: "New section", icon: "󰉗", prompt: "Section name" }]
+    if (root.sectionFileWritable(group.notebookId)) {
+      menu.push({ id: "rename", title: "Rename", icon: "󰑕", rename: true },
+                { id: "delete", title: "Delete", icon: "󰆴",
+                  confirm: "Delete the section group “" + group.name + "” and everything in it? It goes to your OneDrive recycle bin." })
+    }
+    return menu
+  }
 
   // `notes` on a section is its searchable whole, fold state ignored: rows
   // only carry the pages of expanded sections, and a search (and the hit
   // count on the tab) must see the closed ones too.
   function rebuild() {
     var account = accountRows(), books = account ? [] : bookList()
-    var visiblePages = root.pages.filter(function(page) {
-      return !root.pendingDeletes[page.id] && !root.deletingSections[page.sectionId]
-    })
+    var visiblePages = root.visiblePages()
     if (root.notebookTabs && books.length > 0) {
       // A tab per notebook. No colour: each takes a pastel from its own
       // name, which is what tells Work from Personal apart (the logo keeps
@@ -336,7 +464,7 @@ LaneProvider {
       root.sections = books.map(function(b) {
         var pgs = root.bookPages(b.id, visiblePages)
         return { key: b.id, name: b.name, count: pgs.length, notes: noteList(pgs),
-                 rows: bookRows(b.id, 0), footerActions: accountActions(b.id) }
+                 rows: bookRows(b.id, "", 0), footerActions: accountActions(b.id) }
       })
       root.updated()
       return
@@ -354,7 +482,7 @@ LaneProvider {
                     expanded: open, count: root.bookPages(books[b].id, visiblePages).length,
                     menu: root.bookWritable(books[b].id) ? root.notebookMenu : [] })
         if (open) {
-          rows = rows.concat(bookRows(books[b].id, 1))
+          rows = rows.concat(bookRows(books[b].id, "", 1))
         }
       }
       if (books.length === 0) {
@@ -439,7 +567,8 @@ LaneProvider {
       next.push(id)
     }
     root.expanded = next
-    // A section still being created has no pages to fetch yet.
+    // Only a section has pages to fetch — a group holds sections — and
+    // one still being created has none yet.
     if (i < 0 && root.sectionAt(id) && !root.creatingSections[id]) {
       pageInventory.request(id, true, false)
     }
@@ -447,21 +576,28 @@ LaneProvider {
     root.persistRequested()
   }
 
-  // A page in a folded section has no row. Revealing one opens its section
-  // and its notebook, so the row exists when the host scrolls to it — asked
-  // for when a search ends on a page the tree was hiding.
+  // The expanded ids with `ids` among them.
+  function expandedWith(ids) {
+    var next = root.expanded.slice()
+    ids.forEach(function(id) {
+      if (next.indexOf(id) < 0) {
+        next.push(id)
+      }
+    })
+    return next
+  }
+
+  // A page in a folded section has no row. Revealing one opens its
+  // section, every group above it and its notebook, so the row exists when
+  // the host scrolls to it — asked for when a search ends on a page the
+  // tree was hiding.
   function revealPath(path) {
     var pg = pageAt(path)
     if (!pg) {
       return
     }
-    var sec = sectionAt(pg.sectionId), next = root.expanded.slice()
-    if (sec && next.indexOf(sec.notebookId) < 0) {
-      next.push(sec.notebookId)
-    }
-    if (next.indexOf(pg.sectionId) < 0) {
-      next.push(pg.sectionId)
-    }
+    var sec = sectionAt(pg.sectionId)
+    var next = root.expandedWith(sec ? root.treePathOf(sec) : [pg.sectionId])
     if (next.length === root.expanded.length) {
       return
     }
@@ -507,6 +643,12 @@ LaneProvider {
           root.statusRequested("OneNote: " + result.error)
         }
       })
+    } else if (id === "newSectionGroup") {
+      root.createSectionGroup(sectionKey, value, function(result) {
+        if (result.error) {
+          root.statusRequested("OneNote: " + result.error)
+        }
+      })
     } else if (id === "unavailable") {
       root.noticeRequested("Microsoft sign-in is not configured in this build",
         "This copy of Note Note has no app registration for OneNote built in (microsoftClientId in plugins/org.note-note.onenote/Provider.qml), so nobody can sign in yet.", "", [])
@@ -514,6 +656,11 @@ LaneProvider {
   }
 
   function notebookName(id) {
+    for (var b = 0; b < root.onNotebooks.length; b++) {
+      if (root.onNotebooks[b].id === id) {
+        return root.onNotebooks[b].name
+      }
+    }
     for (var i = 0; i < root.onSections.length; i++) {
       if (root.onSections[i].notebookId === id) {
         return root.onSections[i].notebook || "OneNote"
@@ -523,13 +670,14 @@ LaneProvider {
   }
 
   // ── new section ─────────────────────────────────────────────────────
-  // From a notebook tab's footer button or a notebook row's menu, both
-  // after the host asked for the name (`prompt`). Listed at once under a
-  // stand-in id while OneNote makes it, it takes no page, rename or delete
-  // until then (create, sectionMenu). `done` hears { error } for a section
-  // that cannot be asked for, or {} once it is listed; OneNote refusing it
-  // takes it off the list and says why.
-  function createSection(notebook, name, done) {
+  // From a notebook tab's footer button, or from the menu of a row
+  // sections are made in — a notebook's or a group's, `holder` its id —
+  // both after the host asked for the name (`prompt`). Listed at once in
+  // its holder under a stand-in id while OneNote makes it, it takes no
+  // page, rename or delete until then (create, sectionMenu). `done` hears
+  // { error } for a section that cannot be asked for, or {} once it is
+  // listed; OneNote refusing it takes it off the list and says why.
+  function createSection(holder, name, done) {
     var n = name.trim()
     if (!n) {
       done({ error: "a section needs a name" })
@@ -539,21 +687,25 @@ LaneProvider {
       done({ error: "OneNote is not signed in" })
       return
     }
+    var group = root.groupAt(holder)
+    if (group && root.creatingGroups[group.id]) {
+      done({ error: "This section group is still being created — try again in a moment." })
+      return
+    }
+    var notebook = group ? group.notebookId : holder
     var draft = { id: "draft-section-" + Date.now() + "-" + (++root.nextDraft), notebookId: notebook,
                   name: n, notebook: root.notebookName(notebook) }
+    if (group) {
+      draft.parentGroupId = group.id
+    }
     root.creatingSections = root.withEntry(root.creatingSections, draft.id, draft)
     root.onSections = root.onSections.concat([draft])
-    var exp = root.expanded.slice()
-    if (exp.indexOf(notebook) < 0) {
-      exp.push(notebook)
-    }
-    exp.push(draft.id)
-    root.expanded = exp
+    root.expanded = root.expandedWith(root.treePathOf(draft))
     root.rebuild()
     done({})
-    root.rq.enqueue({ key: "section:" + notebook, mode: "append", priority: 0, owner: root,
+    root.rq.enqueue({ key: "section:" + holder, mode: "append", priority: 0, owner: root,
                       flush: true, label: "new section" },
-      function(ctx) { root.runScript(["create-section", notebook, "-"], JSON.stringify({ name: n }), ctx) },
+      function(ctx) { root.runScript(["create-section", holder, "-"], JSON.stringify({ name: n }), ctx) },
       function(r, info) {
         root.creatingSections = root.withoutEntry(root.creatingSections, draft.id)
         if (!r || r.error) {
@@ -585,6 +737,59 @@ LaneProvider {
       })
   }
 
+  // ── new section group ───────────────────────────────────────────────
+  // From a notebook tab's footer button or a notebook row's menu, after
+  // the host asked for the name: a group directly in the notebook, the one
+  // level of groups the app makes. Listed at once under a stand-in id, and
+  // open, while OneNote makes it, it takes no section until then
+  // (groupMenu, createSection). `done` hears what createSection's does.
+  function createSectionGroup(notebook, name, done) {
+    var n = name.trim()
+    if (!n) {
+      done({ error: "a section group needs a name" })
+      return
+    }
+    if (!root.rq) {
+      done({ error: "OneNote is not signed in" })
+      return
+    }
+    var draft = { id: "draft-group-" + Date.now() + "-" + (++root.nextDraft), notebookId: notebook,
+                  name: n, notebook: root.notebookName(notebook) }
+    root.creatingGroups = root.withEntry(root.creatingGroups, draft.id, draft)
+    root.onGroups = root.onGroups.concat([draft])
+    root.expanded = root.expandedWith([notebook, draft.id])
+    root.rebuild()
+    done({})
+    root.rq.enqueue({ key: "section-group:" + notebook, mode: "append", priority: 0, owner: root,
+                      flush: true, label: "new section group" },
+      function(ctx) { root.runScript(["create-section-group", notebook, "-"], JSON.stringify({ name: n }), ctx) },
+      function(r, info) {
+        root.creatingGroups = root.withoutEntry(root.creatingGroups, draft.id)
+        if (!r || r.error) {
+          root.onGroups = root.onGroups.filter(function(other) { return other.id !== draft.id })
+          root.expanded = root.expanded.filter(function(id) { return id !== draft.id })
+          root.rebuild()
+          root.statusRequested(root.name + ": " + root.sectionFailure(r, info, "section group creation"))
+          return
+        }
+        var made = r.group
+        pageInventory.serial = Math.max(pageInventory.serial, r.pageListSerial || 0)
+        // A listing may have brought the group already: that row goes, and
+        // the group takes the stand-in's place.
+        root.onGroups = root.onGroups.filter(function(other) {
+          return other.id !== made.id
+        }).map(function(other) {
+          return other.id === draft.id ? made : other
+        })
+        root.expanded = root.expanded.map(function(id) {
+          return id === draft.id ? made.id : id
+        })
+        root.rebuild()
+        root.persistRequested()
+        root.statusRequested("Section group created")
+      })
+  }
+
   // ── section refresh, rename and delete ──────────────────────────────
   // Refresh lists a section's pages again at once, whatever its timestamp
   // says: besides the open page's, a section is listed again only when the
@@ -598,6 +803,11 @@ LaneProvider {
   // rename-section and delete-section). Those two are offered where that
   // file can be written (sectionFileWritable); the rows that carry this
   // menu are listed only for an account that may write files (accountRows).
+  // A section group is the folder holding its sections' files and its
+  // groups' folders, named after the group likewise: renaming or deleting
+  // the folder renames the group, or sends it with everything in it to the
+  // recycle bin (rename-group and delete-group), on the same terms
+  // (groupMenu).
   function sectionMenu(sec) {
     if (root.creatingSections[sec.id]) {
       return []
@@ -625,11 +835,17 @@ LaneProvider {
   }
 
   function rowAction(path, id, value, cb) {
+    // On a notebook's row or a group's: the section goes in it.
     if (id === "newSection") {
       root.createSection(path, value, cb)
       return
     }
-    var sec = root.sectionAt(path)
+    // On a notebook's row alone (notebookMenu): the group goes in it.
+    if (id === "newSectionGroup") {
+      root.createSectionGroup(path, value, cb)
+      return
+    }
+    var sec = root.sectionAt(path), group = root.groupAt(path)
     if (sec && id === "refresh") {
       // Nothing the user wrote moves or goes with a listing, so the open
       // note need not wait for it: the pages show as they arrive.
@@ -655,9 +871,23 @@ LaneProvider {
       root.rebuild()
       cb({ pending: true, removed: paths })
       run = function() { root.deleteSection(sec, paths) }
+    } else if (group && id === "rename") {
+      root.setGroupName(group.id, value.trim())
+      run = function() { root.renameGroup(group, value, cb) }
+    } else if (group && id === "delete") {
+      // Off the list at once with everything in it, the host told which
+      // notes went; the request follows (deleteGroup), and a group OneNote
+      // keeps comes back.
+      var groupPaths = root.groupPages(group.id, root.pages).map(function(page) {
+        return root.pathOf(page.id)
+      })
+      root.deletingGroups = root.withEntry(root.deletingGroups, group.id, true)
+      root.rebuild()
+      cb({ pending: true, removed: groupPaths })
+      run = function() { root.deleteGroup(group, groupPaths) }
     }
     if (!run) {
-      cb({ error: "unknown section action" })
+      cb({ error: "unknown row action" })
     } else if (root.writeBusy) {
       root.afterWrites = root.afterWrites.concat([run])
     } else {
@@ -692,7 +922,7 @@ LaneProvider {
       function(ctx) { root.runScript(["rename-section", sec.id, "-"], JSON.stringify({ name: name }), ctx) },
       function(r, info) {
         if (r && r.gone) {
-          cb({ error: r.error, removed: root.dropSection(sec, r) })
+          cb({ error: r.error, removed: root.dropSections([sec.id], r) })
           return
         }
         if (!r || r.error) {
@@ -726,10 +956,76 @@ LaneProvider {
           root.finishSectionDeletion(sec, paths, { error: root.sectionFailure(r, info, "delete") })
           return
         }
-        root.dropSection(sec, r)
+        root.dropSections([sec.id], r)
         root.statusRequested("Section deleted")
         root.finishSectionDeletion(sec, paths, {})
       })
+  }
+
+  function setGroupName(id, name) {
+    root.onGroups = root.onGroups.map(function(other) {
+      return other.id === id ? Object.assign({}, other, { name: name }) : other
+    })
+    root.rebuild()
+  }
+
+  // `group` is the group as it was before rowAction showed the new name.
+  function renameGroup(group, name, cb) {
+    if (!root.rq) {
+      root.setGroupName(group.id, group.name)
+      cb({ error: "OneNote is not signed in" })
+      return
+    }
+    root.rq.enqueue({ key: "section-group:" + group.id, mode: "append", priority: 0, owner: root,
+                      flush: true, label: "rename section group" },
+      function(ctx) { root.runScript(["rename-group", group.id, "-"], JSON.stringify({ name: name }), ctx) },
+      function(r, info) {
+        if (r && r.gone) {
+          cb({ error: r.error, removed: root.dropGroup(group, r) })
+          return
+        }
+        if (!r || r.error) {
+          root.setGroupName(group.id, group.name)
+          cb({ error: root.sectionFailure(r, info, "rename") })
+          return
+        }
+        pageInventory.serial = Math.max(pageInventory.serial, r.pageListSerial || 0)
+        root.setGroupName(group.id, r.name)
+        root.statusRequested("Section group renamed")
+        cb({})
+      })
+  }
+
+  // As deleteSection, for a group and everything in it.
+  function deleteGroup(group, paths) {
+    if (!root.rq) {
+      root.finishGroupDeletion(group, paths, { error: "OneNote is not signed in" })
+      return
+    }
+    root.rq.enqueue({ key: "section-group:" + group.id, mode: "append", priority: 0, owner: root,
+                      flush: true, label: "delete section group" },
+      function(ctx) { root.runScript(["delete-group", group.id], "", ctx) },
+      function(r, info) {
+        if (!r || r.error) {
+          root.finishGroupDeletion(group, paths, { error: root.sectionFailure(r, info, "delete") })
+          return
+        }
+        root.dropGroup(group, r)
+        root.statusRequested("Section group deleted")
+        root.finishGroupDeletion(group, paths, {})
+      })
+  }
+
+  function finishGroupDeletion(group, paths, result) {
+    root.deletingGroups = root.withoutEntry(root.deletingGroups, group.id)
+    root.rebuild()
+    // With no pages, no page's outcome says it failed.
+    if (result.error && paths.length === 0) {
+      root.statusRequested(root.name + ": " + result.error)
+    }
+    paths.forEach(function(path) {
+      root.noteDeletionFinished(path, result)
+    })
   }
 
   function finishSectionDeletion(sec, paths, result) {
@@ -744,14 +1040,32 @@ LaneProvider {
     })
   }
 
-  // Takes a section that is gone off the model, as onenote.py's answer
-  // (forget_section) took it off the cache. Returns its pages' paths: the
-  // listed ones, and any the cache knew that were not listed yet.
-  function dropSection(sec, r) {
+  // Takes a group that is gone off the model with the groups and sections
+  // in it, as onenote.py's answer (forget_group) took them off the cache.
+  // Returns the paths of the pages that went, as dropSections does.
+  function dropGroup(group, r) {
+    var within = [group.id].concat(root.groupsWithin(group.id).map(function(member) {
+      return member.id
+    }))
+    var sections = root.onSections.filter(function(sec) {
+      return within.indexOf(root.parentOf(sec)) >= 0
+    }).map(function(sec) {
+      return sec.id
+    })
+    root.onGroups = root.onGroups.filter(function(other) { return within.indexOf(other.id) < 0 })
+    root.expanded = root.expanded.filter(function(id) { return within.indexOf(id) < 0 })
+    return root.dropSections(sections, r)
+  }
+
+  // Takes sections that are gone off the model, as onenote.py's answer
+  // (forget_section, forget_group) took them off the cache. Returns their
+  // pages' paths: the listed ones, and any the cache knew that were not
+  // listed yet.
+  function dropSections(sectionIds, r) {
     root.supersedeOrderPass()
     pageInventory.serial = Math.max(pageInventory.serial, r.pageListSerial || 0)
     var gone = root.pages.filter(function(page) {
-      return page.sectionId === sec.id
+      return sectionIds.indexOf(page.sectionId) >= 0
     }).map(function(page) {
       return page.id
     })
@@ -764,18 +1078,18 @@ LaneProvider {
     gone.forEach(function(id) {
       delete root.bodies[id]
     })
-    // Its drafts OneNote could not make go with it: the host was told they
-    // went, and no listing would show their section again.
+    // Their drafts OneNote could not make go with them: the host was told
+    // they went, and no listing would show their section again.
     var drafts = {}
     for (var draftId in root.pendingPages) {
-      if (root.pendingPages[draftId].page.sectionId !== sec.id) {
+      if (sectionIds.indexOf(root.pendingPages[draftId].page.sectionId) < 0) {
         drafts[draftId] = root.pendingPages[draftId]
       }
     }
     root.pendingPages = drafts
-    root.pages = root.pages.filter(function(page) { return page.sectionId !== sec.id })
-    root.onSections = root.onSections.filter(function(other) { return other.id !== sec.id })
-    root.expanded = root.expanded.filter(function(id) { return id !== sec.id })
+    root.pages = root.pages.filter(function(page) { return sectionIds.indexOf(page.sectionId) < 0 })
+    root.onSections = root.onSections.filter(function(other) { return sectionIds.indexOf(other.id) < 0 })
+    root.expanded = root.expanded.filter(function(id) { return sectionIds.indexOf(id) < 0 })
     root.inventoryRevision++
     root.rebuild()
     root.persistRequested()
@@ -885,6 +1199,7 @@ LaneProvider {
   function refresh() {
     if (!root.ready) {
       root.onNotebooks = []
+      root.onGroups = []
       root.onSections = []
       root.pages = []
       rebuild()
@@ -949,6 +1264,9 @@ LaneProvider {
     root.inventoryRevision++
     if (result.notebooks instanceof Array) {
       root.onNotebooks = result.notebooks
+    }
+    if (result.sectionGroups instanceof Array) {
+      root.onGroups = root.listedGroups(result.sectionGroups)
     }
     if (result.sections instanceof Array) {
       root.onSections = root.listedSections(result.sections)
@@ -1052,7 +1370,7 @@ LaneProvider {
     inventoryComplete: root.searchInventoryComplete
     session: root.ms ? root.ms.cacheSession : ""
     pages: root.pages.filter(function(page) {
-      return !root.pendingPages[page.id] && !root.pendingDeletes[page.id] && !root.deletingSections[page.sectionId]
+      return !root.pendingPages[page.id] && !root.pendingDeletes[page.id] && !root.sectionHidden(page.sectionId)
     })
     queue: root.rq
     run: root.runLocal
@@ -1098,6 +1416,7 @@ LaneProvider {
       root.trackedSections = ({})
       root.changedSections = ({})
       root.onSections = []
+      root.onGroups = []
       root.onNotebooks = []
       root.clearListedPages()
       root.loadVersions = ({})
@@ -1106,6 +1425,7 @@ LaneProvider {
     function onSignedOut() {
       root.supersedeOrderPass()
       root.onSections = []
+      root.onGroups = []
       root.onNotebooks = []
       root.clearListedPages()
       root.loadVersions = ({})

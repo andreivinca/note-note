@@ -1690,16 +1690,16 @@ ShellRoot {
           orderingSource.microsoftScopes.indexOf("Files.ReadWrite") >= 0
           && orderingSource.accountActions(orderingBook).map(function(action) {
             return action.path
-          }).join(",") === "newSection,logout")
+          }).join(",") === "newSection,newSectionGroup,logout")
     oneNoteAccount.filesWrite = false
     check("a sign-in without OneDrive write access asks to sign in again",
           orderingSource.accountRows().length === 1 && orderingSource.accountRows()[0].path === "login")
-    check("OneNote page drags require OneDrive write access", !orderingSource.bookRows(orderingBook, 0)[1].reorder)
+    check("OneNote page drags require OneDrive write access", !orderingSource.bookRows(orderingBook, "", 0)[1].reorder)
     orderingSource.action("login")
     check("signing in again keeps the account instead of signing out first",
           oneNoteAccount.logins === 1 && oneNoteAccount.destructiveLogins === 0)
     oneNoteAccount.filesWrite = true
-    var orderingRows = orderingSource.bookRows(orderingBook, 0)
+    var orderingRows = orderingSource.bookRows(orderingBook, "", 0)
     check("OneNote declares section page groups and keeps subpage hierarchy",
           orderingRows[0].reorder === undefined && orderingRows[1].reorder.scope === "pages:" + orderingSection
           && orderingRows[1].reorder.descendants && !orderingRows[2].reorder && orderingRows[2].level === 2
@@ -1711,7 +1711,7 @@ ShellRoot {
     // stamp moved, so its pages are listed again.
     orderingSource.applyInventory({ sections: orderingSource.onSections, notebooks: orderingSource.onNotebooks,
                                     pages: orderingSource.pages, pendingSections: [orderingSection], pageListSerial: 1 })
-    var relisted = orderingSource.bookRows(orderingBook, 0)[1].reorder
+    var relisted = orderingSource.bookRows(orderingBook, "", 0)[1].reorder
     check("a section whose pages are being listed again keeps its page drags",
           !!relisted && relisted.scope === "pages:" + orderingSection)
     // A first listing publishes its pages as they come: until it is done,
@@ -1719,7 +1719,7 @@ ShellRoot {
     orderingSource.applyInventory({ sections: orderingSource.onSections, notebooks: orderingSource.onNotebooks,
                                     pages: orderingSource.pages, pendingSections: [orderingSection],
                                     partialSections: [orderingSection], pageListSerial: 2 })
-    check("a section listed only in part offers no page drags", !orderingSource.bookRows(orderingBook, 0)[1].reorder)
+    check("a section listed only in part offers no page drags", !orderingSource.bookRows(orderingBook, "", 0)[1].reorder)
     orderingSource.applyInventory({ sections: orderingSource.onSections, notebooks: orderingSource.onNotebooks,
                                     pages: orderingSource.pages, pendingSections: [], pageListSerial: 3 })
     // A page order just written may not reach Graph for a few seconds, and
@@ -1729,20 +1729,20 @@ ShellRoot {
     orderingSource.applyInventory({ sections: orderingSource.onSections, notebooks: orderingSource.onNotebooks,
                                     pages: orderingSource.pages, pendingSections: [],
                                     sectionOrderSettlesAt: settlesAt, pageListSerial: 4 })
-    var settlingRefresh = orderingSource.bookRows(orderingBook, 0)[0].menu[0]
+    var settlingRefresh = orderingSource.bookRows(orderingBook, "", 0)[0].menu[0]
     check("a section whose page order was just written offers Refresh disabled",
           settlingRefresh.id === "refresh" && settlingRefresh.enabled === false, JSON.stringify(settlingRefresh))
     orderingSource.applyInventory({ sections: orderingSource.onSections, notebooks: orderingSource.onNotebooks,
                                     pages: orderingSource.pages, pendingSections: [], pageListSerial: 5 })
     check("its Refresh comes back once the order has settled",
-          orderingSource.bookRows(orderingBook, 0)[0].menu[0].enabled === true)
+          orderingSource.bookRows(orderingBook, "", 0)[0].menu[0].enabled === true)
     orderingSource.pages[1].level = undefined
     check("a section listed before its pages carried their level offers no ordering",
           !orderingSource.pageOrderingAvailable(orderingSource.onSections[0]))
     orderingSource.pages[1].level = 1
     orderingSource.onNotebooks = [{ id: orderingBook, name: "Book", userRole: "Reader" }]
     check("read-only OneNote notebooks cannot expose reorder capabilities", !orderingSource.pageOrderingAvailable(orderingSource.onSections[0]))
-    var readOnlyMenu = orderingSource.bookRows(orderingBook, 0)[0].menu
+    var readOnlyMenu = orderingSource.bookRows(orderingBook, "", 0)[0].menu
     check("a read-only notebook's OneNote section offers Refresh alone",
           readOnlyMenu.map(function(item) { return item.id }).join(",") === "refresh", JSON.stringify(readOnlyMenu))
     orderingSource.onNotebooks = [{ id: orderingBook, name: "Book", userRole: "Contributor" }]
@@ -1826,7 +1826,7 @@ ShellRoot {
     writer.create("section:" + orderingSection, function(result) { made = result.path })
     var creation = orderLane.jobs.shift()
     var orderIdOf = function(path) {
-      var row = writer.bookRows(orderingBook, 0).filter(function(candidate) { return candidate.path === path })[0]
+      var row = writer.bookRows(orderingBook, "", 0).filter(function(candidate) { return candidate.path === path })[0]
       return row && row.reorder ? row.reorder.id : ""
     }
     check("a page being made is in its section's order at once",
@@ -1922,6 +1922,7 @@ ShellRoot {
     // fake account below: a destroyed provider still hears signals until the
     // event loop reclaims it.
     oneNote.onSections = [{ id: "section", name: "Section", notebookId: "book", notebook: "Book" }]
+    oneNote.onGroups = [{ id: "group", name: "Group", notebookId: "book", notebook: "Book" }]
     oneNote.pages = [{ id: "page", sectionId: "section", title: "Note" }]
     var messages = []
     var relay = function(text) { messages.push(text) }
@@ -1933,7 +1934,8 @@ ShellRoot {
     oneNoteAccount.signedIn = false
     oneNoteAccount.signedOut()
     oneNoteAccount.updated()
-    check("the sign-out transition clears OneNote's pages", oneNote.pages.length === 0)
+    check("the sign-out transition clears OneNote's pages and groups",
+          oneNote.pages.length === 0 && oneNote.onGroups.length === 0)
     oneNote.statusRequested.disconnect(relay)
     oneNoteAccount.signedIn = true
     oneNote.onSections = []
@@ -1974,12 +1976,13 @@ ShellRoot {
     created.notebookTabs = false
     created.rebuild()
     var bookRows = created.sections[0].rows.filter(function(row) { return row.kind === "tree" && row.level === 0 })
-    check("the combined OneNote tab offers New section on each notebook's row, not in its footer",
+    check("the combined OneNote tab offers New section and New section group on each notebook's row, not in its footer",
           !created.sections[0].footerActions.some(function(action) { return action.path === "newSection" })
           && bookRows.map(function(row) { return row.path }).sort().join(",") === "book,other-book"
           && bookRows.every(function(row) {
-            return row.menu.some(function(item) { return item.id === "newSection" && !!item.prompt })
-          }), JSON.stringify(bookRows.map(function(row) { return row.path })))
+            return row.menu.map(function(item) { return item.id + (item.prompt ? "?" : "") }).join(",")
+              === "newSection?,newSectionGroup?"
+          }), JSON.stringify(bookRows.map(function(row) { return row.menu })))
 
     // A section shows as soon as it is asked for and leaves the list as soon
     // as it is deleted; OneNote's answer only settles what then stays.
@@ -2071,6 +2074,204 @@ ShellRoot {
           && !created.pages.some(function(page) { return page.id === "draft-page" }), JSON.stringify(created.pages))
     created.rq = lane
     created.destroy()
+
+    // Section groups: a notebook's sections, then its groups A–Z, each
+    // holding sections and groups of its own; a group counts its whole
+    // contents, and a folded one hides no page from search.
+    var grouped = oneNoteFactory.createObject(test, { ms: oneNoteAccount })
+    var groupedLane = grouped.rq
+    grouped.onNotebooks = [{ id: "gbook", name: "Grouped", userRole: "Owner" }]
+    grouped.onGroups = [{ id: "work", name: "Work", notebookId: "gbook", notebook: "Grouped" },
+                        { id: "archive", name: "Archive", notebookId: "gbook", notebook: "Grouped", parentGroupId: "work" },
+                        { id: "empty", name: "Empty", notebookId: "gbook", notebook: "Grouped" },
+                        { id: "notes-in-work", name: "Notes", notebookId: "gbook", notebook: "Grouped", parentGroupId: "work" }]
+    grouped.onSections = [{ id: "loose", name: "Loose", notebookId: "gbook", notebook: "Grouped" },
+                          { id: "tasks", name: "Tasks", notebookId: "gbook", notebook: "Grouped", parentGroupId: "work" },
+                          { id: "old", name: "Old", notebookId: "gbook", notebook: "Grouped", parentGroupId: "archive" },
+                          { id: "orphan", name: "Orphan", notebookId: "gbook", notebook: "Grouped", parentGroupId: "gone" }]
+    grouped.pages = [{ id: "l1", sectionId: "loose", title: "Loose page" },
+                     { id: "t1", sectionId: "tasks", title: "Task page" },
+                     { id: "o1", sectionId: "old", title: "Old page" },
+                     { id: "o2", sectionId: "old", title: "Older page" }]
+    grouped.expanded = []
+    grouped.notebookTabs = true
+    grouped.rebuild()
+    var groupedRows = function() {
+      return grouped.sections[0].rows.map(function(row) { return row.path + ":" + row.level }).join(",")
+    }
+    var folded = grouped.sections[0].rows
+    check("a notebook tab lists its sections, then its groups A–Z; a section whose group is not listed sits with the sections",
+          groupedRows() === "loose:0,orphan:0,empty:0,work:0", groupedRows())
+    check("a group counts the pages of every section inside it, at any depth, and an empty group none",
+          folded[3].count === 3 && folded[2].count === 0)
+    check("a folded group hides no page from the tab's count or search",
+          grouped.sections[0].count === 4 && grouped.sections[0].notes.length === 4)
+    grouped.expanded = ["work", "archive"]
+    grouped.rebuild()
+    check("an open group lists its sections, then its groups, a level deeper, to any depth",
+          groupedRows() === "loose:0,orphan:0,empty:0,work:0,tasks:1,archive:1,old:2,notes-in-work:1", groupedRows())
+    check("a group's row is marked, and makes a section in it where the notebook can be written, no group inside a group",
+          grouped.sections[0].rows[3].icon === "󰉓" && !grouped.sections[0].rows[0].icon
+          && grouped.sections[0].rows[3].menu.map(function(item) { return item.id + (item.prompt ? "?" : "") }).join(",") === "newSection?",
+          JSON.stringify(grouped.sections[0].rows[3]))
+    check("the breadcrumb names the groups down to the page",
+          grouped.crumb(grouped.pathOf("o2")) === "OneNote › Grouped › Work › Archive › Old", grouped.crumb(grouped.pathOf("o2")))
+    grouped.expanded = []
+    grouped.revealPath(grouped.pathOf("o2"))
+    check("revealing a page opens its notebook, every group above it and its section",
+          grouped.expanded.join(",") === "gbook,work,archive,old", grouped.expanded.join(","))
+    grouped.notebookTabs = false
+    grouped.expanded = ["gbook", "work"]
+    grouped.rebuild()
+    check("the one-tab shape nests a notebook's groups under its row",
+          groupedRows() === "gbook:0,loose:1,orphan:1,empty:1,work:1,tasks:2,archive:2,notes-in-work:2", groupedRows())
+    var groupJobs = []
+    grouped.rq = { depth: 0, enqueue: function(opts, start, settled) {
+      groupJobs.push({ key: opts.key, settled: settled })
+      return { cancel: function() {} }
+    }, cancelOwner: function(owner) {} }
+    grouped.expanded = []
+    var madeIn = null
+    grouped.rowAction("archive", "newSection", "Plans", function(result) { madeIn = result })
+    var groupDraft = grouped.onSections.filter(function(section) { return section.name === "Plans" })[0]
+    var groupJob = groupJobs.filter(function(job) { return job.key === "section:archive" })[0]
+    check("a section made in a group is listed in it at once, the groups above it opened, and asked of the group",
+          !!madeIn && !madeIn.error && !!groupDraft && groupDraft.parentGroupId === "archive"
+          && groupDraft.notebookId === "gbook" && groupDraft.notebook === "Grouped"
+          && grouped.expanded.join(",") === "gbook,work,archive," + groupDraft.id && !!groupJob,
+          JSON.stringify({ madeIn: madeIn, draft: groupDraft, expanded: grouped.expanded }))
+    if (groupJob) {
+      groupJob.settled({ section: { id: "plans", name: "Plans", notebookId: "gbook", notebook: "Grouped", parentGroupId: "archive" },
+                         pageListSerial: 0 }, {})
+    }
+    grouped.notebookTabs = true
+    grouped.rebuild()
+    check("OneNote's answer puts the made section in its group, in the stand-in's place",
+          groupedRows().indexOf("old:2,plans:2") >= 0 && grouped.expanded.indexOf("plans") >= 0, groupedRows())
+    grouped.applyInventory({ sectionGroups: [{ id: "work", name: "Work", notebookId: "gbook", notebook: "Grouped" }],
+                             sections: grouped.onSections, notebooks: grouped.onNotebooks, pages: grouped.pages,
+                             pageListSerial: 1 })
+    check("a listing's groups replace the ones on screen", grouped.onGroups.length === 1)
+    // A section group is made in its notebook from the tab's button or the
+    // notebook row's menu, one level down only, and shows at once.
+    var takeGroupJob = function(key) {
+      for (var i = 0; i < groupJobs.length; i++) {
+        if (groupJobs[i].key === key) {
+          return groupJobs.splice(i, 1)[0]
+        }
+      }
+      return null
+    }
+    grouped.action("newSectionGroup", "Projects", "gbook")
+    var groupStandIn = grouped.onGroups.filter(function(group) { return group.name === "Projects" })[0]
+    var makeGroup = takeGroupJob("section-group:gbook")
+    var standInRow = grouped.sections[0].rows.filter(function(row) { return !!groupStandIn && row.path === groupStandIn.id })[0]
+    check("a new section group is listed in its notebook at once, open and marked, with no menu until OneNote has made it",
+          !!groupStandIn && groupStandIn.notebookId === "gbook" && !!makeGroup && !!standInRow && standInRow.expanded
+          && standInRow.icon === "󰉓" && standInRow.menu.length === 0 && standInRow.level === 0,
+          JSON.stringify({ standIn: groupStandIn, rows: groupedRows() }))
+    var tooSoon = null
+    grouped.createSection(groupStandIn ? groupStandIn.id : "", "Too soon", function(result) { tooSoon = result })
+    check("a section group still being created takes no section",
+          !!tooSoon && String(tooSoon.error).indexOf("still being created") >= 0, JSON.stringify(tooSoon))
+    if (makeGroup) {
+      makeGroup.settled({ group: { id: "projects", name: "Projects", notebookId: "gbook", notebook: "Grouped" },
+                          pageListSerial: 0 }, {})
+    }
+    check("OneNote's answer puts the made group in the stand-in's place, open, and it offers New section alone",
+          grouped.onGroups.some(function(group) { return group.id === "projects" })
+          && !grouped.onGroups.some(function(group) { return !!groupStandIn && group.id === groupStandIn.id })
+          && grouped.expanded.indexOf("projects") >= 0 && !(groupStandIn && grouped.expanded.indexOf(groupStandIn.id) >= 0)
+          && grouped.groupMenu(grouped.groupAt("projects")).map(function(item) { return item.id }).join(",") === "newSection",
+          JSON.stringify(grouped.expanded))
+    grouped.rowAction("gbook", "newSectionGroup", "Broken", function(result) {})
+    var brokenGroup = grouped.onGroups.filter(function(group) { return group.name === "Broken" })[0]
+    grouped.applyInventory({ sectionGroups: [{ id: "projects", name: "Projects", notebookId: "gbook", notebook: "Grouped" }],
+                             sections: [], notebooks: grouped.onNotebooks, pages: [], pageListSerial: 2 })
+    check("a listing made before OneNote had a group keeps the one being made",
+          !!brokenGroup && grouped.onGroups.some(function(group) { return group.id === brokenGroup.id }))
+    var brokenJob = takeGroupJob("section-group:gbook")
+    if (brokenJob) {
+      brokenJob.settled({ error: "refused" }, {})
+    }
+    check("a section group OneNote refuses leaves the list again",
+          !!brokenJob && !grouped.onGroups.some(function(group) { return !!brokenGroup && group.id === brokenGroup.id }))
+    // A group's folder is renamed and deleted where a section's file is,
+    // the group with everything in it.
+    var personalBook = "0-0000000000000001!1"
+    grouped.onNotebooks = [{ id: personalBook, name: "Personal", userRole: "Owner" }]
+    grouped.onGroups = [{ id: "work", name: "Work", notebookId: personalBook, notebook: "Personal" },
+                        { id: "archive", name: "Archive", notebookId: personalBook, notebook: "Personal", parentGroupId: "work" },
+                        { id: "empty", name: "Empty", notebookId: personalBook, notebook: "Personal" }]
+    grouped.onSections = [{ id: "loose", name: "Loose", notebookId: personalBook, notebook: "Personal" },
+                          { id: "tasks", name: "Tasks", notebookId: personalBook, notebook: "Personal", parentGroupId: "work" },
+                          { id: "old", name: "Old", notebookId: personalBook, notebook: "Personal", parentGroupId: "archive" }]
+    grouped.pages = [{ id: "l1", sectionId: "loose", title: "Loose page" },
+                     { id: "t1", sectionId: "tasks", title: "Task page" },
+                     { id: "o1", sectionId: "old", title: "Old page" }]
+    grouped.expanded = ["work", "archive", "old"]
+    grouped.notebookTabs = true
+    grouped.rebuild()
+    var workMenu = grouped.groupMenu(grouped.groupAt("work"))
+    check("a group's row renames and deletes the group where its folder can be written, the delete asking first",
+          workMenu.map(function(item) { return item.id }).join(",") === "newSection,rename,delete"
+          && workMenu[1].rename === true && String(workMenu[2].confirm).indexOf("“Work”") >= 0
+          && grouped.groupMenu({ id: "shared", name: "Shared", notebookId: "gbook" }).map(function(item) { return item.id }).join(",") === "newSection",
+          JSON.stringify(workMenu))
+    var renamed = null
+    grouped.rowAction("work", "rename", "Projects", function(result) { renamed = result })
+    var renameJob = takeGroupJob("section-group:work")
+    check("a group rename shows the new name at once and asks OneNote for it",
+          grouped.groupAt("work").name === "Projects" && !!renameJob && renamed === null, JSON.stringify(grouped.onGroups))
+    if (renameJob) {
+      renameJob.settled({ error: "refused" }, {})
+    }
+    check("a group rename OneNote refuses puts the old name back and says why",
+          grouped.groupAt("work").name === "Work" && !!renamed && renamed.error === "refused")
+    grouped.rowAction("work", "rename", "Projects", function(result) { renamed = result })
+    renameJob = takeGroupJob("section-group:work")
+    if (renameJob) {
+      renameJob.settled({ ok: true, name: "Projects (1)", pageListSerial: 0 }, {})
+    }
+    check("a group rename OneNote takes shows the name it stored",
+          grouped.groupAt("work").name === "Projects (1)" && !!renamed && !renamed.error)
+    grouped.setGroupName("work", "Work")
+    var groupOutcomes = []
+    grouped.noteDeletionFinished.connect(function(path, result) {
+      groupOutcomes.push(path + ":" + (result.error || "ok"))
+    })
+    var groupDelete = null
+    grouped.rowAction("work", "delete", "", function(result) { groupDelete = result })
+    var deleteJob = takeGroupJob("section-group:work")
+    check("a deleted group leaves the list at once with everything in it, its pages reported going",
+          !!groupDelete && groupDelete.pending === true
+          && groupDelete.removed.join(",") === grouped.pathOf("t1") + "," + grouped.pathOf("o1")
+          && groupedRows() === "loose:0,empty:0" && grouped.sections[0].count === 1
+          && grouped.sections[0].notes.length === 1 && !!deleteJob,
+          JSON.stringify({ answer: groupDelete, rows: groupedRows() }))
+    if (deleteJob) {
+      deleteJob.settled({ error: "the group is open elsewhere" }, {})
+    }
+    check("a group OneNote keeps comes back with everything in it, each page told the delete failed",
+          groupedRows().indexOf("work:0,tasks:1,archive:1,old:2") >= 0
+          && groupOutcomes.join(",") === grouped.pathOf("t1") + ":the group is open elsewhere," + grouped.pathOf("o1") + ":the group is open elsewhere",
+          groupedRows() + " " + groupOutcomes.join(","))
+    groupOutcomes = []
+    grouped.rowAction("work", "delete", "", function(result) {})
+    deleteJob = takeGroupJob("section-group:work")
+    if (deleteJob) {
+      deleteJob.settled({ ok: true, pages: ["t1", "o1", "unlisted"], pageListSerial: 0 }, {})
+    }
+    check("a group OneNote deletes is gone for good with its groups, sections and pages, each page told so",
+          groupedRows() === "loose:0,empty:0"
+          && grouped.onGroups.map(function(group) { return group.id }).join(",") === "empty"
+          && grouped.onSections.map(function(section) { return section.id }).join(",") === "loose"
+          && grouped.pages.map(function(page) { return page.id }).join(",") === "l1"
+          && grouped.expanded.join(",") === ""
+          && groupOutcomes.join(",") === grouped.pathOf("t1") + ":ok," + grouped.pathOf("o1") + ":ok",
+          JSON.stringify({ rows: groupedRows(), expanded: grouped.expanded, outcomes: groupOutcomes }))
+    grouped.rq = groupedLane
+    grouped.destroy()
     oneNote.notebookTabs = false
     oneNote.onSections = [{ id: "section", name: "Section", notebookId: "book", notebook: "Book" }]
     oneNote.pages = [{ id: "page", sectionId: "section", title: "Note" }]
@@ -2099,7 +2300,7 @@ ShellRoot {
     oneNote.rebuild()
     check("read-only shared notebooks keep their notes and omit creation actions",
           oneNote.sections[0].notes.length === 1 &&
-          !oneNote.bookRows("book", 0).some(function(row) { return row.kind === "new" }) &&
+          !oneNote.bookRows("book", "", 0).some(function(row) { return row.kind === "new" }) &&
           !oneNote.accountActions("book").some(function(action) { return action.path === "newSection" }) &&
           oneNote.createTargetFor("onenote:page") === "")
     var sharedBody = oneNote.cacheBody("onenote:page", { title: "Title", body: "Shared", view: "shared-view", editable: true })
