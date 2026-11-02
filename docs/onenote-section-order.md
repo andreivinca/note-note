@@ -164,3 +164,16 @@ folder-revision requests with app-generated authorization were rejected
 been established. Page order is now read directly with Graph's `pagelevel=true`;
 page writes use a separately verified app-authenticated revision path, described
 in [OneNote page order](onenote-page-order.md).
+
+An offline reading of those captures on 2026-11-02
+([the handoff](future/onenote-section-order-write-2026-11-02.md)) found that
+they hold the notebook's *opening* only: the web client opens the notebook as
+a WOPI `/folders/<item>` resource with a `GetCells` operation and receives the
+folder's ordered children (section proxies and a group proxy, in two root
+lists), while every captured write changes a section's pages, never the
+folder. The client's own code names the two codes `invalidFileID` (6) and
+`unspecifiedFailure` (14), which fits the app having offered a section file's
+credentials for a folder. Writing section or group order therefore still
+needs two things: a capture of an actual section drag on the web, for the
+folder write's shape, and a live check of whether a preview minted for the
+notebook package item yields folder credentials.

@@ -1,7 +1,9 @@
 .pragma library
 
 // A provider owns the group and item identifiers. The host only knows that
-// items in the same group may exchange positions, optionally with children.
+// items in the same group may exchange positions, optionally with children,
+// and how a drag shows where one lands: the rows make room for it (`rows`,
+// the default), or a line between them marks the place (`line`).
 function descriptor(provider, section, row) {
   var source = row.reorder
   // A row that says nothing about ordering keeps the legacy meaning: under
@@ -14,7 +16,8 @@ function descriptor(provider, section, row) {
     return null
   }
   return { provider: provider.id, scope: source.scope, id: source.id,
-           descendants: source.descendants === true }
+           descendants: source.descendants === true,
+           marker: source.marker === "line" ? "line" : "rows" }
 }
 
 function key(group) {
@@ -64,6 +67,43 @@ function pushRange(positions, from, to) {
   }
 }
 
+// The group's blocks as `rows` lists them: each member's id, the index of
+// its row and the length of the block it carries. Null when a member is
+// listed twice or a block carries another member.
+function blocks(rows, group) {
+  var seen = Object.create(null), result = []
+  for (var i = 0; i < rows.length; i++) {
+    if (!sameGroup(rows[i].reorder, group)) {
+      continue
+    }
+    var id = rows[i].reorder.id, length = blockLength(rows, i)
+    if (seen[id]) {
+      return null
+    }
+    for (var child = i + 1; child < i + length; child++) {
+      if (sameGroup(rows[child].reorder, group)) {
+        return null
+      }
+    }
+    seen[id] = true
+    result.push({ id: id, index: i, length: length })
+    i += length - 1
+  }
+  return result
+}
+
+// `order` once `id` has landed before what is now its `slot`th member,
+// `order.length` meaning after the last one: where a line marker drops it.
+function landed(order, id, slot) {
+  var from = order.indexOf(id), result = order.slice()
+  if (from < 0) {
+    return result
+  }
+  result.splice(from, 1)
+  result.splice(slot > from ? slot - 1 : slot, 0, id)
+  return result
+}
+
 // Where each row of the reordered list comes from: indexes into `rows` that
 // put the group's blocks in `order` while every other row keeps its slot.
 // Null unless `order` is a complete, unique permutation of the group; a
@@ -72,31 +112,22 @@ function arrangement(rows, group, order) {
   if (!group || !(order instanceof Array) || !order.length) {
     return null
   }
-  var blocks = Object.create(null), slots = [], members = []
-  for (var i = 0; i < rows.length; i++) {
-    if (!sameGroup(rows[i].reorder, group)) {
-      continue
-    }
-    var id = rows[i].reorder.id, length = blockLength(rows, i)
-    if (blocks[id]) {
-      return null
-    }
-    for (var child = i + 1; child < i + length; child++) {
-      if (sameGroup(rows[child].reorder, group)) {
-        return null
-      }
-    }
-    blocks[id] = { index: i, length: length }
-    slots.push(blocks[id])
-    members.push(id)
-    i += length - 1
+  var slots = blocks(rows, group)
+  if (!slots) {
+    return null
   }
-  if (!isPermutation(members, order)) {
+  var byId = Object.create(null)
+  slots.forEach(function(block) {
+    byId[block.id] = block
+  })
+  if (!isPermutation(slots.map(function(block) {
+    return block.id
+  }), order)) {
     return null
   }
   var positions = [], cursor = 0
   for (var slot = 0; slot < slots.length; slot++) {
-    var block = blocks[order[slot]]
+    var block = byId[order[slot]]
     pushRange(positions, cursor, slots[slot].index)
     pushRange(positions, block.index, block.index + block.length)
     cursor = slots[slot].index + slots[slot].length

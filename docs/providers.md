@@ -168,8 +168,8 @@ comes back if OneNote keeps it.
 
 ### Provider-defined ordering
 
-Declare reorderable rows with `reorder: { scope, id, descendants? }` and
-implement `reorder(scope, ids, callback)`. Both identifiers are opaque strings
+Declare reorderable rows with `reorder: { scope, id, descendants?, marker? }`
+and implement `reorder(scope, ids, callback)`. Both identifiers are opaque strings
 owned by the provider; an empty scope is valid. Groups are isolated by provider
 and scope, independently of notebook tabs, row kind and displayed hierarchy.
 Set `reorder: null` when ordering is unavailable, such as insufficient
@@ -188,6 +188,12 @@ single block. A provider can therefore enable future section/tree ordering by
 declaring a different group on those parent rows and handling that scope in
 its existing hook. The workspace needs no provider-specific branches.
 Rows within a carried block must not belong to the parent's reorder group.
+
+`marker: "line"` shows a drag as OneNote on the web does: the rows stand
+still, and a line between them marks where the dragged row, with the block
+it carries, will land; dropped at its own place, it writes nothing. Without
+it the rows make room for the dragged row as the pointer crosses them, as
+the local provider's do. Give every row of a group the same marker.
 
 The callback settles exactly once with `{}` or `{ error }`. Validate the full
 unique permutation (`isPermutation(current, ids)` in

@@ -59,6 +59,50 @@ Window {
                reorder: scope === undefined ? null : { scope: scope, id: path, descendants: !!descendants } }
     }
 
+    // A row of a group that asks for a line marker.
+    function lined(kind, path, level, scope, descendants) {
+      var result = item(kind, path, level, scope, descendants)
+      result.reorder.marker = "line"
+      return result
+    }
+
+    // Holds `path` from the middle of its row to `fraction` of the way down
+    // `over`'s row, without releasing.
+    function hold(path, over, fraction) {
+      var source = row(path), target = row(over)
+      var start = source.mapToItem(window.contentItem, 70, source.height / 2)
+      var end = target.mapToItem(window.contentItem, 70, target.height * fraction)
+      mousePress(window.contentItem, start.x, start.y, Qt.LeftButton)
+      mouseMove(window.contentItem, start.x, start.y + 14, 20)
+      wait(30)
+      mouseMove(window.contentItem, end.x, end.y, 20)
+      wait(40)
+      return end
+    }
+
+    function release(at) {
+      mouseRelease(window.contentItem, at.x, at.y, Qt.LeftButton)
+      wait(160)
+    }
+
+    // Where the line marker's middle is, in the window.
+    function lineY() {
+      var line = findChild(list, "dropLine")
+      return line.mapToItem(window.contentItem, 0, line.height / 2).y
+    }
+
+    // A row's slot edge in the window: its top with `below` false, its
+    // bottom with it true; the pill sits centred in the slot.
+    function slotEdge(path, below) {
+      var pill = row(path)
+      return pill.mapToItem(window.contentItem, 0, below ? pill.height + list.rowGap / 2 : -list.rowGap / 2).y
+    }
+
+    function linedNotes() {
+      return [lined("note", "lined-a", 0, "lined"), lined("note", "lined-b", 0, "lined"),
+              lined("note", "lined-c", 0, "lined")]
+    }
+
     function publish(rows) {
       list.filtering = false
       list.model = Sidebar.build([{ id: "custom", canReorder: false,
@@ -281,6 +325,48 @@ Window {
       check(paths(list.visualRows()) === "pinned-b,fixed,pinned-a", "fixed rows keep their slots during a drag")
       mouseRelease(window.contentItem, end.x, end.y, Qt.LeftButton)
       wait(100)
+
+      // A group that asks for a line marker: the rows stand still while the
+      // line says where the dragged row lands, and the drop commits that.
+      check(Ordering.landed(["a", "b", "c"], "a", 3).join(",") === "b,c,a"
+            && Ordering.landed(["a", "b", "c"], "c", 0).join(",") === "c,a,b"
+            && Ordering.landed(["a", "b", "c"], "b", 1).join(",") === "a,b,c",
+            "a landing counts the blocks above it without the one on the move")
+      publish(linedNotes())
+      var dropLine = findChild(list, "dropLine")
+      var lineCommits = window.commits
+      var at = hold("lined-a", "lined-c", 0.8)
+      check(paths(list.visualRows()) === "lined-a,lined-b,lined-c" && window.commits === lineCommits,
+            "a line marker's drag moves no row before the drop")
+      check(dropLine.visible && Math.abs(lineY() - slotEdge("lined-c", true)) <= 2,
+            "the line stands under the row the pointer is low on: " + lineY() + " vs " + slotEdge("lined-c", true))
+      release(at)
+      check(window.commits === lineCommits + 1 && window.lastIds.join(",") === "lined-b,lined-c,lined-a"
+            && !dropLine.visible, "the drop commits the order the line showed")
+
+      publish(linedNotes())
+      at = hold("lined-a", "lined-b", 0.2)
+      check(!dropLine.visible, "at the row's own edge there is no line")
+      release(at)
+      check(window.commits === lineCommits + 1, "dropped at its own place, a row writes nothing")
+
+      publish([lined("tree", "lined-first", 0, "lined-sections", true), item("note", "lined-child-a", 1, "lined-first"),
+               lined("tree", "lined-second", 0, "lined-sections", true), item("note", "lined-child-c", 1, "lined-second")])
+      at = hold("lined-second", "lined-first", 0.2)
+      check(dropLine.visible && Math.abs(lineY() - slotEdge("lined-first", false)) <= 2
+            && paths(list.visualRows()) === "lined-first,lined-child-a,lined-second,lined-child-c",
+            "a tree row under a line marker lands before the whole block above: " + lineY() + " vs " + slotEdge("lined-first", false))
+      release(at)
+      check(window.commits === lineCommits + 2 && paths(list.model) === "lined-second,lined-child-c,lined-first,lined-child-a",
+            "a tree row's drop under a line marker carries its block")
+
+      publish(linedNotes())
+      at = hold("lined-a", "lined-c", 0.8)
+      keyClick(Qt.Key_Escape)
+      check(!dropLine.visible, "Escape takes the line away")
+      release(at)
+      check(window.commits === lineCommits + 2 && paths(list.model) === "lined-a,lined-b,lined-c",
+            "Escape cancels a line marker's drag without writing")
 
       publish(flat())
       list.filtering = true

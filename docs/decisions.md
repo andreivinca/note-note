@@ -1052,3 +1052,23 @@ again and the close ends. Once the process has decided to exit, a launch is
 not shown there: the activation socket answers only when it showed the
 window, so a launch it did not answer waits for the process to go and starts
 on its own.
+
+## 2026-11-02: a drag shows where it lands in the provider's way
+
+A dragged local note moves among the rows as the pointer crosses them, the
+rows making room for it. OneNote on the web shows a drag differently: the
+pages stand still, and a line between them marks where the dragged page
+will land. OneNote's pages in Note Note now drag that way.
+
+*Considered:* one marker for every provider. The rows making room is what
+local notes have always done, and a line in a list whose rows could as well
+move reads as a lesser version of it; OneNote's users know the line from
+the web app and from OneNote's own clients.
+
+*Chosen:* the group's descriptor says which (`marker: "line"`; the rows make
+room without it), so a provider shows a drag as its backend's own apps do,
+and the host knows nothing of either provider: the list draws the line for
+any group that asks, and commits the order on release through the same
+`reorderFinished` as the other marker. A line marker's drag moves no row
+until the drop, so a drop at the row's own place writes nothing, and
+Escape takes the line away.

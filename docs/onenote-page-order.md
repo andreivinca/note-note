@@ -77,7 +77,10 @@ its section's reorder group and carries its subpages; a page being made is in
 the group at once, at the end of its section, and a draft OneNote could not
 make leaves it. Subpage indentation is shown, and
 subpages retain their existing order and parent. Individual subpage promotion,
-cross-section moves and section reordering are not enabled.
+cross-section moves and section reordering are not enabled. A drag shows as
+OneNote on the web shows it: the pages stand still while a line between them
+marks where the dragged page lands (the row's `marker: "line"`,
+[providers.md](providers.md#provider-defined-ordering)).
 
 The generic row declaration is documented in [the provider contract](providers.md#provider-defined-ordering).
 The host has no OneNote-specific drag rules. Both local-provider presentations
