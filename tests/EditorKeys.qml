@@ -809,9 +809,13 @@ Window {
     require(gap < bar.width, "the scrollbar is not beside the note's body")
     var original = editor.documentHtml()
     var caret = editor.cursorPosition()
+    var title = keys.findChild(editor, "noteTitle")
+    var titleTop = title.mapToItem(bar, 0, 0).y
     keys.mouseWheel(body, body.width / 2, 30, 0, -120)
     keys.tryVerify(function() { return editor.viewState().scroll > 0 }, 3000)
     require(editor.viewState().scroll > 0, "wheel did not scroll the note")
+    require(title.mapToItem(bar, 0, 0).y === titleTop - editor.viewState().scroll,
+            "the title did not scroll with the note's body")
     var thumb = bar.contentItem
     var start = thumb.mapToItem(bar, thumb.width / 2, thumb.height / 2)
     var beforeDrag = editor.viewState().scroll
@@ -842,6 +846,11 @@ Window {
     var state = editor.viewState()
     require(state.cursor === editor.plainText().length && state.scroll > 0, "the caret at the end did not scroll the view")
     editor.focusTitle()
+    var title = keys.findChild(editor, "noteTitle")
+    var bar = keys.findChild(editor, "noteScrollBar")
+    var titleTop = title.mapToItem(bar, 0, 0).y
+    require(titleTop >= 0 && titleTop + title.height <= bar.height,
+            "focusing the title from the note's end did not bring it into view: " + titleTop)
     keys.keyClick(Qt.Key_Down)
     require(editor.bodyFocused, "Down in the title did not focus the body")
     require(editor.cursorPosition() === 0, "Down in the title did not land on the first line: " + editor.cursorPosition())

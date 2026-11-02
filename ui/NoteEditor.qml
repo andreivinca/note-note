@@ -1860,7 +1860,8 @@ Item {
     z: -1
   }
 
-  // ---- the note's sheet: title and body on one surface. No frame around it
+  // ---- the note's sheet: the margins its page keeps, and where a notice,
+  // a provider's own view or a conflict review shows. No frame around it
   // and no rule beside it — a box drawn around a page is one line too many.
   Column {
     id: sheet
@@ -1873,68 +1874,20 @@ Item {
     anchors.bottomMargin: Style.spacing.panelPadding
     anchors.leftMargin: Math.max(Style.spacing.panelPadding, Math.min(Style.space(72), root.width * 0.064))
     anchors.rightMargin: anchors.leftMargin
-    // Shared spacing between the date, title and document.
+    // Shared spacing between a notice's title and what it says.
     spacing: Style.spacing.xxxl
 
+    // A notice's title. A note's own title is on its page, below, and
+    // scrolls with it.
     Text {
-      visible: root.hasNote && !root.showingNotice && root.modifiedText.length > 0
-      width: parent.width
-      horizontalAlignment: Text.AlignRight
-      text: root.modifiedText
       textFormat: Text.PlainText
-      color: Style.secondaryText(root.foreground, 0.45)
-      font.family: root.fontFamily
-      font.pixelSize: Style.font.bodySmall
-    }
-
-    // ---- header: the title belongs on the note's own sheet
-    Item {
+      visible: root.showingNotice
       width: parent.width
-      height: titleColumn.implicitHeight
-
-      Column {
-        id: titleColumn
-        anchors.left: parent.left
-        anchors.right: parent.right
-        spacing: Style.spacing.xxs
-
-        Text {
-          textFormat: Text.PlainText
-          visible: root.showingNotice
-          width: parent.width
-          text: root.noticeTitle
-          color: root.foreground
-          font.family: root.fontFamily
-          font.pixelSize: root.titleSize
-          elide: Text.ElideRight
-        }
-
-        TextField {
-          id: titleField
-          width: parent.width
-          // Sticky Notes have no separate title (subject = first line).
-          visible: !root.showingNotice && root.hasTitle
-          enabled: root.hasNote && !root.readOnly
-          placeholderText: "Untitled"
-          // The title sits a step behind the body: slightly faded.
-          foreground: root.foreground
-          accent: root.accent
-          font.family: root.noteFontFamily
-          font.pixelSize: root.titleSize
-          font.bold: true
-          horizontalPadding: Style.spacing.xs
-          verticalPadding: 0
-          // A title is a title: no box around it. The padding still comes off
-          // the spec the field would have drawn, so nothing shifts.
-          background: null
-          onTextEdited: root.edited()
-          Keys.priority: Keys.BeforeItem
-          Keys.onPressed: function(event) { root.shortcut(event) }
-          Keys.onReturnPressed: root.focusBody()
-          Keys.onEnterPressed: root.focusBody()
-          Keys.onDownPressed: root.focusBody()
-        }
-      }
+      text: root.noticeTitle
+      color: root.foreground
+      font.family: root.fontFamily
+      font.pixelSize: root.titleSize
+      elide: Text.ElideRight
     }
 
       Loader {
@@ -2018,43 +1971,114 @@ Item {
           }
         }
       }
+  }
 
-      Flickable {
-        id: flick
-        visible: !root.showingNotice
+  // The note's page — date, title and body — scrolls in the whole panel
+  // under the toolbar, keeping the sheet's margins as its own padding: the
+  // wheel turns it anywhere in the panel, and the text runs up to the
+  // toolbar's edge.
+  Flickable {
+    id: flick
+    visible: root.hasNote && !root.showingNotice && !root.showingSkeleton
+    anchors.top: toolStrip.bottom
+    anchors.bottom: parent.bottom
+    anchors.left: parent.left
+    anchors.right: parent.right
+    clip: true
+    contentWidth: width
+    contentHeight: page.height
+    boundsBehavior: Flickable.StopAtBounds
+
+    // The wheel keeps the one scroll feel every list has; the bar adds a
+    // thumb to drag through a long note.
+    ListWheel { flick: flick }
+    QQC.ScrollBar.vertical: QQC.ScrollBar {
+      objectName: "noteScrollBar"
+      // Set just beside the sheet, the height of the panel the page
+      // scrolls in, so the thumb never lies over the note's text or code
+      // slabs.
+      parent: root
+      x: sheet.x + sheet.width + Style.spacing.xs
+      y: flick.y
+      height: flick.height
+      // Shown exactly while the note is longer than its frame.
+      policy: QQC.ScrollBar.AlwaysOn
+      visible: flick.visible && size < 1
+
+      // Outside the Flickable the wheel no longer reaches its handler.
+      ListWheel { flick: flick }
+    }
+
+    function ensureVisible(r) {
+      if (contentY >= r.y) {
+        contentY = r.y
+      } else if (contentY + height <= r.y + r.height) {
+        contentY = r.y + r.height - height
+      }
+    }
+
+    // The page: the date, the title and the body scroll as one.
+    Column {
+      id: page
+      x: sheet.anchors.leftMargin
+      width: sheet.width
+      topPadding: sheet.anchors.topMargin
+      bottomPadding: sheet.anchors.bottomMargin
+      // Shared spacing between the date, title and document.
+      spacing: Style.spacing.xxxl
+
+      Text {
+        visible: root.hasNote && root.modifiedText.length > 0
         width: parent.width
-        height: parent.height - y
-        clip: true
-        contentWidth: width
-        contentHeight: area.height
-        boundsBehavior: Flickable.StopAtBounds
+        horizontalAlignment: Text.AlignRight
+        text: root.modifiedText
+        textFormat: Text.PlainText
+        color: Style.secondaryText(root.foreground, 0.45)
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
 
-        // The wheel keeps the one scroll feel every list has; the bar adds a
-        // thumb to drag through a long note.
-        ListWheel { flick: flick }
-        QQC.ScrollBar.vertical: QQC.ScrollBar {
-          objectName: "noteScrollBar"
-          // Set just beside the sheet, level with the body, so the thumb
-          // never lies over the note's text or code slabs.
-          parent: root
-          x: sheet.x + sheet.width + Style.spacing.xs
-          y: sheet.y + flick.y
-          height: flick.height
-          // Shown exactly while the note is longer than its frame.
-          policy: QQC.ScrollBar.AlwaysOn
-          visible: flick.visible && size < 1
-
-          // Outside the Flickable the wheel no longer reaches its handler.
-          ListWheel { flick: flick }
-        }
-
-        function ensureVisible(r) {
-          if (contentY >= r.y) {
-            contentY = r.y
-          } else if (contentY + height <= r.y + r.height) {
-            contentY = r.y + r.height - height
+      TextField {
+        id: titleField
+        objectName: "noteTitle"
+        width: parent.width
+        // Sticky Notes have no separate title (subject = first line).
+        visible: root.hasTitle
+        enabled: root.hasNote && !root.readOnly
+        placeholderText: "Untitled"
+        // The title sits a step behind the body: slightly faded.
+        foreground: root.foreground
+        accent: root.accent
+        font.family: root.noteFontFamily
+        font.pixelSize: root.titleSize
+        font.bold: true
+        horizontalPadding: Style.spacing.xs
+        verticalPadding: 0
+        // A title is a title: no box around it. The padding still comes off
+        // the spec the field would have drawn, so nothing shifts.
+        background: null
+        onTextEdited: root.edited()
+        // Focused from below (focusTitle), the title scrolls into view as
+        // the caret does.
+        onActiveFocusChanged: {
+          if (activeFocus) {
+            flick.ensureVisible(mapToItem(flick.contentItem, 0, 0, width, height))
           }
         }
+        Keys.priority: Keys.BeforeItem
+        Keys.onPressed: function(event) { root.shortcut(event) }
+        Keys.onReturnPressed: root.focusBody()
+        Keys.onEnterPressed: root.focusBody()
+        Keys.onDownPressed: root.focusBody()
+      }
+
+      // The body: the code slabs behind the editor, and the editor, which
+      // carries everything else it draws. Both start at the body's top,
+      // so a slab's place is the editor's own coordinates.
+      Item {
+        id: body
+        width: parent.width
+        height: area.height
 
         // The code slabs, painted behind the editor so the text sits on
         // them; the bars above it live at the bottom of the TextEdit.
@@ -2074,10 +2098,10 @@ Item {
         TextEdit {
           id: area
           objectName: "noteBody"
-          width: flick.width
-          // Fill the frame so a click anywhere in the empty area focuses
-          // the editor.
-          height: Math.max(implicitHeight, flick.height)
+          width: body.width
+          // Fill the frame below the title, so a click anywhere in the
+          // empty area focuses the editor and a short note does not scroll.
+          height: Math.max(implicitHeight, flick.height - body.y - page.bottomPadding)
           leftPadding: Style.spacing.xs
           rightPadding: Style.spacing.xs
           // Room for the code slab's vertical overhang (slabGeometry): a
@@ -2197,7 +2221,7 @@ Item {
             }
             root.beforeReturn()
           }
-          onCursorRectangleChanged: flick.ensureVisible(cursorRectangle)
+          onCursorRectangleChanged: flick.ensureVisible(mapToItem(flick.contentItem, cursorRectangle))
           onWidthChanged: root.scheduleDecorations()
           onImplicitHeightChanged: root.scheduleDecorations()
           onTextChanged: {
@@ -2428,6 +2452,7 @@ Item {
           }
         }
       }
+    }
   }
 
   NoteSkeleton {
