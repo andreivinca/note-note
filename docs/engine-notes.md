@@ -512,7 +512,7 @@ class is set: extended property `String 0x001A` = `IPM.StickyNote`.
   notebook at `/notebooks/{id}/sectionGroups` (`Notes.ReadWrite` both).
   Graph renames and deletes neither sections nor groups: a group is the
   OneDrive folder holding its sections' files, named after the group, and
-  is renamed and deleted as a section's file is, once `web_session.group_item`
+  is renamed and deleted as a section's file is, once `onenote_web.group_item`
   has verified a folder of that name in the group's holder.
   Cache each resource's `self`, `pagesUrl` and `contentUrl` to preserve the
   location Microsoft supplies for shared content. The notebook and section

@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import onenote  # noqa: E402
 import page_order as ordering  # noqa: E402
 import revision_objects as revisions  # noqa: E402
-import web_session as web  # noqa: E402
+import onenote_web as web  # noqa: E402
 
 
 def guid(number):

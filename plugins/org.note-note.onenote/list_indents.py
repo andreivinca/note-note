@@ -7,7 +7,7 @@ inline text, formatting, attachments and generated item IDs.
 from onenote_md import Node
 from onenote_patch import LISTS, children, parse, serialize, walk
 from revision_objects import CHILDREN, properties, references
-from web_session import WebError
+from onenote_web import WebError
 from blank_lines import ELEMENT
 from list_edits import CHILD_LEVEL, GROUP, LIST_NODES, OUTLINE, object_id, rows
 import liststyles

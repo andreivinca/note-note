@@ -1,6 +1,5 @@
 """Search cache, provider transport and QML lifecycle tests; no real account."""
 import contextlib
-import io
 import json
 import multiprocessing
 import os
@@ -323,26 +322,6 @@ class ProviderTests(unittest.TestCase):
         self.assertIsNotNone(self.out.call_args.args[0]["conflict"])
         self.assertEqual(self.index.search("remote conflict")["ids"], ["p1"])
         self.assertEqual(self.index.search("local conflict")["ids"], [])
-
-    def test_account_lookup_cannot_write_another_signins_token(self):
-        tokens = [{"cacheSession": "a"}, {"cacheSession": "b", "refresh_token": "new"}]
-        with patch.object(onenote.msgraph, "signed_in", side_effect=tokens), \
-                patch.object(onenote.msgraph, "TOKENS", self.temp.name + "/token.json"), \
-                patch.object(onenote, "graph", return_value=(200, {"id": "account-a"})), \
-                patch.object(onenote, "save_private") as save, contextlib.redirect_stdout(io.StringIO()) as output:
-            with self.assertRaises(SystemExit):
-                onenote.merge_account()
-        save.assert_not_called()
-        self.assertIn("the signed-in account changed", output.getvalue())
-
-    def test_account_lookup_preserves_a_concurrent_token_refresh(self):
-        tokens = [{"cacheSession": "a", "refresh_token": "old"}, {"cacheSession": "a", "refresh_token": "new"}]
-        with patch.object(onenote.msgraph, "signed_in", side_effect=tokens), \
-                patch.object(onenote.msgraph, "TOKENS", self.temp.name + "/token.json"), \
-                patch.object(onenote, "graph", return_value=(200, {"id": "account-a"})), \
-                patch.object(onenote, "save_private") as save:
-            self.assertEqual(onenote.merge_account(), "client:account-a")
-        self.assertEqual(save.call_args.args[1], {"cacheSession": "a", "refresh_token": "new", "userId": "account-a"})
 
     def test_other_account_listing_is_never_used_as_search_inventory(self):
         onenote.save_private(onenote.ONENOTE_CACHE, {"cacheSession": "other", "pages": [page("private")]})

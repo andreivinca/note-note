@@ -2,9 +2,10 @@
 
 A section file holds cells, each a chain of revisions of objects. The
 section's root cell lists its page series, and each page's content is a cell
-of its own. web_session.py carries the reads and writes; page_order.py and
-blank_lines.py change these objects. Pages are joined to Graph by their
-public OneNote client ID, which their metadata names.
+of its own. The Microsoft library's onenote_web.py (services/microsoft/)
+carries the reads and writes; page_order.py and blank_lines.py change
+these objects. Pages are joined to Graph by their public OneNote client
+ID, which their metadata names.
 """
 import copy
 from dataclasses import dataclass
@@ -12,7 +13,7 @@ import re
 import urllib.parse
 import uuid
 
-from web_session import NIL, WebError
+from onenote_web import NIL, WebError
 
 CONTENT_ROOT = "4a3717f8-1c14-49e7-9526-81d942de1741|1"
 SECTION = 0x60007

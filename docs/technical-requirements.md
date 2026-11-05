@@ -51,7 +51,8 @@ plugins/org.note-note.sticky/           Microsoft Sticky Notes  (sticky.py)
 plugins/org.note-note.onenote/          OneNote                 (onenote.py, onenote_md.py)
 plugins/org.note-note.notion/           Notion                  (notion.py, notion_md.py)
 services/clipboard/         the clipboard's image    (Clipboard.qml, clipboard.py)
-services/microsoft/         shared Graph sign-in    (Account.qml, msgraph.py)
+services/microsoft/         the Microsoft library: sign-in, Graph and the workarounds past it
+                            (Account.qml, msgraph.py, onenote_web.py; README.md lists every endpoint)
 services/requests/          the per-provider request queue: ordering, coalescing,
                             throttle parks (RequestQueue.qml, scheduler.js, selftest)
 services/markdown/          vendored mistune + parse.py (one Markdown parser)

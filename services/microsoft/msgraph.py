@@ -3,6 +3,8 @@
 
 Owns the OAuth 2.0 device-code sign-in, the token file and its refresh, and
 the Graph HTTP helpers that provider scripts (sticky.py, onenote.py) import.
+It is the Microsoft library's core: README.md beside it lists every
+Microsoft endpoint the app calls.
 Standard library only. A script says which budget and scopes are its own
 with `configure()` before its first request; what cannot be answered is
 raised as `GraphError`, carrying the `kind` the host's queue reads, and
@@ -300,6 +302,46 @@ def request(method, url, body=None, headers=None, max_bytes=MAX_BODY,
                                  reserve=settings.background_reserve if rate_key else 0)
 
 
+def download(url, max_bytes, deadline):
+    """A Graph resource's bytes — a page's picture or recording — or None
+    when they cannot be had now. A download is optional: a failed one costs
+    its caller the one resource, never the sign-in.
+
+    One attempt, paced like any Graph request (`budget_for`), signed, and
+    never redirected (OPENER). The body is read against the caller's
+    `deadline` (time.monotonic), and no socket wait is longer than 20
+    seconds. Nothing forces a refresh: the page read that named the
+    resource has already met any 401 (`signed`), and a grant revoked since
+    then shows as a failed download until the next read signs the account
+    out. A throttle is recorded once for the rate key, so the page's other
+    resources, and the next process, fail fast instead of asking again.
+    """
+    if not graph_url(url):
+        return None
+    req = urllib.request.Request(url, headers={"Authorization": "Bearer " + access_token()})
+    rate_key, rate_windows = budget_for(url)
+
+    def once():
+        try:
+            with OPENER.open(req, timeout=20) as response:
+                return read_bounded(response, max_bytes, deadline)
+        except urllib.error.HTTPError as error:
+            if error.code in THROTTLED_STATUSES:
+                raise ratelimit.Retry(wait_asked_by(error))
+            return None
+        except (OSError, OverflowError):
+            return None
+
+    try:
+        data = ratelimit.attempt_loop(rate_key, rate_windows, once, attempts=1,
+                                      reserve=settings.background_reserve if rate_key else 0)
+    except ratelimit.Throttled:
+        return None
+    # Graph serves a just-written resource as 200 with an empty body, and
+    # caching that would poison the page for good.
+    return data or None
+
+
 # ---------------------------------------------------------------- tokens
 
 def token_url(tenant):
@@ -440,26 +482,84 @@ def access_token(force=False):
         return fresh["access_token"]
 
 
+def signed(send):
+    """`send(token)` with this provider's access token — and once more with a
+    forced refresh if the answer is a 401, which says the token was revoked
+    rather than merely old (`access_token`). `graph` and `graph_raw` both
+    sign through this, so there is one copy of the second pass to keep right."""
+    status, answer = send(access_token())
+    if status == 401:
+        status, answer = send(access_token(force=True))
+    return status, answer
+
+
 def graph(method, path, data=None, extra_headers=None, max_bytes=MAX_BODY, retry_policy=None):
-    """One Graph request, signed — and signed again once if the 401 says the
-    token was revoked rather than merely old. The second pass is the same one
-    call with `force`, so there is no second copy of the request to keep in
-    step with the first.
+    """One Graph request with a JSON body and a JSON answer, `signed`.
 
     `path` is relative to GRAPH, or an absolute URL that Graph handed out;
     one that is not a `graph_url` is refused by `request` before anything is
     sent."""
     url = path if path.startswith("http") else GRAPH + path
 
-    def send(force):
-        headers = {"Authorization": "Bearer " + access_token(force), "Accept": "application/json"}
+    def send(token):
+        headers = {"Authorization": "Bearer " + token, "Accept": "application/json"}
         headers.update(extra_headers or {})
         return http(method, url, data, headers, max_bytes=max_bytes, retry_policy=retry_policy)
 
-    status, res = send(False)
-    if status == 401:
-        status, res = send(True)
-    return status, res
+    return signed(send)
+
+
+def graph_raw(method, path, data=None, content_type=None, extra_headers=None,
+              max_bytes=MAX_BODY, retry_policy=None):
+    """One Graph request whose body is sent as given and whose answer is
+    text: OneNote's page HTML, and the multipart bodies that carry a page's
+    pictures and recordings. Those run to Graph's 4 MB request limit, so it
+    waits 60 seconds for an answer where `graph` waits 30. It is `signed`,
+    and reads `path`, as `graph` does.
+
+    The retry policy is the transport's (`request`): reads can replay,
+    replacements restart their job with a fresh merge, and uncertain inserts
+    and uploads stop."""
+    url = path if path.startswith("http") else GRAPH + path
+
+    def send(token):
+        headers = {"Authorization": "Bearer " + token}
+        if content_type:
+            headers["Content-Type"] = content_type
+        headers.update(extra_headers or {})
+        status, raw = request(method, url, data, headers, max_bytes=max_bytes, timeout=60,
+                              retry_policy=retry_policy)
+        return status, raw.decode(errors="replace")
+
+    return signed(send)
+
+
+def account_id():
+    """The signed-in account's stable Graph id: never an email or a display
+    name, which change, nor a token, which rotates. A sign-in records it
+    (`cmd_login`); one made before that did asks /me once and keeps the
+    answer in the token file as it is by then, so a refresh that landed
+    meanwhile is kept, and never in a file that has become another
+    sign-in's."""
+    client_id, _ = config()
+    tok = signed_in(client_id)
+    if not tok:
+        raise GraphError("not signed in")
+    expected = os.environ.get("NOTE_NOTE_MS_CACHE_SESSION", "")
+    if expected and tok.get("cacheSession") != expected:
+        raise GraphError("the signed-in account changed")
+    if tok.get("userId"):
+        return tok["userId"]
+    status, me = graph("GET", "/me?$select=id")
+    if status != 200 or not me.get("id"):
+        raise GraphError("could not identify the signed-in account")
+    with token_lock():
+        current = signed_in(client_id)
+        if not current or current.get("cacheSession") != tok.get("cacheSession"):
+            raise GraphError("the signed-in account changed")
+        current["userId"] = me["id"]
+        save_private(TOKENS, current)
+    return me["id"]
 
 
 # ---------------------------------------------------------------- caches

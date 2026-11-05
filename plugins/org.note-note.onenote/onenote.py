@@ -32,17 +32,17 @@
 import html as _html
 import contextlib
 import fcntl
-import json, os, re, sys, time, urllib.parse, urllib.request, urllib.error, uuid
+import json, os, re, sys, time, urllib.parse, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "services", "microsoft"))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "lib"))
 sys.path.insert(0, HERE)
 import msgraph  # noqa: E402
-import provider_io  # noqa: E402
+import onenote_web  # noqa: E402
 import fileio  # noqa: E402
 import ratelimit  # noqa: E402
-from msgraph import graph, http, access_token, GRAPH  # noqa: E402
+from msgraph import graph, graph_raw, http, access_token, GRAPH  # noqa: E402
 from provider_io import (fail, fail_throttled, out, load_json, save_private, read_payload,  # noqa: E402
                          TRANSIENT_STATUSES, STATE_DIR, CACHE_DIR)
 import onenote_md  # noqa: E402
@@ -53,7 +53,6 @@ import search_index  # noqa: E402
 import notebook_inventory  # noqa: E402
 import revision_objects  # noqa: E402
 import page_order  # noqa: E402
-import web_session  # noqa: E402
 import blank_lines  # noqa: E402
 import list_indents  # noqa: E402
 import list_edits  # noqa: E402
@@ -117,37 +116,6 @@ MAX_UPLOAD_PARTS = 4
 
 
 
-def graph_raw(method, path, data=None, content_type=None, extra_headers=None,
-              max_bytes=MAX_PAGE_HTML, retry_policy=None):
-    """Graph call with a non-JSON body (OneNote HTML) and a text response.
-
-    Paced and retried by the same loop as `msgraph.http()`, and classifying
-    statuses out of the same two names — this used to be a second copy of it,
-    and the two drifted.
-
-    The shared transport owns the retry policy. Reads can replay, replacements
-    restart the job with a fresh merge, and uncertain inserts/uploads stop.
-    """
-    url = path if path.startswith("http") else GRAPH + path
-
-    def send(force):
-        headers = {"Authorization": "Bearer " + access_token(force)}
-        if content_type:
-            headers["Content-Type"] = content_type
-        headers.update(extra_headers or {})
-        status, raw = msgraph.request(method, url, data, headers, max_bytes=max_bytes,
-                                       timeout=60, retry_policy=retry_policy)
-        return status, raw.decode(errors="replace")
-
-    status, body = send(False)
-    if status == 401:
-        # As in `msgraph.graph()`: a 401 on a token the disk still calls valid
-        # is a grant revoked at Microsoft's end, and only a forced refresh can
-        # tell that apart from a token that simply needed renewing.
-        status, body = send(True)
-    return status, body
-
-
 def graph_err(res, status):
     err = res.get("error") if isinstance(res, dict) else None
     if isinstance(err, dict):
@@ -197,11 +165,11 @@ def require_writable(collection, resource_id):
 def require_revision_access(collection, resource_id, not_writable, not_granted):
     """Fail unless the section, or section group, can be written under the
     current sign-in — through OneNote's web revision service
-    (web_session.py) or as its file or folder: both need a personal notebook
-    this account may edit, and Files.ReadWrite."""
-    if not web_session.writable_notebook(notebook_record(collection, resource_id)):
+    (services/microsoft/onenote_web.py) or as its file or folder: both need
+    a personal notebook this account may edit, and Files.ReadWrite."""
+    if not onenote_web.writable_notebook(notebook_record(collection, resource_id)):
         fail(not_writable)
-    if not web_session.write_granted():
+    if not onenote_web.write_granted():
         fail(not_granted)
 
 
@@ -215,13 +183,13 @@ def open_page_revision(page_id):
         status, metadata = graph("GET", resource_url("pages", page_id) + "?$select=id,links")
         client_id = revision_objects.client_guid(metadata) if status == 200 and isinstance(metadata, dict) else None
     if not client_id:
-        raise web_session.WebError("OneNote did not identify the page")
+        raise onenote_web.WebError("OneNote did not identify the page")
     section = cached_resource("sections", cached_resource("pages", page_id).get("sectionId"))
-    session = web_session.Session.for_section(section, graph)
+    session = onenote_web.Session.for_section(section, graph)
     cell = revision_objects.Section(session.read_section()).cell(client_id)
     state = session.read(cell)
     if blank_lines.Page(state).identity() != client_id:
-        raise web_session.WebError("The page's revisions could not be verified; refresh the section")
+        raise onenote_web.WebError("The page's revisions could not be verified; refresh the section")
     return session, cell, state
 
 
@@ -390,7 +358,8 @@ def cmd_search_step(payload):
         return
     try:
         with msgraph.background_requests():
-            status, html = graph_raw("GET", page_content_url(ticket["id"]), retry_policy=msgraph.RetryPolicy.NEVER)
+            status, html = graph_raw("GET", page_content_url(ticket["id"]), max_bytes=MAX_PAGE_HTML,
+                                     retry_policy=msgraph.RetryPolicy.NEVER)
     except ratelimit.Deferred as deferred:
         index.release(ticket)
         out({"status": index.status(), "deferred": True, "retryAfter": deferred.retry_after})
@@ -1026,9 +995,6 @@ _image_budget = FetchBudget(seconds=45, requests=40)
 _recording_budget = FetchBudget(seconds=300, requests=MAX_UPLOAD_PARTS)
 
 
-_image_opener = urllib.request.build_opener(provider_io.NoRedirect)
-
-
 def image_allowed(src):
     if not notebook_inventory.graph_url(src):
         return False
@@ -1314,50 +1280,23 @@ def audio_suffix(title):
 
 
 def fetch_page_resource(src, max_bytes, budget):
-    """Fetch a bounded, private Graph resource without following redirects;
-    the bytes, or None when the budget is spent or the request fails.
+    """A page's resource, downloaded within `budget` (msgraph.download): the
+    bytes, or None when the budget is spent or the download fails.
 
     Nothing from the document is handed to Qt as an authenticated remote URL.
     """
     if not image_allowed(src) or budget.spent():
         return None
-    # No revoked-grant pass of its own, for the reason the listing pool has
-    # none: a page read's `graph_raw` fetch of the content has already met
-    # any 401 and forced the refresh, and a recording is played or copied
-    # from a page that was read. A grant revoked since then shows as a
-    # failed download until the next read signs the account out.
-    req = urllib.request.Request(src, headers={"Authorization": "Bearer " + access_token()})
-    pause = 0.0        # a throttle met here, recorded once the slot is released
-    try:
-        # A resource is a Graph request like any other and is paced like one:
-        # forty of them is what a picture-heavy page costs, and that is most
-        # of a minute's budget on its own.
-        with ratelimit.slot(msgraph.settings.rate_key, msgraph.settings.rate_windows,
-                            reserve=msgraph.settings.background_reserve):
-            with _image_opener.open(req, timeout=20) as r:
-                # Bounded in size and in time: a TimeoutError is an OSError, caught below.
-                data = provider_io.read_bounded(r, max_bytes, budget.until())
-                if not data:
-                    # Graph serves a just-written resource as 200 with an
-                    # empty body; caching that would poison the page for good.
-                    raise OverflowError("empty resource response")
+    # A resource is a Graph request like any other and is paced like one:
+    # forty of them is what a picture-heavy page costs, and that is most of
+    # a minute's budget on its own. One that fails leaves the page loading
+    # all the same — an image shows its alt text, a recording its
+    # unavailable player — and keeps a save from writing the page back
+    # (remember_images, read_page).
+    data = msgraph.download(src, max_bytes, budget.until())
+    if data is not None:
         budget.used += 1
-        return data
-    except ratelimit.Throttled:
-        pass                       # the pacer already knows; nothing to record
-    except urllib.error.HTTPError as e:
-        if e.code in (429, 503):
-            pause = msgraph.wait_asked_by(e)
-    except (urllib.error.URLError, OSError, OverflowError):
-        pass
-    if pause:
-        # The rest of this page's resources would earn the same answer, and
-        # so would the next process: record it once and let them all fail
-        # fast. The page still loads — an image shows its alt text, a
-        # recording its unavailable player — and the missing resource keeps
-        # a save from writing the page back (remember_images, read_page).
-        ratelimit.report_throttle(msgraph.settings.rate_key, pause)
-    return None
+    return data
 
 
 def cmd_onenote_pages(section_ids):
@@ -1418,27 +1357,9 @@ def normalize_note(note):
 
 
 def merge_account():
-    # Stable Graph identity, never an email/display name or a rotating token.
-    client_id = msgraph.config()[0]
-    token = msgraph.signed_in(client_id)
-    if not token:
-        fail("not signed in")
-    expected = os.environ.get("NOTE_NOTE_MS_CACHE_SESSION", "")
-    if expected and token.get("cacheSession") != expected:
-        fail("the signed-in account changed")
-    account = token.get("userId")
-    if not account:
-        status, profile = graph("GET", "/me?$select=id")
-        if status != 200 or not profile.get("id"):
-            fail("could not identify the account for note recovery")
-        account = profile["id"]
-        with msgraph.token_lock():
-            current = msgraph.signed_in(client_id)
-            if not current or current.get("cacheSession") != token.get("cacheSession"):
-                fail("the signed-in account changed")
-            current["userId"] = account
-            save_private(msgraph.TOKENS, current)
-    return client_id + ":" + account
+    """Whose merge journals these are: the app registration and the
+    account's stable id (msgraph.account_id)."""
+    return msgraph.config()[0] + ":" + msgraph.account_id()
 
 
 def merge_store(page_id):
@@ -1457,7 +1378,7 @@ def restore_list_indents(page_id, source):
     if not any(node.tag in onenote_patch.LISTS for node in onenote_patch.walk(onenote_patch.parse(source))):
         return source, ""
     section_id = cached_resource("pages", page_id).get("sectionId")
-    if not web_session.writable_notebook(notebook_record("sections", section_id)) or not web_session.write_granted():
+    if not onenote_web.writable_notebook(notebook_record("sections", section_id)) or not onenote_web.write_granted():
         return source, ""
     _, _, state = open_page_revision(page_id)
     return list_indents.restore(source, blank_lines.Page(state).objects), state["LatestRevisionId"]
@@ -1489,7 +1410,7 @@ def read_page(page_id, check=False):
     _image_budget.start()
     ticket = search_ticket(page_id)
     url = page_content_url(page_id) + "?includeIDs=true"
-    status, html = graph_raw("GET", url)
+    status, html = graph_raw("GET", url, max_bytes=MAX_PAGE_HTML)
     if status != 200:
         try:
             fail(graph_err(json.loads(html), status))
@@ -1498,7 +1419,7 @@ def read_page(page_id, check=False):
     unread = ""
     try:
         html, revision = read_list_levels(page_id, html, reuse=check)
-    except web_session.WebError as error:
+    except onenote_web.WebError as error:
         # Graph's HTML omits skipped list levels: a save planned against it
         # could flatten them, so the page opens without being editable.
         revision, unread = "", str(error)
@@ -1756,7 +1677,7 @@ def remove_blank_lines(page_id, runs):
                             "Sign in to OneNote again to let Note Note remove blank lines — your draft was kept")
     try:
         blank_lines.remove(*open_page_revision(page_id), runs)
-    except web_session.WebError as error:
+    except onenote_web.WebError as error:
         fail("Could not remove the blank lines: %s — your draft was kept" % error)
 
 
@@ -1769,25 +1690,25 @@ def write_lists(page_id, current, desired, expected_revision=""):
     try:
         session, cell, state = open_page_revision(page_id)
         if expected_revision and state["LatestRevisionId"] != expected_revision:
-            raise web_session.WebError("The page changed while planning its list save; reload the note")
+            raise onenote_web.WebError("The page changed while planning its list save; reload the note")
         page = list_edits.ListPage(state)
-        status, fresh = graph_raw("GET", page_content_url(page_id) + "?includeIDs=true")
+        status, fresh = graph_raw("GET", page_content_url(page_id) + "?includeIDs=true", max_bytes=MAX_PAGE_HTML)
         if status != 200:
-            raise web_session.WebError("OneNote did not return the page before its list save")
+            raise onenote_web.WebError("OneNote did not return the page before its list save")
         fresh = list_indents.restore(fresh, page.objects)
         if onenote_patch.serialize(onenote_patch.parse(fresh), True) != onenote_patch.serialize(onenote_patch.parse(current), True):
-            raise web_session.WebError("The page changed while planning its list save; reload the note")
+            raise onenote_web.WebError("The page changed while planning its list save; reload the note")
         updates = list_edits.plan(current, desired, page)
         session.write(cell, state, updates)
         written = list_edits.ListPage(session.read(cell))
         for obj in updates:
             if not list_edits.confirmed(obj, written.objects.get(obj["ObjectId"], {})):
-                raise web_session.WebError("OneNote did not confirm the list changes; reload the note")
-        status, source = graph_raw("GET", page_content_url(page_id) + "?includeIDs=true")
+                raise onenote_web.WebError("OneNote did not confirm the list changes; reload the note")
+        status, source = graph_raw("GET", page_content_url(page_id) + "?includeIDs=true", max_bytes=MAX_PAGE_HTML)
         if status != 200:
-            raise web_session.WebError("OneNote did not return the saved lists; reload the note")
+            raise onenote_web.WebError("OneNote did not return the saved lists; reload the note")
         return list_indents.restore(source, written.objects)
-    except web_session.WebError as error:
+    except onenote_web.WebError as error:
         fail("Could not save the lists: %s — your draft was kept" % error)
 
 
@@ -2057,7 +1978,7 @@ SECTION_FILE_NOT_GRANTED = "Sign in to OneNote again to let Note Note rename and
 # The saved listing is the only record of a section's notebook and of what
 # this account may do there, so a section it does not hold — a listing not
 # read, or another account's — is unknown, not gone: only Graph can say it is
-# gone (web_session.SectionGone), and nothing is changed until it is known.
+# gone (onenote_web.SectionGone), and nothing is changed until it is known.
 SECTION_NOT_LISTED = "This section is not in the list Note Note last read from OneNote; refresh the list and try again"
 # What OneNote refuses in a section name.
 SECTION_NAME_REFUSED = '\\/*?"|<>:%#'
@@ -2144,7 +2065,7 @@ def answer_group_gone(group_id):
 
 
 def answer_section_gone(section_id):
-    """A section whose file Graph no longer finds (web_session.SectionGone):
+    """A section whose file Graph no longer finds (onenote_web.SectionGone):
     deleted or moved elsewhere since the list on screen was made, and the
     list learns it now."""
     pages, serial = forget_section(section_id)
@@ -2163,11 +2084,11 @@ def cmd_onenote_rename_section(section_id, path):
         fail(SECTION_NOT_LISTED)
     require_revision_access("sections", section_id, SECTION_FILE_UNAVAILABLE, SECTION_FILE_NOT_GRANTED)
     try:
-        item = web_session.section_item(section, graph)
-    except web_session.SectionGone:
+        item = onenote_web.section_item(section, graph)
+    except onenote_web.SectionGone:
         answer_section_gone(section_id)
         return
-    except web_session.WebError as error:
+    except onenote_web.WebError as error:
         fail(str(error))
     status, res = graph("PATCH", item, {"name": name + ".one"}, retry_policy=msgraph.RetryPolicy.NEVER)
     if status == 409:
@@ -2193,10 +2114,10 @@ def cmd_onenote_delete_section(section_id):
     # A section whose file is already gone from OneDrive is deleted all the
     # same.
     try:
-        item = web_session.section_item(section, graph)
-    except web_session.SectionGone:
+        item = onenote_web.section_item(section, graph)
+    except onenote_web.SectionGone:
         item = None
-    except web_session.WebError as error:
+    except onenote_web.WebError as error:
         fail(str(error))
     if item:
         status, res = graph_raw("DELETE", item)
@@ -2220,11 +2141,11 @@ def cmd_onenote_rename_group(group_id, path):
         fail(GROUP_NOT_LISTED)
     require_revision_access("sectionGroups", group_id, GROUP_FOLDER_UNAVAILABLE, SECTION_FILE_NOT_GRANTED)
     try:
-        item = web_session.group_item(group, graph)
-    except web_session.SectionGone:
+        item = onenote_web.group_item(group, graph)
+    except onenote_web.SectionGone:
         answer_group_gone(group_id)
         return
-    except web_session.WebError as error:
+    except onenote_web.WebError as error:
         fail(str(error))
     status, res = graph("PATCH", item, {"name": name}, retry_policy=msgraph.RetryPolicy.NEVER)
     if status == 409:
@@ -2250,10 +2171,10 @@ def cmd_onenote_delete_group(group_id):
     # A group whose folder is already gone from OneDrive is deleted all the
     # same.
     try:
-        item = web_session.group_item(group, graph)
-    except web_session.SectionGone:
+        item = onenote_web.group_item(group, graph)
+    except onenote_web.SectionGone:
         item = None
-    except web_session.WebError as error:
+    except onenote_web.WebError as error:
         fail(str(error))
     if item:
         status, res = graph_raw("DELETE", item)
@@ -2308,7 +2229,7 @@ def cmd_reorder_pages(payload_path):
     # is never cut off between the reads around it.
     budgets = ((msgraph.settings.rate_key, msgraph.settings.rate_windows),
                (msgraph.settings.files_rate_key, msgraph.settings.files_rate_windows),
-               (web_session.RATE_KEY, web_session.RATE_WINDOWS))
+               (onenote_web.RATE_KEY, onenote_web.RATE_WINDOWS))
     if any(ratelimit.background_delay(key, windows) > 0 for key, windows in budgets):
         fail("The order was not saved — OneNote's requests are kept for notes right now")
     require_revision_access("sections", section_id, "Page ordering is available only in personal notebooks you can edit",
@@ -2316,7 +2237,7 @@ def cmd_reorder_pages(payload_path):
     fresh = collect_section_pages(section, lambda url: graph("GET", url, max_bytes=MAX_LIST_BODY))
     if fresh.get("error"):
         fail(fresh["error"], kind=fresh.get("kind"))
-    session = web_session.Session.for_section(section, graph)
+    session = onenote_web.Session.for_section(section, graph)
     # From this point a revision might commit. Neither a follow-up throttle
     # nor a lost response may tell the host to replay this whole command.
     try:

@@ -1,11 +1,19 @@
-"""App-authenticated access to OneNote's web revision service.
+"""WORKAROUND: OneNote's web revision service, and the OneDrive files it
+reaches a personal notebook's sections through.
 
-This is an undocumented Microsoft interface, not a Graph API. It writes what
-Graph cannot: page order (page_order.py) and blank-line removal
-(blank_lines.py), both changing the objects revision_objects.py reads.
-Credentials are minted through Graph's driveItem preview and live only in
-this process. No browser cookies, HAR files or account-specific identifiers
-are needed. See docs/onenote-page-order.md for the compatibility boundary.
+The service (ENDPOINT) is an undocumented Microsoft interface, not a Graph
+API. The OneNote provider writes through it what Graph cannot: page order,
+blank-line removal and native list edits, all changing the objects its
+revision_objects.py reads. Credentials are minted through Graph's driveItem
+preview and live only in this process. No browser cookies, HAR files or
+account-specific identifiers are needed. See docs/onenote-page-order.md for
+the compatibility boundary, and README.md beside this file for what would
+replace it.
+
+A personal notebook's sections and groups are files and folders in its
+owner's OneDrive, and their OneNote IDs name those items (PERSONAL_ID):
+`section_item` and `group_item` find them, which is also how a section or a
+group is renamed or deleted, since Graph's OneNote API can do neither.
 """
 import http.client
 import json
@@ -17,9 +25,15 @@ import urllib.request
 import uuid
 
 import msgraph
-from notebook_inventory import PERSONAL_ID
 import provider_io
 import ratelimit
+
+# HIGH-RISK WORKAROUND: observed personal-ID shape, not a documented mapping.
+# A personal notebook or section ID is "0-" and its OneDrive item ID: the
+# drive ID, "!", then the item's number or, for items OneDrive created since
+# it changed formats, "s" and a GUID (docs/onenote-section-order.md). Keep
+# this restriction; do not infer support for other notebook ID formats.
+PERSONAL_ID = re.compile(r"0-([0-9A-Fa-f]{16}!(?:[0-9]+|s[0-9A-Fa-f]{32}))\Z")
 
 NIL = "00000000-0000-0000-0000-000000000000|0"
 # The web client's unknown-root sentinel, resolved by the server on reads.

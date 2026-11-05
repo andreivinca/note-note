@@ -293,10 +293,11 @@ Every source of notes is a self-contained *provider* — a folder with a
 - `plugins/org.note-note.sticky/` — Microsoft Sticky Notes
 - `plugins/org.note-note.onenote/` — OneNote
 - `plugins/org.note-note.notion/` — Notion
-- `services/microsoft/` — Microsoft sign-in code the two above run; each
-  has its own app registration, token and scope, so nothing about one's
-  account touches the other's, and signing out of one leaves the other
-  signed in.
+- `services/microsoft/` — the Microsoft library the two above run: sign-in,
+  the Graph transport and the workarounds that reach past Graph. Its README
+  lists every Microsoft endpoint the app calls. Each provider has its own
+  app registration, token and scope, so nothing about one's account touches
+  the other's, and signing out of one leaves the other signed in.
 
 New external providers go in `~/.config/notenote/plugins/<package>/` with a
 `plugin.json` manifest. Review the code, enable the package in Settings, then

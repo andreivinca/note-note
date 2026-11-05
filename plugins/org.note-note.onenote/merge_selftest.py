@@ -33,7 +33,7 @@ from parse import parse  # noqa: E402
 from qthtml import to_html, to_markdown  # noqa: E402
 import revision_objects  # noqa: E402
 from revision_objects import CHILDREN, CONTENT_ROOT, ENTITY_GUID, PAGE_METADATA, properties, references  # noqa: E402
-from web_session import NIL, WebError  # noqa: E402
+from onenote_web import NIL, WebError  # noqa: E402
 
 
 def note(body, title="Title"):
@@ -1283,7 +1283,7 @@ class SaveTests(SaveFixture):
     def http_transport(self, endpoint):
         """Use the actual authentication wrapper, HTTP handling and retry loop."""
         with (patch.object(onenote, "graph_raw", self.raw_transport),
-              patch.object(onenote, "access_token", return_value="synthetic-token"),
+              patch.object(onenote.msgraph, "access_token", return_value="synthetic-token"),
               patch.object(onenote.msgraph.settings, "rate_key", None),
               patch.object(onenote.msgraph.OPENER, "open", side_effect=endpoint)):
             yield
@@ -2227,8 +2227,8 @@ class NativeSaveTests(SaveFixture):
                    "sections": [{"id": "section", "notebookId": NOTEBOOK}],
                    "pages": [{"id": "page", "sectionId": "section", "clientId": CLIENT}]}
         patch.object(onenote, "load_listing", return_value=listing).start()
-        patch.object(onenote.web_session, "write_granted", return_value=True).start()
-        patch.object(onenote.web_session.Session, "for_section", return_value=RevisionService(self)).start()
+        patch.object(onenote.onenote_web, "write_granted", return_value=True).start()
+        patch.object(onenote.onenote_web.Session, "for_section", return_value=RevisionService(self)).start()
         patch.object(onenote, "graph", side_effect=self.page_record).start()
         self.page("one\n\nmiddle\n\nthree")
 

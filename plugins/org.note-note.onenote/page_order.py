@@ -6,7 +6,7 @@ Only an exact join between the two may be written, against the revision
 just read. No inferred page-ID encoding, note recreation or manual overlay.
 """
 from revision_objects import Section, with_children
-from web_session import WebError
+from onenote_web import WebError
 
 
 class SectionOrder:

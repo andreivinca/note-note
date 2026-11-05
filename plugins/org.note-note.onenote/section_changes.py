@@ -16,7 +16,7 @@ as it did before. See docs/onenote-changes.md.
 import urllib.parse
 
 import msgraph
-from notebook_inventory import PERSONAL_ID
+from onenote_web import PERSONAL_ID
 
 # A cursor at "now" costs one request, where one from the start would list
 # every file the drive holds first. A section's ID holds its file's item ID

@@ -117,6 +117,26 @@ Notion is the opposite by necessity: its API has no public-client flow, so
 each user creates an internal integration and pastes the secret into the
 provider's own setup screen.
 
+### Every Microsoft request goes through one library
+
+`services/microsoft/` is the one place that talks to Microsoft: sign-in
+and tokens, the Graph transport (`msgraph.py`), and the workarounds that
+reach past Graph (`onenote_web.py`). Its README lists every host and
+endpoint the app calls, which are official and which are workarounds, and
+what official API would replace each.
+
+*Considered:* each provider keeping its own Microsoft code, which is how
+OneNote's grew. *Rejected:* it opened connections to Microsoft from four
+places, three of them with an opener of their own and their own idea of
+pacing and of a revoked grant, and a workaround spread through a provider
+can only be replaced by first finding all of it. *Chosen:* one library
+that providers call, holding none of their logic — OneNote's revision
+objects, its page order and its notebook discovery stay in its plugin.
+The OneNote web client is in the library although only OneNote uses it:
+it is a Microsoft service, and when Microsoft offers an official API for
+what it does, that is where it is replaced. Signing in stays separate
+per provider (above); only the code is shared.
+
 ### Setup belongs to the provider, not the host
 
 *Considered:* a declarative `setupFields` schema the host renders.

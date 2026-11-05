@@ -32,7 +32,7 @@ import urllib.parse
 import urllib.request
 
 import msgraph
-from notebook_inventory import PERSONAL_ID
+from onenote_web import PERSONAL_ID
 import provider_io
 import ratelimit
 

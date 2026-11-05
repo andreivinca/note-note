@@ -147,58 +147,6 @@ def recorded_graph_raw():
         onenote.graph_raw = real
 
 
-def test_revoked_grant_refreshes_once(verbose):
-    """§3b, through this module's own copy of the retry."""
-    sign_in()
-    endpoint = Endpoint(
-        graph=[(401, b"InvalidAuthenticationToken", headers()),
-               (200, b"<html>ok</html>", headers())],
-        token=[(200, {"access_token": "new", "refresh_token": "r2", "expires_in": 3600}, headers())])
-    with scripted(endpoint):
-        status, body = onenote.graph_raw("GET", PAGE)
-    failures = 0
-    failures += check("the retry succeeds", status == 200 and "ok" in body,
-                      "%r %r" % (status, body))
-    failures += check("refreshed exactly once", len(endpoint.to("token")) == 1,
-                      "%d refreshes" % len(endpoint.to("token")))
-    sent = [call[3] for call in endpoint.to("graph")]
-    failures += check("the retry carries the new token", sent == ["Bearer old", "Bearer new"],
-                      "%r" % (sent,))
-    if verbose:
-        print("  %r" % (sent,))
-    print("graph_raw meets a 401 with one refresh and one retry")
-    print("  %d checks failed" % failures if failures else "  all green")
-    return failures
-
-
-def test_the_transient_gate(verbose):
-    """The flag decides, in both positions, and the default is the open one."""
-    failures = 0
-    for status in msgraph.TRANSIENT_STATUSES:
-        sign_in()
-        endpoint = Endpoint(graph=[(status, b"Transient error", headers())])
-        error = None
-        with scripted(endpoint):
-            try:
-                onenote.graph_raw("GET", PAGE)
-            except msgraph.GraphError as e:
-                error = e
-        failures += check("%d is transient by default" % status,
-                          error is not None and error.kind == "transient", "%r" % (error,))
-
-        sign_in()
-        endpoint = Endpoint(graph=[(status, b"Transient error", headers())])
-        with scripted(endpoint):
-            got, body = onenote.graph_raw("GET", PAGE, retry_policy=msgraph.RetryPolicy.NEVER)
-        failures += check("%d is the caller's when the gate is shut" % status,
-                          got == status and "Transient error" in body, "%r %r" % (got, body))
-    if verbose:
-        print("  %r gated both ways" % (list(msgraph.TRANSIENT_STATUSES),))
-    print("the transient gate decides, and only it")
-    print("  %d checks failed" % failures if failures else "  all green")
-    return failures
-
-
 def test_writes_that_must_not_repeat(verbose):
     """Which callers shut the gate — read off the calls, not inferred."""
     failures = 0
@@ -290,8 +238,6 @@ def main():
 
     total = 0
     try:
-        total += test_revoked_grant_refreshes_once(args.verbose)
-        total += test_the_transient_gate(args.verbose)
         total += test_writes_that_must_not_repeat(args.verbose)
         total += test_title_failure_does_not_repeat_the_body(args.verbose)
         total += test_uncertain_mutations_are_sent_once(args.verbose)

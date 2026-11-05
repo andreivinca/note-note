@@ -457,7 +457,7 @@ python3 plugins/org.note-note.onenote/selftest.py     # which writes may be run 
 python3 lib/notemerge/selftest.py         # shared merging and recovery storage
 python3 plugins/org.note-note.onenote/merge_selftest.py # concurrent edits, conflicts and OneNote saves
 python3 plugins/org.note-note.onenote/order_selftest.py # section order: the OneDrive download, its limits and the join
-python3 services/microsoft/selftest.py    # 5xx and 401 classification
+python3 services/microsoft/selftest.py    # 5xx and 401 classification, downloads, the account id
 ```
 
 Each pins a bug that shipped, and was found by a review of the Python:
@@ -516,9 +516,9 @@ Each pins a bug that shipped, and was found by a review of the Python:
   any request at all, for a save and a create alike. And that a new
   integration secret never shows the old one's listing: not from the warm
   cache, and not from a run made under the old secret that lands late.
-- **`plugins/org.note-note.onenote/selftest.py`** — `graph_raw` and `msgraph.http` share
-  the bounded transport. This suite checks the raw wrapper's 401 refresh
-  and its caller's gate for whether a failure may be run again. A
+- **`plugins/org.note-note.onenote/selftest.py`** — OneNote's writes through
+  the library's transport (`msgraph.graph_raw`), and their gate for whether
+  a failure may be run again. A
   `kind: "transient"` re-runs the **whole job** three times, which is right
   for a page fetch or a body replace and wrong for anything that creates — a
   502 is the gateway losing the answer to a page Graph may already have made,
@@ -531,6 +531,9 @@ Each pins a bug that shipped, and was found by a review of the Python:
   A grant that will not refresh is deleted, so the UI offers a sign-in instead
   of repeating a raw Graph error for ever — but a *server* error during that
   forced refresh must not, or a passing blip would sign the user out.
+  `graph_raw` is signed and gated as `graph` is; a `download` is one
+  attempt that answers bytes or nothing and records a throttle once; and
+  `account_id` asks `/me` once and writes only its own sign-in's token.
 
 **Add a case for every provider-script bug.** Three of the four finish in
 about a tenth of a second; `plugins/org.note-note.local/selftest.py` takes around four,

@@ -292,6 +292,127 @@ def test_revoked_grant_refreshes_once(verbose):
     return failures
 
 
+def test_raw_requests_are_signed_and_gated_alike(verbose):
+    """`graph_raw` sends its body as given and answers text, and is
+    otherwise `graph`: a 401 refreshes once and retries once, and the
+    transient gate is the caller's retry policy, open by default."""
+    page = "/me/onenote/pages/1-abc/content"
+    sign_in()
+    endpoint = Endpoint(
+        graph=[(401, b"InvalidAuthenticationToken", headers()),
+               (200, b"<html>ok</html>", headers())],
+        token=[(200, {"access_token": "new", "refresh_token": "r2", "expires_in": 3600}, headers())])
+    with scripted(endpoint):
+        status, body = msgraph.graph_raw("GET", page)
+    failures = 0
+    failures += check("the raw retry succeeds", status == 200 and body == "<html>ok</html>",
+                      "%r %r" % (status, body))
+    failures += check("the raw request refreshed exactly once", len(endpoint.to("token")) == 1,
+                      "%d refreshes" % len(endpoint.to("token")))
+    sent = [call[3] for call in endpoint.to("graph")]
+    failures += check("the raw retry carries the new token", sent == ["Bearer old", "Bearer new"],
+                      "%r" % (sent,))
+
+    for status in msgraph.TRANSIENT_STATUSES:
+        sign_in()
+        endpoint = Endpoint(graph=[(status, b"Transient error", headers())])
+        error = None
+        with scripted(endpoint):
+            try:
+                msgraph.graph_raw("GET", page)
+            except msgraph.GraphError as e:
+                error = e
+        failures += check("a raw %d is transient by default" % status,
+                          error is not None and error.kind == "transient", "%r" % (error,))
+
+        sign_in()
+        endpoint = Endpoint(graph=[(status, b"Transient error", headers())])
+        with scripted(endpoint):
+            got, body = msgraph.graph_raw("GET", page, retry_policy=msgraph.RetryPolicy.NEVER)
+        failures += check("a raw %d is the caller's when the gate is shut" % status,
+                          got == status and body == "Transient error", "%r %r" % (got, body))
+    if verbose:
+        print("  %r" % (sent,))
+    print("raw requests are signed and gated as JSON ones are")
+    print("  %d checks failed" % failures if failures else "  all green")
+    return failures
+
+
+def test_a_download_is_one_attempt_that_never_raises(verbose):
+    """`download` answers bytes or None: an empty body, an error or a
+    throttle is None, a throttle is recorded once for the rate key, and an
+    address outside Graph is never sent the token. (A redirect is OPENER's:
+    test_redirects_are_answered_not_followed.)"""
+    resource = "https://graph.microsoft.com/v1.0/me/onenote/resources/0-abc/$value"
+    deadline = time.monotonic() + 30
+    key = "test-download"
+    failures = 0
+    sign_in()
+    for reply, expected in (((200, b"picture", headers()), b"picture"),
+                            ((200, b"", headers()), None),
+                            ((404, b"not here", headers()), None)):
+        endpoint = Endpoint(graph=[reply])
+        with scripted(endpoint):
+            got = msgraph.download(resource, 1024, deadline)
+        failures += check("a %d answers %r" % (reply[0], expected), got == expected, "%r" % (got,))
+        failures += check("a %d is asked once" % reply[0], len(endpoint.calls) == 1)
+
+    endpoint = Endpoint(graph=[(429, b"", headers(Retry_After=PARKED))])
+    with scripted(endpoint), patch.object(msgraph.settings, "rate_key", key):
+        got = msgraph.download(resource, 1024, deadline)
+    failures += check("a throttled download is None", got is None, "%r" % (got,))
+    failures += check("a throttled download is asked once", len(endpoint.calls) == 1)
+    failures += check("a throttled download records the cooldown", ratelimit.cooldown_remaining(key) > 990)
+
+    endpoint = Endpoint()
+    with scripted(endpoint):
+        got = msgraph.download("https://example.com/v1.0/picture", 1024, deadline)
+    failures += check("an address outside Graph is not asked", got is None and not endpoint.calls)
+    print("a download is one attempt, answered with bytes or None")
+    print("  %d checks failed" % failures if failures else "  all green")
+    return failures
+
+
+def test_the_account_id_is_kept_only_in_its_own_sign_in(verbose):
+    """`account_id` asks /me once for a sign-in that has no id yet, and keeps
+    the answer in the token file as it is by then: a refresh that landed
+    meanwhile is kept, and another sign-in's file is never written."""
+    failures = 0
+    error = None
+    with patch.object(msgraph, "signed_in", side_effect=[{"cacheSession": "a"},
+                                                         {"cacheSession": "b", "refresh_token": "new"}]), \
+            patch.object(msgraph, "graph", return_value=(200, {"id": "account-a"})), \
+            patch.object(msgraph, "save_private") as save:
+        try:
+            msgraph.account_id()
+        except msgraph.GraphError as e:
+            error = e
+    failures += check("another sign-in's token is not written", not save.called)
+    failures += check("the change is reported", str(error) == "the signed-in account changed", "%r" % (error,))
+
+    with patch.object(msgraph, "signed_in", side_effect=[{"cacheSession": "a", "refresh_token": "old"},
+                                                         {"cacheSession": "a", "refresh_token": "new"}]), \
+            patch.object(msgraph, "graph", return_value=(200, {"id": "account-a"})), \
+            patch.object(msgraph, "save_private") as save:
+        answer = msgraph.account_id()
+    failures += check("the id is answered", answer == "account-a", "%r" % (answer,))
+    failures += check("a refresh that landed meanwhile is kept",
+                      save.called and save.call_args.args[1] == {"cacheSession": "a", "refresh_token": "new",
+                                                                 "userId": "account-a"},
+                      "%r" % (save.call_args,))
+
+    sign_in()
+    token = msgraph.load_json(msgraph.TOKENS, {})
+    token["userId"] = "recorded"
+    msgraph.save_private(msgraph.TOKENS, token)
+    with patch.object(msgraph, "graph", side_effect=AssertionError("asked /me")):
+        answer = msgraph.account_id()
+    failures += check("a recorded id costs no request", answer == "recorded", "%r" % (answer,))
+    print("the account id is asked once and kept only in its own sign-in")
+    print("  %d checks failed" % failures if failures else "  all green")
+    return failures
+
+
 def test_dead_grant_is_forgotten(verbose):
     """And when the forced refresh cannot revive it, the token comes off the
     disk and the answer is the plain "not signed in" the UI knows how to
@@ -779,6 +900,9 @@ def main():
         total += test_other_statuses_reach_the_caller(args.verbose)
         total += test_retry_policy_and_cooldown_are_independent(args.verbose)
         total += test_revoked_grant_refreshes_once(args.verbose)
+        total += test_raw_requests_are_signed_and_gated_alike(args.verbose)
+        total += test_a_download_is_one_attempt_that_never_raises(args.verbose)
+        total += test_the_account_id_is_kept_only_in_its_own_sign_in(args.verbose)
         total += test_dead_grant_is_forgotten(args.verbose)
         total += test_ordinary_expiry_keeps_its_message(args.verbose)
         total += test_a_blip_during_a_forced_refresh_keeps_the_token(args.verbose)

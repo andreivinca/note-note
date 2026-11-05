@@ -55,8 +55,8 @@ tested account. Microsoft changes may disable ordering. The provider fails
 visibly rather than guessing a different resource, recreating notes, or
 retrying an uncertain write.
 
-`web_session.py` carries the service's reads and writes and decides which
-notebooks it can write. `revision_objects.py` reads the section and page
+The Microsoft library's `onenote_web.py` (`services/microsoft/`) carries the
+service's reads and writes and decides which notebooks it can write. `revision_objects.py` reads the section and page
 objects. Page ordering (`page_order.py`) and
 [blank-line removal](onenote-blank-lines.md) (`blank_lines.py`) are the two
 changes written through it.

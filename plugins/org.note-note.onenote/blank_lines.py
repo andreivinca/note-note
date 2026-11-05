@@ -12,7 +12,7 @@ import uuid
 
 from revision_objects import (CHILDREN, CONTENT_ROOT, PAGE_METADATA, latest_objects, page_guid, properties,
                               references, with_children)
-from web_session import WebError
+from onenote_web import WebError
 
 ELEMENT = 0x6000D
 GROUP = 0x60019      # elements indented together under one parent

@@ -18,7 +18,7 @@ from notemerge import AmbiguousAlignment, align
 from onenote_md import Converter, Node
 from onenote_patch import LISTS, children, parse, serialize, text, walk
 from revision_objects import CHILDREN, properties, references
-from web_session import WebError
+from onenote_web import WebError
 import liststyles
 import textcolor
 

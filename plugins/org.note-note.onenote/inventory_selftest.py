@@ -12,6 +12,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import onenote
 import notebook_inventory as inventory
+import provider_io  # on the path onenote set up
 
 ROOT = "https://graph.microsoft.com/v1.0"
 SHARED = ROOT + "/users/other-owner/onenote"
@@ -274,11 +275,11 @@ class InventoryTests(unittest.TestCase):
             stack.enter_context(patch.object(onenote, "content_index"))
             stack.enter_context(patch.object(onenote, "merge_store"))
             stack.enter_context(patch.object(onenote, "read_payload", return_value={"name": "New"}))
-            stack.enter_context(patch.object(onenote.web_session, "write_granted", return_value=True))
+            stack.enter_context(patch.object(onenote.onenote_web, "write_granted", return_value=True))
             if isinstance(item, Exception):
-                found = stack.enter_context(patch.object(onenote.web_session, "group_item", side_effect=item))
+                found = stack.enter_context(patch.object(onenote.onenote_web, "group_item", side_effect=item))
             else:
-                found = stack.enter_context(patch.object(onenote.web_session, "group_item", return_value=item))
+                found = stack.enter_context(patch.object(onenote.onenote_web, "group_item", return_value=item))
             renamed = stack.enter_context(patch.object(onenote, "graph", return_value=graph))
             deleted = stack.enter_context(patch.object(onenote, "graph_raw", return_value=raw))
             stack.enter_context(contextlib.redirect_stdout(output))
@@ -317,7 +318,7 @@ class InventoryTests(unittest.TestCase):
     def test_a_rename_of_a_folder_gone_takes_the_group_off_the_list_with_everything_in_it(self):
         cache = self.grouped_listing()
         answer, failed, calls = self.run_group_command(self.rename_group, cache,
-                                                       item=onenote.web_session.SectionGone("gone"))
+                                                       item=onenote.onenote_web.SectionGone("gone"))
         self.assertFalse(failed)
         self.assertEqual((answer["gone"], answer["pages"]), (True, ["p2", "p3"]))
         calls["renamed"].assert_not_called()
@@ -357,7 +358,7 @@ class InventoryTests(unittest.TestCase):
 
     def test_a_group_folder_is_verified_before_it_is_written(self):
         """The folder must be the group's: in its holder, named after it."""
-        web = onenote.web_session
+        web = onenote.onenote_web
         drive = "0123456789abcdef"
         group = {"id": self.WORK, "name": "Work", "notebookId": self.GROUP_BOOK}
         folder = {"id": drive + "!s" + "a" * 32, "name": "Work", "folder": {},
@@ -579,7 +580,7 @@ class InventoryTests(unittest.TestCase):
         with patch.object(onenote, "load_listing", return_value=cache), \
                 patch.object(onenote, "load_order", return_value={}), \
                 patch.object(onenote, "graph", return_value=(500, {"error": {"message": "Unavailable"}})), \
-                patch.object(onenote, "save_listing") as save, patch.object(onenote.provider_io, "out") as output:
+                patch.object(onenote, "save_listing") as save, patch.object(provider_io, "out") as output:
             with self.assertRaises(SystemExit):
                 onenote.cmd_onenote_list(False)
         save.assert_not_called()
@@ -688,7 +689,7 @@ class InventoryTests(unittest.TestCase):
                 patch.object(onenote, "graph") as graph, \
                 patch.object(onenote, "graph_raw") as raw, \
                 patch.object(onenote, "read_payload") as payload, \
-                patch.object(onenote.provider_io, "out") as output:
+                patch.object(provider_io, "out") as output:
             for command, args in commands:
                 with self.subTest(command=command.__name__):
                     with self.assertRaises(SystemExit):

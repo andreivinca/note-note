@@ -327,7 +327,7 @@ LaneProvider {
 
   // A section is a .one file in its owner's OneDrive, which its page order,
   // rename and delete write: a personal notebook this account owns, or one
-  // shared with it for editing. web_session.py's writable_notebook()
+  // shared with it for editing. services/microsoft/onenote_web.py's writable_notebook()
   // enforces the same rule.
   function sectionFileWritable(bookId) {
     var book = root.onNotebooks.find(function(candidate) {

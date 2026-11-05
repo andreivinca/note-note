@@ -39,16 +39,16 @@ def private_cache(test):
     stack.enter_context(patch.object(onenote, "_image_budget", onenote.FetchBudget(seconds=45, requests=40)))
     stack.enter_context(patch.object(onenote, "_recording_budget", onenote.FetchBudget(seconds=300, requests=4)))
     stack.enter_context(patch.object(onenote.ratelimit, "slot", side_effect=lambda *a, **kw: contextlib.nullcontext()))
-    token = stack.enter_context(patch.object(onenote, "access_token", return_value="test-token"))
+    token = stack.enter_context(patch.object(onenote.msgraph, "access_token", return_value="test-token"))
     return work, token
 
 
 def responses(data):
-    return patch.object(onenote._image_opener, "open", side_effect=lambda *a, **kw: io.BytesIO(data))
+    return patch.object(onenote.msgraph.OPENER, "open", side_effect=lambda *a, **kw: io.BytesIO(data))
 
 
 def no_requests():
-    return patch.object(onenote._image_opener, "open", side_effect=AssertionError("a resource was fetched"))
+    return patch.object(onenote.msgraph.OPENER, "open", side_effect=AssertionError("a resource was fetched"))
 
 
 def read_page(html, read_only=False):
@@ -179,9 +179,9 @@ class PlaybackTests(unittest.TestCase):
             with self.subTest(response=response), patch.object(onenote, "MAX_AUDIO", 8), \
                     patch.object(onenote, "fail", side_effect=SystemExit) as failure:
                 if isinstance(response, Exception):
-                    context = patch.object(onenote._image_opener, "open", side_effect=response)
+                    context = patch.object(onenote.msgraph.OPENER, "open", side_effect=response)
                 else:
-                    context = patch.object(onenote._image_opener, "open", return_value=response)
+                    context = patch.object(onenote.msgraph.OPENER, "open", return_value=response)
                 with context, self.assertRaises(SystemExit):
                     onenote.cmd_onenote_recording(RESOURCE, "Voice.3gp")
                 self.assertIn("could not be downloaded", failure.call_args.args[0])
@@ -250,7 +250,7 @@ class UploadTests(unittest.TestCase):
         uploads = onenote.Uploads(recordings=[self.recording])
         content = uploads.audio_ref(RESOURCE, "Voice.3gp")
         os.remove(onenote.recording_cache_path(RESOURCE, "Voice.3gp"))
-        with patch.object(onenote._image_opener, "open", side_effect=urllib.error.URLError("offline")):
+        with patch.object(onenote.msgraph.OPENER, "open", side_effect=urllib.error.URLError("offline")):
             uploads.materialize([{"target": "object:voice", "action": "replace", "content": content}])
         self.assertIn("could not be downloaded", uploads.error)
         self.assertEqual(uploads.parts, [])

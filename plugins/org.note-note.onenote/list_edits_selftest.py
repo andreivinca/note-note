@@ -13,7 +13,7 @@ import onenote  # noqa: E402
 import list_edits as edits  # noqa: E402
 import list_indents  # noqa: E402
 from revision_objects import CONTENT_ROOT, ENTITY_GUID, PAGE_METADATA, properties  # noqa: E402
-from web_session import NIL, WebError  # noqa: E402
+from onenote_web import NIL, WebError  # noqa: E402
 
 GUID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 CLIENT = "12345678-1234-1234-1234-123456789abc"
@@ -280,7 +280,7 @@ class WriteTests(unittest.TestCase):
         section.cell.return_value = "page-cell"
         with patch.object(onenote, "require_revision_access"), \
                 patch.object(onenote, "cached_resource", return_value={"sectionId": "section", "clientId": CLIENT}), \
-                patch.object(onenote.web_session.Session, "for_section", return_value=session), \
+                patch.object(onenote.onenote_web.Session, "for_section", return_value=session), \
                 patch.object(onenote.revision_objects, "Section", return_value=section), \
                 patch.object(onenote, "graph_raw", side_effect=[(200, source), (200, source.replace("Nested", "Changed"))]):
             saved = onenote.write_lists("page", current, desired, "base|1")
@@ -297,7 +297,7 @@ class WriteTests(unittest.TestCase):
         section.cell.return_value = "page-cell"
         with patch.object(onenote, "require_revision_access"), \
                 patch.object(onenote, "cached_resource", return_value={"sectionId": "section", "clientId": CLIENT}), \
-                patch.object(onenote.web_session.Session, "for_section", return_value=session), \
+                patch.object(onenote.onenote_web.Session, "for_section", return_value=session), \
                 patch.object(onenote.revision_objects, "Section", return_value=section), \
                 contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
             onenote.write_lists("page", source, source, "older|1")
