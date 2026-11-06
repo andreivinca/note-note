@@ -224,9 +224,7 @@ a group's row makes one inside it; the app makes groups directly in a
 notebook only. New section, New section group and New notebook ask for the
 name in a small dialog. Providers supply all of these actions, including creation and account
 controls; each is an icon button with its name as the tooltip.
-Lists keep their provider’s note order. Drag local notes to reorder them: the rows make room
-as you go. Drag OneNote pages the way OneNote on the web shows it: the pages stand still, and a
-line between them marks where the page will land. Notebook trees keep
+Lists keep their provider’s note order. Drag local notes to reorder them. Notebook trees keep
 their provider’s hierarchy and order, and show how many notes each holds.
 Right-click a note to delete it. Right-click a section — or a notebook, when
 notebooks share one tab, or a OneNote section group — to make a section

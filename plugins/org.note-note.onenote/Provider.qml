@@ -419,14 +419,12 @@ LaneProvider {
     }
     var orderable = root.pageOrderingAvailable(sec)
     var pageMenu = root.bookWritable(bookId) ? root.noteMenu : []
-    // A page drags as OneNote on the web shows it: the pages stand still,
-    // and a line between them marks where it lands.
     for (var p = 0; p < pages.length; p++) {
       var pg = pages[p]
       rows.push({ kind: "note", path: pathOf(pg.id), title: pg.title, preview: "", menu: pageMenu,
                   level: level + 1 + (pg.level || 0),
                   reorder: orderable && root.orderedPage(pg)
-                    ? { scope: "pages:" + sec.id, id: root.orderId(pg.id), descendants: true, marker: "line" } : null,
+                    ? { scope: "pages:" + sec.id, id: root.orderId(pg.id), descendants: true } : null,
                   version: pg.modified || "", modified: pg.modified || "" })
     }
     if (pageInventory.pendingSections.indexOf(sec.id) >= 0) {

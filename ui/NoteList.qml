@@ -16,10 +16,8 @@ import "../design/controls"
 //                      its state, optional `count` its note count;
 //                      rows are indented by `level`
 // Any row with a `reorder` group (services/notes/ordering.js) can be dragged
-// among the rows of that group; the rest keep their slots. A group that asks
-// for a line marker keeps every row still while a line between the rows
-// shows where the dragged one lands. A row's `menu` lists what its provider
-// offers on a right-click.
+// among the rows of that group; the rest keep their slots. A row's `menu`
+// lists what its provider offers on a right-click.
 Item {
   id: root
 
@@ -29,11 +27,6 @@ Item {
   property var model: []
   property var dragSlot: null
   property bool movingDrag: false
-  // A line marker's drag: the number of the group's blocks above the place
-  // the dragged block would land, and that place in the list's content; -1
-  // while there is nowhere to land, or the place is the block's own.
-  property int dropSlot: -1
-  property real dropY: 0
   onModelChanged: root.cancelDrag()
   onFilteringChanged: root.cancelDrag()
   // The provider's buttons, drawn as icons at the right of the header.
@@ -153,74 +146,6 @@ Item {
     return rows
   }
 
-  // A row's slot: a note's row, or a control's height with the air after
-  // it. A New note row shows only inside a tree.
-  function slotHeight(row) {
-    if (row.kind === "new" && !root.hasTree) {
-      return 0
-    }
-    return row.kind === "note" ? root.rowHeight : Style.spacing.controlHeight + root.rowGap
-  }
-
-  // The content y where each of the group's blocks begins, and where the
-  // last one ends: the places a dragged block can land. Measured from the
-  // row at `index`, on screen as `item`, by the heights of the rows between,
-  // since a row off screen has no item to ask.
-  function blockEdges(blocks, index, item) {
-    var y = item.y
-    for (var above = 0; above < index; above++) {
-      y -= root.slotHeight(root.model[above])
-    }
-    var edges = [], last = blocks[blocks.length - 1], end = last.index + last.length
-    for (var row = 0, block = 0; row < end; row++) {
-      if (block < blocks.length && blocks[block].index === row) {
-        edges.push(y)
-        block++
-      }
-      y += root.slotHeight(root.model[row])
-    }
-    edges.push(y)
-    return edges
-  }
-
-  // A line marker's drag, with the pointer at `y` in the list's viewport:
-  // the dragged block lands at the edge of the group's blocks nearest the
-  // pointer. At its own edges there is nothing to move, and no line; off
-  // the rows there is nowhere to land.
-  function pointDrag(y) {
-    var slot = root.dragSlot
-    if (!slot) {
-      return
-    }
-    var contentY = Math.max(listView.originY,
-                            Math.min(listView.contentY + y, listView.originY + listView.contentHeight - 1))
-    var index = listView.indexAt(listView.width / 2, contentY)
-    var item = listView.itemAtIndex(index)
-    if (index < 0 || !item) {
-      root.dropSlot = -1
-      return
-    }
-    var group = slot.modelData.reorder, blocks = Ordering.blocks(root.model, group) || []
-    var own = -1
-    for (var b = 0; b < blocks.length; b++) {
-      if (blocks[b].id === group.id) {
-        own = b
-      }
-    }
-    if (own < 0) {
-      root.dropSlot = -1
-      return
-    }
-    var edges = root.blockEdges(blocks, index, item), nearest = 0
-    for (var edge = 1; edge < edges.length; edge++) {
-      if (Math.abs(edges[edge] - contentY) < Math.abs(edges[nearest] - contentY)) {
-        nearest = edge
-      }
-    }
-    root.dropY = edges[nearest]
-    root.dropSlot = nearest === own || nearest === own + 1 ? -1 : nearest
-  }
-
   // Move the dragged row's block to the slot of the group member at visual
   // index `to`. Linear in the rows: the edge scroll calls this every tick.
   function moveDrag(to) {
@@ -261,7 +186,6 @@ Item {
   function cancelDrag() {
     var slot = root.dragSlot
     root.dragSlot = null
-    root.dropSlot = -1
     if (slot) {
       slot.cancelDrag()
     }
@@ -300,8 +224,7 @@ Item {
   // Scrolls while the dragged row is held against the top or bottom edge.
   // The row it then lands on is found under the same point the DropAreas
   // see, the row's drag hot spot, so the timer and a mouse move never pick
-  // different slots for one position; a line marker is pointed again at
-  // the pointer, which the rows have moved under.
+  // different slots for one position.
   Timer {
     interval: 30
     repeat: true
@@ -316,11 +239,7 @@ Item {
       }
       root.setScrollOffset(root.scrollOffset() + Math.max(-Style.space(12), Math.min(distance / 4, Style.space(12))))
       var y = Math.max(0, Math.min(point, listView.height - 1))
-      if (root.dragSlot.lineMarker) {
-        root.pointDrag(y)
-      } else {
-        root.moveDrag(listView.indexAt(listView.width / 2, listView.contentY + y))
-      }
+      root.moveDrag(listView.indexAt(listView.width / 2, listView.contentY + y))
     }
   }
 
@@ -452,9 +371,7 @@ Item {
         // delegate and destroys the one under the mouse, ending the drag at
         // the first swap. Instead the drag shuffles the visual order
         // (items.move) as rows are crossed, and the model hears about it
-        // once, on release (reorderFinished). A line marker's drag shuffles
-        // nothing: the pointer picks the edge the row lands at (pointDrag),
-        // and the model hears the order on release the same way.
+        // once, on release (reorderFinished).
         DelegateModel {
           id: visualModel
           model: root.filtering ? [] : root.model
@@ -477,29 +394,19 @@ Item {
             readonly property int indent: (modelData.level || 0)
               * (Style.font.icon + Style.space(2) + Style.spacing.md - Style.spacing.sm)
             readonly property bool draggable: !!modelData.reorder
-            // The group asked for a line marker: dragged, the row stands
-            // still while a line shows where it lands.
-            readonly property bool lineMarker: draggable && modelData.reorder.marker === "line"
-            // The pointer's last place in the list's viewport while this row
-            // is dragged under a line marker.
-            property real pointerY: 0
-            readonly property real itemHeight: root.slotHeight(modelData)
+            readonly property real itemHeight: isNote ? root.rowHeight : Style.spacing.controlHeight + root.rowGap
             // Where this row sits on screen while a drag shuffles the order.
             readonly property int visualIndex: slot.DelegateModel.itemsIndex
             function cancelDrag() {
               row.Drag.cancel()
               slot.DelegateModel.inPersistedItems = false
             }
-            // Where the drag is, in the list's viewport: the carried row's hot
-            // spot, or the pointer over the row standing still.
+            // Where the dragged row's hot spot is, in the list's viewport.
             function dragPointY() {
-              if (slot.lineMarker) {
-                return slot.pointerY
-              }
               return row.mapToItem(listView, row.Drag.hotSpot.x, row.Drag.hotSpot.y).y
             }
             width: listView.width
-            height: itemHeight
+            height: isNew && !root.hasTree ? 0 : itemHeight
             visible: height > 0
 
             DropArea {
@@ -518,7 +425,7 @@ Item {
               objectName: "noteRow-" + slot.modelData.path
               x: Style.spacing.xxs
               width: slot.width - Style.spacing.xxs * 2
-              height: Math.max(0, slot.itemHeight - root.rowGap)
+              height: slot.itemHeight - root.rowGap
               anchors.verticalCenter: parent.verticalCenter
               radius: root.rowRadius
               readonly property bool current: slot.isNote
@@ -528,10 +435,7 @@ Item {
               // Action rows ("New note…", sign in/out, settings) are dimmed so
               // notes stand out from the things you can do; hover lifts them.
               // Light system palettes retain more ink so actions stay readable.
-              // A carried row is lifted a little; one standing still under a
-              // line marker fades further, to show it is the one on the move.
-              opacity: dragArea.drag.active ? (slot.lineMarker ? 0.5 : 0.85)
-                : ((slot.isNew || slot.isAction) && !rowHover.hovered ? Style.secondaryOpacity(0.65) : 1)
+              opacity: dragArea.drag.active ? 0.85 : ((slot.isNew || slot.isAction) && !rowHover.hovered ? Style.secondaryOpacity(0.65) : 1)
 
               HoverHandler { id: rowHover }
 
@@ -617,7 +521,7 @@ Item {
                 id: dragArea
                 anchors.fill: parent
                 cursorShape: drag.active ? Qt.ClosedHandCursor : (slot.draggable ? Qt.OpenHandCursor : Qt.PointingHandCursor)
-                drag.target: (root.filtering || !slot.draggable) ? null : (slot.lineMarker ? dragStandIn : row)
+                drag.target: (root.filtering || !slot.draggable) ? null : row
                 drag.axis: Drag.YAxis
                 drag.threshold: Style.space(6)
                 // The row stays under the pointer. Smoothed, it would follow
@@ -632,14 +536,7 @@ Item {
                 drag.onActiveChanged: {
                   if (drag.active) {
                     root.dragSlot = slot
-                    root.dropSlot = -1
                     slot.DelegateModel.inPersistedItems = true
-                  }
-                }
-                onPositionChanged: function(mouse) {
-                  if (drag.active && slot.lineMarker && root.dragSlot === slot) {
-                    slot.pointerY = row.mapToItem(listView, mouse.x, mouse.y).y
-                    root.pointDrag(slot.pointerY)
                   }
                 }
                 onClicked: {
@@ -654,21 +551,15 @@ Item {
                   }
                 }
                 onReleased: {
-                  if (root.dragSlot !== slot) {
+                  if (!row.Drag.active || root.dragSlot !== slot) {
                     slot.DelegateModel.inPersistedItems = false
                     return
                   }
                   var group = slot.modelData.reorder
+                  var ids = Ordering.ids(root.visualRows(), group)
                   var before = Ordering.ids(root.model, group)
-                  var ids = before
-                  if (!slot.lineMarker) {
-                    ids = Ordering.ids(root.visualRows(), group)
-                  } else if (root.dropSlot >= 0) {
-                    ids = Ordering.landed(before, group.id, root.dropSlot)
-                  }
                   row.Drag.drop()
                   root.dragSlot = null
-                  root.dropSlot = -1
                   slot.DelegateModel.inPersistedItems = false
                   root.restoreVisualOrder()
                   if (JSON.stringify(ids) !== JSON.stringify(before)) {
@@ -678,7 +569,6 @@ Item {
                 onCanceled: {
                   row.Drag.cancel()
                   root.dragSlot = null
-                  root.dropSlot = -1
                   slot.DelegateModel.inPersistedItems = false
                   root.restoreVisualOrder()
                 }
@@ -692,15 +582,7 @@ Item {
                 onTapped: rowMenu.openFor(slot.modelData)
               }
 
-              // A line marker's drag moves this in the row's stead: the row
-              // keeps its slot, and the pointer says where it lands.
-              Item {
-                id: dragStandIn
-              }
-
-              // Carried, the row is what the DropAreas see; under a line
-              // marker it stays, and no DropArea hears of it.
-              Drag.active: dragArea.drag.active && !slot.lineMarker
+              Drag.active: dragArea.drag.active
               // The delegate root, so a DropArea can read the dragged row's
               // modelData and visualIndex without copies of either.
               Drag.source: slot
@@ -708,7 +590,7 @@ Item {
               Drag.hotSpot.y: height / 2
 
               states: State {
-                when: dragArea.drag.active && !slot.lineMarker
+                when: dragArea.drag.active
                 ParentChange { target: row; parent: listView }
                 // The pill is centred in its slot by an anchor, and an anchor
                 // outranks the drag's writes to y — reparented, it would pin
@@ -731,20 +613,6 @@ Item {
           displaced: Transition { NumberAnimation { properties: "y"; duration: 120; easing.type: Easing.OutQuad } }
 
           ListWheel { flick: listView }
-        }
-
-        // The line marker: where the dragged row of a group that asked for
-        // one will land, drawn between the rows while they stand still, from
-        // the row's own indent to the pills' right edge.
-        Rectangle {
-          objectName: "dropLine"
-          visible: root.dropSlot >= 0
-          x: Style.spacing.xxs + root.textInset + (root.dragSlot ? root.dragSlot.indent : 0)
-          width: listView.width - x - Style.spacing.xxs
-          y: root.dropY - listView.contentY - height / 2
-          height: Style.spacing.xxs
-          radius: height / 2
-          color: root.accent
         }
 
         // ---- there is more: these fades, and the track on the panel's own

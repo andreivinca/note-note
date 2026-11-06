@@ -1700,10 +1700,9 @@ ShellRoot {
           oneNoteAccount.logins === 1 && oneNoteAccount.destructiveLogins === 0)
     oneNoteAccount.filesWrite = true
     var orderingRows = orderingSource.bookRows(orderingBook, "", 0)
-    check("OneNote declares section page groups with a line marker and keeps subpage hierarchy",
+    check("OneNote declares section page groups and keeps subpage hierarchy",
           orderingRows[0].reorder === undefined && orderingRows[1].reorder.scope === "pages:" + orderingSection
-          && orderingRows[1].reorder.descendants && orderingRows[1].reorder.marker === "line"
-          && !orderingRows[2].reorder && orderingRows[2].level === 2
+          && orderingRows[1].reorder.descendants && !orderingRows[2].reorder && orderingRows[2].level === 2
           && orderingRows[3].reorder.scope === orderingRows[1].reorder.scope)
     check("a OneNote section offers Refresh, and rename and delete where its file can be written",
           orderingRows[0].menu.map(function(item) { return item.id }).join(",") === "refresh,rename,delete",
