@@ -492,7 +492,7 @@ class SectionFileTests(unittest.TestCase):
         answer, failed, calls = self.run_command(self.delete, cache)
         self.assertFalse(failed)
         self.assertEqual((answer["ok"], answer["pages"]), (True, ["p1"]))
-        calls["deleted"].assert_called_once_with("DELETE", self.ITEM)
+        calls["deleted"].assert_called_once_with("DELETE", self.ITEM, max_bytes=onenote.MAX_PAGE_HTML)
         self.assertEqual([section["id"] for section in cache["sections"]], ["t"])
 
     def test_a_delete_of_a_file_already_gone_is_done_all_the_same(self):

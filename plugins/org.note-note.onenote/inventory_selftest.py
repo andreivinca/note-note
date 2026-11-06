@@ -224,6 +224,20 @@ class InventoryTests(unittest.TestCase):
                          ("work", "family", "Family Room"))
         self.assertEqual(cache["sections"], [made_section])
 
+    def test_a_section_asked_of_a_holder_the_listing_does_not_hold_is_refused(self):
+        """The holder could be a notebook or a group: Graph is not asked to
+        guess, and the answer says to read the list again."""
+        cache = {"notebooks": [{"id": "family", "name": "Family Room", "userRole": "Owner"}],
+                 "sectionGroups": [], "sections": [], "pages": []}
+        output = io.StringIO()
+        with patch.object(onenote, "load_listing", return_value=cache), \
+                patch.object(onenote, "read_payload", return_value={"name": "Tasks"}), \
+                patch.object(onenote, "graph") as graph, contextlib.redirect_stdout(output):
+            with self.assertRaises(SystemExit):
+                onenote.cmd_onenote_create_section("work", "-")
+        self.assertEqual(json.loads(output.getvalue())["error"], onenote.HOLDER_NOT_LISTED)
+        graph.assert_not_called()
+
     def test_a_section_group_is_made_in_its_notebook(self):
         cache = {"notebooks": [{"id": "family", "name": "Family Room", "userRole": "Owner",
                                 "self": SHARED + "/notebooks/family"}],
@@ -307,6 +321,24 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(calls["found"].call_args.args[0]["id"], self.WORK)
         self.assertEqual([group["name"] for group in cache["sectionGroups"]], ["New", "Archive", "Empty"])
 
+    def test_a_rename_takes_the_name_onedrive_takes(self):
+        """A section's and a group's names are OneDrive's: one rule, named
+        for what is renamed."""
+        with patch.object(onenote, "read_payload", return_value={"name": "  " + "N" * 60 + " "}):
+            self.assertEqual(onenote.requested_name("-", "section group"), "N" * 50)
+        refused = " ".join(onenote.SECTION_NAME_REFUSED)
+        for noun, name, error in (("section", "", "a section needs a name"),
+                                  ("section group", " ", "a section group needs a name"),
+                                  ("section", "a/b", "A section name cannot contain any of " + refused),
+                                  ("section group", "a:b", "A section group name cannot contain any of " + refused)):
+            output = io.StringIO()
+            with self.subTest(noun=noun, name=name), \
+                    patch.object(onenote, "read_payload", return_value={"name": name}), \
+                    contextlib.redirect_stdout(output):
+                with self.assertRaises(SystemExit):
+                    onenote.requested_name("-", noun)
+                self.assertEqual(json.loads(output.getvalue())["error"], error)
+
     def test_a_group_rename_onto_a_name_the_notebook_has_is_refused(self):
         cache = self.grouped_listing()
         answer, failed, calls = self.run_group_command(self.rename_group, cache, graph=(409, {}))
@@ -330,7 +362,7 @@ class InventoryTests(unittest.TestCase):
         answer, failed, calls = self.run_group_command(self.delete_group, cache)
         self.assertFalse(failed)
         self.assertEqual((answer["ok"], answer["pages"]), (True, ["p2", "p3"]))
-        calls["deleted"].assert_called_once_with("DELETE", self.GROUP_ITEM)
+        calls["deleted"].assert_called_once_with("DELETE", self.GROUP_ITEM, max_bytes=onenote.MAX_PAGE_HTML)
         self.assertEqual([group["id"] for group in cache["sectionGroups"]], ["empty"])
         self.assertEqual([section["id"] for section in cache["sections"]], ["loose"])
         self.assertEqual([page["id"] for page in cache["pages"]], ["p1"])
@@ -383,6 +415,10 @@ class InventoryTests(unittest.TestCase):
             with self.subTest(metadata=metadata):
                 with self.assertRaises(web.WebError):
                     web.group_item(group, lambda method, url: (200, metadata))
+        # The folder of a group renamed in OneNote since the listing was
+        # read: not written under the old name, and the answer says what to do.
+        with self.assertRaisesRegex(web.WebError, "refresh the list"):
+            web.group_item(group, lambda method, url: (200, dict(folder, name="Other")))
         with self.assertRaises(web.SectionGone):
             web.group_item(group, lambda method, url: (404, {}))
         with self.assertRaises(web.WebError):

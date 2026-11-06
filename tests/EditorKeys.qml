@@ -861,6 +861,21 @@ Window {
             "the view state did not come back: " + JSON.stringify(back) + " vs " + JSON.stringify(state))
   }
 
+  // The caret on the body's first line shows the page's top — the date and
+  // the title above it — not the line pinned to the frame's edge.
+  function firstLineShowsTheTop() {
+    var lines = []
+    for (var i = 0; i < 80; i++) {
+      lines.push("line " + i)
+    }
+    load({ source: lines.join("\n\n") + "\n" })
+    editor.setCursorPosition(editor.plainText().length)
+    require(editor.viewState().scroll > 0, "the caret at the end did not scroll the view")
+    keys.keyClick(Qt.Key_Home, Qt.ControlModifier)
+    require(editor.cursorPosition() === 0, "Ctrl+Home did not land on the first line: " + editor.cursorPosition())
+    require(editor.viewState().scroll === 0, "the first line left the title out of view: " + editor.viewState().scroll)
+  }
+
   // The session's own sequence — read-only while a note loads, released
   // once it is shown — leaves a long note at its top: Qt's readOnly
   // toggle would put the caret at the end and scroll the view after it.
@@ -3583,6 +3598,7 @@ Window {
       { name: "retyping an emptied code line keeps it code", run: retypeCodeLine },
       { name: "a note released from read-only stays at its top", run: releasedAtTop },
       { name: "Down from the title lands on the first line; a reload keeps the view", run: titleDownAndViewState },
+      { name: "Ctrl+Home from the note's end shows the title", run: firstLineShowsTheTop },
       { name: "typing on a rule creates one undo step", run: typeAfterRule }
     ], each(deletions, deleteParagraph), each(listEdits, editNestedList), [
       { name: "conflict passages and all actions work through the real editor", run: conflictPanel },

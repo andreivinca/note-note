@@ -140,9 +140,9 @@ def run(suite, args):
             "import json, sys\n"
             "b = {'id': 'b', 'name': 'B', 'notebookId': 'n', 'notebook': 'N'}\n"
             "a = {'id': 'a', 'name': 'A', 'notebookId': 'n', 'notebook': 'N'}\n"
-            "answers = {'list': {'sections': [b, a], 'pages': [], 'cached': True, 'inventoryReady': True,\n"
-            "                    'inventoryComplete': True, 'sectionOrderPending': True},\n"
-            "           'section-order': {'sections': [a, b], 'sectionOrderWarnings': ['N: placed by the pass']}}\n"
+            "answers = {'list': {'sections': [b, a], 'sectionRanks': {'b': 0, 'a': 1}, 'pages': [], 'cached': True,\n"
+            "                    'inventoryReady': True, 'inventoryComplete': True, 'sectionOrderPending': True},\n"
+            "           'section-order': {'sectionRanks': {'a': 0, 'b': 1}, 'sectionOrderWarnings': ['N: placed by the pass']}}\n"
             "sys.stdout.write(json.dumps(answers[sys.argv[1]]))\n")
         (work / "onenote_race_stub.py").write_text(
             "import json, sys, time\n"

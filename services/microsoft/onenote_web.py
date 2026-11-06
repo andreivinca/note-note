@@ -124,9 +124,14 @@ def group_item(group, graph=msgraph.graph):
             or str(parent.get("driveId", "")).casefold() != drive_id.casefold()
             or parent.get("driveType") != "personal"
             or str(parent.get("id", "")).casefold() != holder_id.casefold()
-            or "folder" not in metadata
-            or str(metadata.get("name", "")).casefold() != str(group.get("name", "")).casefold()):
+            or "folder" not in metadata):
         raise WebError("The OneNote section group could not be verified as a writable OneDrive folder")
+    # A folder in the right holder under another name is as likely the
+    # group renamed in OneNote since the listing was read as a folder that
+    # is not the group's: the listing says which once it is read again.
+    if str(metadata.get("name", "")).casefold() != str(group.get("name", "")).casefold():
+        raise WebError("This section group's folder no longer has the name Note Note last read from OneNote"
+                       " — it may have been renamed; refresh the list and try again")
     return path
 
 

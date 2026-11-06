@@ -141,13 +141,19 @@ LaneProvider {
     }
     return null
   }
+  // Each section and group by id: the rows look one up per page and per
+  // record, and the listings replace the arrays, so the indexes follow.
+  readonly property var sectionsById: root.indexById(root.onSections)
+  readonly property var groupsById: root.indexById(root.onGroups)
+  function indexById(records) {
+    var index = new Map()
+    records.forEach(function(record) {
+      index.set(record.id, record)
+    })
+    return index
+  }
   function sectionAt(id) {
-    for (var i = 0; i < root.onSections.length; i++) {
-      if (root.onSections[i].id === id) {
-        return root.onSections[i]
-      }
-    }
-    return null
+    return root.sectionsById.get(id) || null
   }
   // A listing's sections with those still being created, which a listing
   // made before OneNote had them does not hold.
@@ -166,12 +172,7 @@ LaneProvider {
     return listed
   }
   function groupAt(id) {
-    for (var i = 0; i < root.onGroups.length; i++) {
-      if (root.onGroups[i].id === id) {
-        return root.onGroups[i]
-      }
-    }
-    return null
+    return root.groupsById.get(id) || null
   }
   // The group a section or group sits in, "" for one directly in its
   // notebook. One whose group is not listed sits there too: a listing cut
@@ -180,11 +181,14 @@ LaneProvider {
     var id = record.parentGroupId || ""
     return root.groupAt(id) ? id : ""
   }
-  // The groups a section or group sits in, outermost first.
+  // The groups a section or group sits in, outermost first. A cache can
+  // be damaged into groups holding each other: the walk ends where it
+  // comes back on itself, as groups_within does (onenote.py).
   function groupsAbove(record) {
-    var groups = []
+    var groups = [], seen = new Set()
     var group = root.groupAt(root.parentOf(record))
-    while (group) {
+    while (group && !seen.has(group.id)) {
+      seen.add(group.id)
       groups.unshift(group)
       group = root.groupAt(root.parentOf(group))
     }
@@ -367,10 +371,12 @@ LaneProvider {
   // directly in the notebook — with the open sections' pages and New Note
   // rows and the open groups' contents, starting at `level`: 0 when the
   // notebook is a tab of its own, 1 when it sits under its own tree row.
-  function bookRows(bookId, groupId, level) {
+  // `pages` are the pages on the list (visiblePages), counted on each
+  // group's row.
+  function bookRows(bookId, groupId, level, pages) {
     var rows = []
     root.holderChildren(bookId, groupId).forEach(function(child) {
-      rows = rows.concat(child.group ? root.groupRows(child.record, bookId, level)
+      rows = rows.concat(child.group ? root.groupRows(child.record, bookId, level, pages)
                                      : root.sectionRows(child.record, bookId, level))
     })
     return rows
@@ -378,20 +384,25 @@ LaneProvider {
 
   // The sections and groups directly in a notebook or group, as OneNote
   // places them: the ones the section-order pass ranked, sections and
-  // groups together, by rank; then the sections it has not ranked, in the
-  // order the listing gives; then such groups, A–Z. A section or group
-  // made since the pass ran is not ranked yet, and OneNote adds it last.
+  // groups together, by rank; then the sections it has not ranked, A–Z;
+  // then such groups, A–Z. A section or group made since the pass ran is
+  // not ranked yet, and OneNote adds it last; a notebook the pass could
+  // not read has no rank at all, and lists A–Z throughout.
   function holderChildren(bookId, groupId) {
+    function byName(a, b) {
+      return a.name.localeCompare(b.name)
+    }
     var sections = root.onSections.filter(function(sec) {
       return sec.notebookId === bookId && root.parentOf(sec) === groupId && !root.deletingSections[sec.id]
-    }).map(function(sec) {
-      return { group: false, record: sec }
     })
+    sections.sort(byName)
     var groups = root.onGroups.filter(function(group) {
       return group.notebookId === bookId && root.parentOf(group) === groupId && !root.deletingGroups[group.id]
     })
-    groups.sort(function(a, b) { return a.name.localeCompare(b.name) })
-    var children = sections.concat(groups.map(function(group) {
+    groups.sort(byName)
+    var children = sections.map(function(sec) {
+      return { group: false, record: sec }
+    }).concat(groups.map(function(group) {
       return { group: true, record: group }
     }))
     function ranked(child) {
@@ -436,13 +447,13 @@ LaneProvider {
     return rows
   }
 
-  // A group's row, and what it holds when it is open.
-  function groupRows(group, bookId, level) {
+  // A group's row, counting the pages in it, and what it holds when it is open.
+  function groupRows(group, bookId, level, pages) {
     var groupOpen = root.expanded.indexOf(group.id) >= 0
     var rows = [{ kind: "tree", path: group.id, title: group.name, icon: "󰉓", level: level, expanded: groupOpen,
-                  count: root.groupPages(group.id, root.visiblePages()).length, menu: root.groupMenu(group) }]
+                  count: root.groupPages(group.id, pages).length, menu: root.groupMenu(group) }]
     if (groupOpen) {
-      rows = rows.concat(root.bookRows(bookId, group.id, level + 1))
+      rows = rows.concat(root.bookRows(bookId, group.id, level + 1, pages))
     }
     return rows
   }
@@ -497,7 +508,7 @@ LaneProvider {
       root.sections = books.map(function(b) {
         var pgs = root.bookPages(b.id, visiblePages)
         return { key: b.id, name: b.name, count: pgs.length, notes: noteList(pgs),
-                 rows: bookRows(b.id, "", 0), footerActions: accountActions(b.id) }
+                 rows: bookRows(b.id, "", 0, visiblePages), footerActions: accountActions(b.id) }
       })
       root.updated()
       return
@@ -515,7 +526,7 @@ LaneProvider {
                     expanded: open, count: root.bookPages(books[b].id, visiblePages).length,
                     menu: root.bookWritable(books[b].id) ? root.notebookMenu : [] })
         if (open) {
-          rows = rows.concat(bookRows(books[b].id, "", 1))
+          rows = rows.concat(bookRows(books[b].id, "", 1, visiblePages))
         }
       }
       if (books.length === 0) {
@@ -618,6 +629,16 @@ LaneProvider {
       }
     })
     return next
+  }
+  // `ids` with `from` as `to`, listed once: the made section or group takes
+  // its stand-in's place among the open rows, beside a listing that brought
+  // it already — and that the user may have opened too.
+  function replacedId(ids, from, to) {
+    var open = ids.indexOf(from) >= 0 || ids.indexOf(to) >= 0
+    var rest = ids.filter(function(id) {
+      return id !== from && id !== to
+    })
+    return open ? rest.concat([to]) : rest
   }
 
   // A page in a folded section has no row. Revealing one opens its
@@ -761,9 +782,7 @@ LaneProvider {
         }).map(function(other) {
           return other.id === draft.id ? sct : other
         })
-        root.expanded = root.expanded.map(function(id) {
-          return id === draft.id ? sct.id : id
-        })
+        root.expanded = root.replacedId(root.expanded, draft.id, sct.id)
         root.rebuild()
         root.persistRequested()
         root.statusRequested("Section created")
@@ -814,9 +833,7 @@ LaneProvider {
         }).map(function(other) {
           return other.id === draft.id ? made : other
         })
-        root.expanded = root.expanded.map(function(id) {
-          return id === draft.id ? made.id : id
-        })
+        root.expanded = root.replacedId(root.expanded, draft.id, made.id)
         root.rebuild()
         root.persistRequested()
         root.statusRequested("Section group created")
@@ -1390,16 +1407,13 @@ LaneProvider {
         root.statusRequested("OneNote section order: " + result.error)
         return
       }
-      if (result.sections instanceof Array) {
-        root.onSections = root.listedSections(result.sections)
-      }
       if (result.sectionRanks instanceof Object) {
         root.orderRanks = result.sectionRanks
       }
+      root.rebuild()
       if (result.sectionOrderWarnings instanceof Array && result.sectionOrderWarnings.length) {
         root.statusRequested("OneNote section order: " + result.sectionOrderWarnings.join("; "))
       }
-      root.rebuild()
     })
   }
 

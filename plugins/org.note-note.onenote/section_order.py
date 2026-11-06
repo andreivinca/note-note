@@ -11,16 +11,16 @@ See docs/onenote-section-order.md for assumptions, evidence and limitations.
 
 For verified personal notebooks, IDs identify OneDrive package items. Groups are
 folders within that package, each with its own TOC. The walk goes into each
-group in its remote position and returns one sequence of section IDs, which
-keeps each group's sections in their TOC order among themselves. It also
-ranks every section and group among the children of the folder holding it,
-sections and groups together, which is where OneNote shows a group. A
-group's rank joins its folder to Graph's group by the same personal-ID
-mapping, a mapping no live check has verified for folders, so it is given
-only where the folder also has the group's name and Graph puts the group in
-the same holder; a group without one is listed A–Z after its holder's
-ranked children (Provider.qml), and the pass says so. No manual positions,
-note contents, signed URLs or raw TOC files are stored locally.
+group in its remote position and ranks every section and group among the
+children of the folder holding it, sections and groups together, which is
+where OneNote shows a group; the provider places each holder's children by
+those ranks (Provider.qml, holderChildren). A group's rank joins its folder
+to Graph's group by the same personal-ID mapping, a mapping no live check
+has verified for folders, so it is given only where the folder also has the
+group's name and Graph puts the group in the same holder; a group without
+one is listed A–Z after its holder's ranked children, and the pass says so.
+No manual positions, note contents, signed URLs or raw TOC files are stored
+locally.
 
 A folder may hold more than one TOC: an old desktop client leaves a localized
 "Open Notebook.onetoc2" beside the ".onetoc2" current clients write, and only
@@ -240,6 +240,9 @@ class Ordering:
         return tables[stamps.index(newest)]
 
     def folder(self, item_id, depth=0, holder=""):
+        """Walks the folder's sections and groups in the order its table of
+        contents gives, recording each one's holder and rank (places) and
+        its name, and goes into each group's folder in its turn."""
         if item_id in self.visited or len(self.visited) >= MAX_FOLDERS or depth >= MAX_DEPTH:
             raise OrderUnavailable("cyclic or excessive notebook hierarchy")
         self.visited.add(item_id)
@@ -250,7 +253,7 @@ class Ordering:
         if not relevant:
             # Nothing to order: a group holding no section or group needs no
             # table of contents, and may have none.
-            return []
+            return
         # Order numbers may repeat and skip; the web client writes both. The
         # rank after a stable sort is the position, so equal numbers keep the
         # order the TOC lists them in.
@@ -261,7 +264,6 @@ class Ordering:
         if any(item["name"].casefold() not in positions for item in relevant):
             raise OrderUnavailable("incomplete live section order")
         relevant.sort(key=lambda item: positions[item["name"].casefold()])
-        ordered = []
         for rank, item in enumerate(relevant):
             # The inverse of the same unguaranteed personal-ID mapping, for a
             # group's folder as for a section's file.
@@ -271,11 +273,9 @@ class Ordering:
             self.places[record_id] = (holder, rank)
             if "folder" in item:
                 self.group_names[record_id] = item["name"]
-                ordered.extend(self.folder(item["id"], depth + 1, record_id))
+                self.folder(item["id"], depth + 1, record_id)
             else:
                 self.section_names[record_id] = item["name"][:-4]
-                ordered.append(record_id)
-        return ordered
 
     def notebook(self, notebook_id, name):
         match = PERSONAL_ID.fullmatch(notebook_id)
@@ -285,16 +285,17 @@ class Ordering:
         if (item.get("id") != match[1] or item.get("name") != name
                 or (item.get("package") or {}).get("type") != "oneNote"):
             raise OrderUnavailable("notebook does not match its OneDrive package")
-        return self.folder(match[1])
+        self.folder(match[1])
 
 
 def arrange(sections, cached=None, remote=None, groups=()):
-    """Use verified remote order per book; any failure sorts that book A–Z.
+    """Rank each verified book's sections and groups among the children of
+    the folder holding each, by ID; any failure leaves that book unranked,
+    which the provider shows A–Z, and warns.
 
-    The ranks are each section's and group's place among the children of the
-    folder holding it, by ID, for the verified books: a record has one where
-    Graph puts it in the folder the walk found it in, under a group the
-    listing holds, and a group only where its folder has its name too.
+    A record has a rank where Graph puts it in the folder the walk found it
+    in, under a group the listing holds, and a group only where its folder
+    has its name too.
 
     The broad catch is intentional at this optional feature boundary. No
     exception text from an unexpected failure is exposed: it might contain
@@ -313,13 +314,11 @@ def arrange(sections, cached=None, remote=None, groups=()):
             continue  # A single section has no relative position to discover.
         ordering.current_files = []
         try:
-            ids = ordering.notebook(notebook_id, members[0]["notebook"])
-            positions = {key: index for index, key in enumerate(ids)}
+            ordering.notebook(notebook_id, members[0]["notebook"])
             for section in members:
-                if (section["id"] not in positions
-                        or ordering.section_names[section["id"]].casefold() != section["name"].casefold()):
+                name = ordering.section_names.get(section["id"])
+                if name is None or name.casefold() != section["name"].casefold():
                     raise OrderUnavailable("Graph and OneDrive section identities no longer match")
-            members.sort(key=lambda section: positions[section["id"]])
             live_files.update(ordering.current_files)
         except (Exception, SystemExit) as error:
             # This module's own reasons are fixed text, and say what to look
@@ -327,7 +326,6 @@ def arrange(sections, cached=None, remote=None, groups=()):
             reason = " (%s)" % error if type(error) is OrderUnavailable else ""
             warnings.append("%s: custom order unavailable%s; sections sorted alphabetically" %
                             (members[0]["notebook"] or "Notebook", reason))
-            members.sort(key=lambda section: (section["name"].casefold(), section["name"], section["id"]))
             for key in ordering.current_files:
                 ordering.saved.pop(key, None)
         else:
@@ -343,12 +341,9 @@ def arrange(sections, cached=None, remote=None, groups=()):
             if any(group["id"] not in ranks for group in held):
                 warnings.append("%s: section group order unavailable; groups listed alphabetically" %
                                 (members[0]["notebook"] or "Notebook"))
-    # Preserve the original placement of notebooks within the account list.
-    iterators = {key: iter(members) for key, members in books.items()}
-    result = [next(iterators[section["notebookId"]]) for section in sections]
     files = {key: value for key, value in ordering.saved.items() if key in live_files}
     saved = {"version": CACHE_VERSION, "files": files}
     if len(json.dumps(saved).encode()) > MAX_CACHE_BYTES:
         # Ordering is still valid; decline to persist an oversized optimization.
         saved = {"version": CACHE_VERSION, "files": {}}
-    return result, saved, warnings, ranks
+    return saved, warnings, ranks

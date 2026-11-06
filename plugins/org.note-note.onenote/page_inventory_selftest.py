@@ -249,7 +249,8 @@ class ListingTests(unittest.TestCase):
             onenote.cmd_onenote_list(False, incremental=True)
         result = self.output.call_args.args[0]
         self.assertTrue(result["deferred"])
-        self.assertEqual([item["id"] for item in result["sections"]], ["created", "s"])
+        # The sections discovery found, then the one it could not say is gone.
+        self.assertEqual([item["id"] for item in result["sections"]], ["s", "created"])
         self.assertEqual(len(onenote.load_listing()["sections"]), 2)
 
     def test_tree_discovery_resumes_without_spending_the_same_requests(self):

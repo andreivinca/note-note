@@ -2009,26 +2009,45 @@ Item {
       ListWheel { flick: flick }
     }
 
+    // Keeps `r` — the caret, or the title — in view. On the body's first
+    // line the page's top is shown instead, with the date and the title
+    // above the line: pinned to the frame's top edge, the line would hide
+    // them, and no key brings them back.
     function ensureVisible(r) {
-      if (contentY >= r.y) {
+      var firstLine = r.y < body.y + r.height
+      if (firstLine && r.y + r.height <= height) {
+        contentY = 0
+      } else if (contentY >= r.y) {
         contentY = r.y
       } else if (contentY + height <= r.y + r.height) {
         contentY = r.y + r.height - height
       }
     }
 
-    // The page: the date, the title and the body scroll as one.
-    Column {
+    // The page: the date, the title and the body scroll as one. Each sits
+    // under the one before it by its own y, not in a Column: a positioner
+    // lays its children out in a later pass, and the page's height — the
+    // Flickable's content height, which shows and hides the scrollbar —
+    // would lag a frame behind the text.
+    Item {
       id: page
       x: sheet.anchors.leftMargin
       width: sheet.width
-      topPadding: sheet.anchors.topMargin
-      bottomPadding: sheet.anchors.bottomMargin
+      height: body.y + body.height + page.bottomPadding
+      readonly property real topPadding: sheet.anchors.topMargin
+      readonly property real bottomPadding: sheet.anchors.bottomMargin
       // Shared spacing between the date, title and document.
-      spacing: Style.spacing.xxxl
+      readonly property real spacing: Style.spacing.xxxl
+      // Where the part after `part` starts: under it, or in its place when
+      // it is not shown.
+      function under(part) {
+        return part.visible ? part.y + part.height + page.spacing : part.y
+      }
 
       Text {
+        id: modifiedLine
         visible: root.hasNote && root.modifiedText.length > 0
+        y: page.topPadding
         width: parent.width
         horizontalAlignment: Text.AlignRight
         text: root.modifiedText
@@ -2041,6 +2060,7 @@ Item {
       TextField {
         id: titleField
         objectName: "noteTitle"
+        y: page.under(modifiedLine)
         width: parent.width
         // Sticky Notes have no separate title (subject = first line).
         visible: root.hasTitle
@@ -2077,6 +2097,7 @@ Item {
       // so a slab's place is the editor's own coordinates.
       Item {
         id: body
+        y: page.under(titleField)
         width: parent.width
         height: area.height
 

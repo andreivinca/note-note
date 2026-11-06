@@ -1365,24 +1365,27 @@ ShellRoot {
     if (!Platform.env("NOTE_NOTE_TEST_ONENOTE_SCRIPT")) {
       return
     }
-    var ids = function() {
-      return orderProvider.onSections.map(function(section) { return section.id }).join(",")
+    var rows = function() {
+      return orderProvider.sections.length === 0 ? ""
+           : orderProvider.sections[0].rows.map(function(row) { return row.path }).join(",")
     }
+    // The rows once the listing is on them: before it, the tab says the
+    // notebooks are loading.
     var listed = ""
     var record = function() {
       if (listed === "" && orderProvider.onSections.length) {
-        listed = ids()
+        listed = rows()
       }
     }
-    orderProvider.onSectionsChanged.connect(record)
+    orderProvider.updated.connect(record)
     orderProvider.statusRequested.connect(function(text) {
       if (text.indexOf("section order") < 0) {
         return
       }
-      orderProvider.onSectionsChanged.disconnect(record)
-      check("the listing answers before the pass, in the order the last pass left", listed === "b,a")
-      check("the pass places the sections and reports its warnings",
-            ids() === "a,b" && text === "OneNote section order: N: placed by the pass")
+      orderProvider.updated.disconnect(record)
+      check("the listing answers before the pass, with the ranks the last pass left", listed === "b,a")
+      check("the pass ranks the sections, shown before it reports its warnings",
+            rows() === "a,b" && text === "OneNote section order: N: placed by the pass")
       test.processes--
     })
     test.processes++
@@ -1947,7 +1950,8 @@ ShellRoot {
     })
     check("OneNote search waits for inventory during dynamic provider startup",
           created && created.searchStatus("onenote") === "Preparing content search…")
-    created.onSections = [{ id: "section", notebookId: "book" }, { id: "other", notebookId: "other-book" }]
+    created.onSections = [{ id: "section", name: "Section", notebookId: "book" },
+                          { id: "other", name: "Other", notebookId: "other-book" }]
     created.pages = []
     created.searchInventoryReady = true
     check("OneNote search scope follows the initialized inventory",
@@ -2124,6 +2128,20 @@ ShellRoot {
     grouped.revealPath(grouped.pathOf("o2"))
     check("revealing a page opens its notebook, every group above it and its section",
           grouped.expanded.join(",") === "gbook,work,archive,old", grouped.expanded.join(","))
+    // A damaged cache can list groups holding each other: the walk up from
+    // a section in one ends where it comes back, and the rows still build.
+    var listedGroups = grouped.onGroups
+    grouped.onGroups = listedGroups.concat([
+      { id: "ring-a", name: "Ring A", notebookId: "gbook", notebook: "Grouped", parentGroupId: "ring-b" },
+      { id: "ring-b", name: "Ring B", notebookId: "gbook", notebook: "Grouped", parentGroupId: "ring-a" }])
+    grouped.onSections = grouped.onSections.concat([
+      { id: "ringed", name: "Ringed", notebookId: "gbook", notebook: "Grouped", parentGroupId: "ring-a" }])
+    grouped.rebuild()
+    check("groups holding each other end the walk above a section where it comes back",
+          grouped.groupsAbove(grouped.sectionAt("ringed")).map(function(group) { return group.id }).join(",") === "ring-b,ring-a"
+          && grouped.sections[0].rows.length > 0, groupedRows())
+    grouped.onGroups = listedGroups
+    grouped.onSections = grouped.onSections.filter(function(section) { return section.id !== "ringed" })
     grouped.expanded = ["work"]
     grouped.orderRanks = { loose: 1, empty: 0, work: 2, tasks: 1, "notes-in-work": 0 }
     grouped.rebuild()
@@ -2184,16 +2202,27 @@ ShellRoot {
     grouped.createSection(groupStandIn ? groupStandIn.id : "", "Too soon", function(result) { tooSoon = result })
     check("a section group still being created takes no section",
           !!tooSoon && String(tooSoon.error).indexOf("still being created") >= 0, JSON.stringify(tooSoon))
+    // A listing brings the group OneNote has made before its answer lands,
+    // and the user opens that row too.
+    grouped.applyInventory({ sectionGroups: [{ id: "work", name: "Work", notebookId: "gbook", notebook: "Grouped" },
+                                             { id: "projects", name: "Projects", notebookId: "gbook", notebook: "Grouped" }],
+                             sections: grouped.onSections, notebooks: grouped.onNotebooks, pages: grouped.pages,
+                             pageListSerial: 2 })
+    grouped.toggleTree("projects")
     if (makeGroup) {
       makeGroup.settled({ group: { id: "projects", name: "Projects", notebookId: "gbook", notebook: "Grouped" },
                           pageListSerial: 0 }, {})
     }
-    check("OneNote's answer puts the made group in the stand-in's place, open, and it offers New section alone",
-          grouped.onGroups.some(function(group) { return group.id === "projects" })
+    check("OneNote's answer puts the made group in the stand-in's place, open once, and it offers New section alone",
+          grouped.onGroups.filter(function(group) { return group.id === "projects" }).length === 1
           && !grouped.onGroups.some(function(group) { return !!groupStandIn && group.id === groupStandIn.id })
-          && grouped.expanded.indexOf("projects") >= 0 && !(groupStandIn && grouped.expanded.indexOf(groupStandIn.id) >= 0)
+          && grouped.expanded.filter(function(id) { return id === "projects" }).length === 1
+          && !(groupStandIn && grouped.expanded.indexOf(groupStandIn.id) >= 0)
           && grouped.groupMenu(grouped.groupAt("projects")).map(function(item) { return item.id }).join(",") === "newSection",
           JSON.stringify(grouped.expanded))
+    grouped.toggleTree("projects")
+    check("one click folds the made group", grouped.expanded.indexOf("projects") < 0, JSON.stringify(grouped.expanded))
+    grouped.toggleTree("projects")
     grouped.rowAction("gbook", "newSectionGroup", "Broken", function(result) {})
     var brokenGroup = grouped.onGroups.filter(function(group) { return group.name === "Broken" })[0]
     grouped.applyInventory({ sectionGroups: [{ id: "projects", name: "Projects", notebookId: "gbook", notebook: "Grouped" }],

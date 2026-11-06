@@ -101,25 +101,28 @@ app-registration permission edit (tenant consent policies still apply).
   Graph puts the group in the same holder, under a group the listing holds;
   a section gets one on the same holder terms. A group without a rank is
   listed A–Z after its holder's ranked children, and the pass warns, so a
-  mapping that does not hold is seen and changes nothing else. The listing
-  answers the ranks (`sectionRanks`) with the order it remembers.
+  mapping that does not hold is seen and changes nothing else. The ranks
+  are the one form the order is kept in: every listing answers them
+  (`sectionRanks`), and the provider places each holder's children by them
+  (`holderChildren`).
   Downloads metadata from signed Microsoft URLs without the bearer token,
   redirects or logging credentials. Parsed entries are reused by TOC eTag;
   no note bodies or manual order are stored by this feature.
 - `onenote.py` runs the order as a pass of its own (`section-order`), after
   the listing and beside the note lane, on the provider's word: the pages
   never wait for OneDrive metadata. The pass keeps its state in its own file
-  (positions by section id, the parsed TOC metadata reused by eTag, and the
-  warnings), and the listing answers in the order the last pass left, a
-  section the pass has not placed yet following its notebook's placed ones
-  until the pass that follows the listing places it. An order file from
-  another policy version or consent state is not applied. The pass's
-  independent alphabetical fallback wraps even the optional imports and
-  initialization. It accepts only a permutation of the original Graph sections;
-  optional code cannot replace section data or membership. Graph remains
-  authoritative for page order. Optional stdout is discarded so even a
-  print-then-exit failure cannot corrupt the provider's JSON reply or expose
-  its exception payload.
+  (the ranks by section and group id, the parsed TOC metadata reused by
+  eTag, and the warnings), and every listing answers the ranks the last
+  pass left; a section the pass has not ranked yet follows its holder's
+  ranked children until the pass that follows the listing ranks it. An
+  order file from another policy version or consent state is not applied.
+  The pass's independent fallback — no rank, and a warning — wraps even the
+  optional imports and initialization. The optional code answers ranks for
+  the sections and groups Graph listed and nothing else: it never hands
+  sections back, so it cannot change section data or membership. Graph
+  remains authoritative for page order. Optional stdout is discarded so
+  even a print-then-exit failure cannot corrupt the provider's JSON reply
+  or expose its exception payload.
 - `section_order.py` requires a position for every live child and matching
   IDs/names for every Graph section. Order numbers may repeat or skip, as the
   web client writes both; equal numbers keep the order the TOC lists them in,

@@ -1108,3 +1108,18 @@ tab is what OneNote's users know a section by.
 file (`NotebookColor`), not in Graph's listing or the notebook's table
 of contents, which is why the web shows it only once a section is
 loaded; reading it would mean reading every section's file.
+
+## 2026-11-06: the section order is its ranks, kept once
+
+The order file holds each section's and group's rank among its holder's
+children, and nothing else about the order. Every listing answers those
+ranks, and the provider places each holder's children by them, the ones
+the pass has not ranked after them, A–Z. Python does not order the
+sections at all.
+
+*Tried and removed:* the order file also held each section's position in
+one flattened walk of the notebook, and `onenote.py` answered the sections
+in that order while `Provider.qml` placed each holder's children by rank.
+Two forms of one walk, and a policy split across two languages that agreed
+only because the Python sort ran before the QML one: a change to either
+had to touch both.
