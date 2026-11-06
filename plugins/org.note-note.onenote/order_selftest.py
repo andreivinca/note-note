@@ -150,6 +150,43 @@ class Remote:
         return fixture(names=("Food.one", "Welcome.one", "Health.one", "Deleted.one", "New.one"), orders=(3, 1, 5, 0, 8))
 
 
+GROUP = "0-" + item(40)
+
+
+def grouped():
+    """A notebook holding Food, the group Group with Child inside it, and
+    Welcome, as Graph lists them: the sections, then the groups."""
+    records = [{"id": "0-" + item(number), "name": name, "notebookId": BOOK, "notebook": "Test", "modified": "stamp"}
+               for number, name in [(30, "Food"), (32, "Welcome"), (41, "Child")]]
+    records[2]["parentGroupId"] = GROUP
+    return records, [{"id": GROUP, "name": "Group", "notebookId": BOOK, "notebook": "Test"}]
+
+
+class GroupedRemote(Remote):
+    """The OneDrive package grouped() lists: Food, Group, then Welcome, by
+    the notebook's TOC, and Child in the group's own folder."""
+
+    def __init__(self):
+        super().__init__()
+        self.children = [{"id": item(30), "name": "Food.one", "file": {}},
+                         {"id": item(40), "name": "Group", "folder": {}},
+                         {"id": item(32), "name": "Welcome.one", "file": {}},
+                         {"id": TOC, "name": "Open Notebook.onetoc2", "file": {}}]
+
+    def get(self, path):
+        if path.startswith(order.item_path(item(40)) + "/children"):
+            self.calls.append(path)
+            return {"value": [{"id": item(41), "name": "Child.one", "file": {}},
+                              {"id": item(42), "name": "Open Notebook.onetoc2", "file": {}}]}
+        return super().get(path)
+
+
+def grouped_entries(reader, item):
+    if item["id"] == TOC:
+        return [{"name": "Food.one", "order": 1}, {"name": "Group", "order": 2}, {"name": "Welcome.one", "order": 3}]
+    return [{"name": "Child.one", "order": 1}]
+
+
 class TocTests(unittest.TestCase):
     def test_current_and_inherited_revisions(self):
         for base in (False, True):
@@ -193,14 +230,14 @@ class TocTests(unittest.TestCase):
 class OrderingTests(unittest.TestCase):
     def test_live_join_and_versioned_cache(self):
         remote = Remote()
-        result, cached, warnings = order.arrange(sections(), remote=remote)
+        result, cached, warnings, _ = order.arrange(sections(), remote=remote)
         self.assertEqual([s["name"] for s in result], ["Welcome", "Food", "Health", "New"])
         self.assertFalse(warnings)
         self.assertEqual(len(result), len(sections()))  # Deleted.one stays deleted.
         self.assertEqual(remote.downloads, 1)
         self.assertNotIn("downloadUrl", json.dumps(cached))
         remote = Remote()
-        again, _, _ = order.arrange(sections(), cached, remote)
+        again, _, _, _ = order.arrange(sections(), cached, remote)
         self.assertEqual(result, again)
         self.assertEqual(remote.downloads, 0)
         remote = Remote("v2")
@@ -208,18 +245,18 @@ class OrderingTests(unittest.TestCase):
         self.assertEqual(remote.downloads, 1)
 
     def test_unavailable_discards_last_remote_order_and_warns(self):
-        _, cached, _ = order.arrange(sections(), remote=Remote())
+        _, cached, _, _ = order.arrange(sections(), remote=Remote())
         remote = Remote()
         def offline(path):
             raise order.OrderUnavailable("offline")
         remote.get = offline
-        again, saved, warnings = order.arrange(sections(), cached, remote)
+        again, saved, warnings, _ = order.arrange(sections(), cached, remote)
         self.assertEqual(again, alphabetical())
         self.assertTrue(warnings)
         self.assertFalse(saved["files"])
 
     def test_guid_item_ids_join_like_numbered_ones(self):
-        result, _, warnings = order.arrange(sections(guid=True), remote=Remote(guid=True))
+        result, _, warnings, _ = order.arrange(sections(guid=True), remote=Remote(guid=True))
         self.assertEqual([s["name"] for s in result], ["Welcome", "Food", "Health", "New"])
         self.assertFalse(warnings)
 
@@ -229,14 +266,14 @@ class OrderingTests(unittest.TestCase):
             entries[0] = dict(entries[0], notebookId=notebook, notebook="Work")
             entries[1] = dict(entries[1], notebookId=notebook, notebook="Work")
             with self.subTest(notebook=notebook):
-                result, _, warnings = order.arrange(entries, remote=remote)
+                result, _, warnings, _ = order.arrange(entries, remote=remote)
                 self.assertEqual(result[0], entries[0])
                 self.assertTrue(warnings)
                 self.assertFalse(any(call.startswith(order.item_path(notebook[2:])) for call in remote.calls))
 
     def test_removed_notebooks_prune_metadata(self):
-        _, cached, _ = order.arrange(sections(), remote=Remote())
-        _, saved, _ = order.arrange([], cached, Remote())
+        _, cached, _, _ = order.arrange(sections(), remote=Remote())
+        _, saved, _, _ = order.arrange([], cached, Remote())
         self.assertFalse(saved["files"])
         self.assertNotIn("notebooks", saved)
 
@@ -252,20 +289,22 @@ class OrderingTests(unittest.TestCase):
             remote.children[-1]["lastModifiedDateTime"] = "2026-09-08T08:03:37Z"
             stamp = "2025-06-15T16:35:10Z" if newest == TOC else "2026-09-08T08:03:37.5Z"
             remote.children.append({"id": "extra", "name": ".onetoc2", "file": {}, "lastModifiedDateTime": stamp})
-            result, saved, warnings = order.arrange(sections(), remote=remote)
+            result, saved, warnings, _ = order.arrange(sections(), remote=remote)
             self.assertEqual([s["name"] for s in result], ["Welcome", "Food", "Health", "New"])
             self.assertFalse(warnings)
             self.assertEqual(list(saved["files"]), [newest])
 
     def test_tocs_without_a_newest_are_not_guessed(self):
-        for stamps in [(None, None), ("2026-09-08T08:03:37Z", "2026-09-08T08:03:37Z"),
-                       ("2026-09-08T08:03:37Z", "yesterday")]:
+        for stamps, reason in [((None, None), "invalid section metadata timestamp"),
+                               (("2026-09-08T08:03:37Z", "2026-09-08T08:03:37Z"),
+                                "notebook folder has no unique .onetoc2 metadata"),
+                               (("2026-09-08T08:03:37Z", "yesterday"), "invalid section metadata timestamp")]:
             remote = Remote()
             remote.children[-1]["lastModifiedDateTime"] = stamps[0]
             remote.children.append({"id": "extra", "name": ".onetoc2", "file": {}, "lastModifiedDateTime": stamps[1]})
-            result, _, warnings = order.arrange(sections(), remote=remote)
+            result, _, warnings, _ = order.arrange(sections(), remote=remote)
             self.assertEqual(result, alphabetical())
-            self.assertTrue(warnings)
+            self.assertEqual(warnings, ["Test: custom order unavailable (%s); sections sorted alphabetically" % reason])
             self.assertEqual(remote.downloads, 0)
 
     def test_nested_group_position_and_recycle_bin(self):
@@ -290,8 +329,59 @@ class OrderingTests(unittest.TestCase):
         self.assertEqual(reader.folder(BOOK[2:]), ["0-food", "0-child"])
         self.assertNotIn("bin", reader.visited)
 
+    def test_groups_rank_among_their_holders_sections(self):
+        records, groups = grouped()
+        with patch.object(order.Ordering, "entries", grouped_entries):
+            result, _, warnings, ranks = order.arrange(records, remote=GroupedRemote(), groups=groups)
+        self.assertEqual([section["name"] for section in result], ["Food", "Child", "Welcome"])
+        self.assertFalse(warnings)
+        self.assertEqual(ranks, {records[0]["id"]: 0, GROUP: 1, records[1]["id"]: 2, records[2]["id"]: 0})
+
+    def test_a_group_the_folders_do_not_confirm_has_no_rank(self):
+        cases = {"renamed": lambda records, groups: groups[0].update(name="Other"),
+                 "in another holder": lambda records, groups: groups[0].update(parentGroupId=records[0]["id"]),
+                 "unlisted": lambda records, groups: groups.clear()}
+        for case, change in cases.items():
+            records, groups = grouped()
+            change(records, groups)
+            with self.subTest(case=case), patch.object(order.Ordering, "entries", grouped_entries):
+                result, _, warnings, ranks = order.arrange(records, remote=GroupedRemote(), groups=groups)
+                self.assertEqual([section["name"] for section in result], ["Food", "Child", "Welcome"])
+                self.assertNotIn(GROUP, ranks)
+                self.assertEqual(ranks[records[0]["id"]], 0)
+                self.assertEqual(ranks[records[1]["id"]], 2)
+                if case == "unlisted":
+                    # A section whose group is not listed sits with the
+                    # notebook's own: its rank in the group means nothing there.
+                    self.assertNotIn(records[2]["id"], ranks)
+                    self.assertFalse(warnings)
+                else:
+                    self.assertTrue(any("section group order unavailable" in warning for warning in warnings))
+
+    def test_an_empty_group_needs_no_table_of_contents(self):
+        records, groups = grouped()
+        del records[2]
+        remote = GroupedRemote()
+        original_get = remote.get
+        remote.get = lambda path: ({"value": []} if path.startswith(order.item_path(item(40)) + "/children")
+                                   else original_get(path))
+        with patch.object(order.Ordering, "entries", grouped_entries):
+            result, _, warnings, ranks = order.arrange(records, remote=remote, groups=groups)
+        self.assertEqual([section["name"] for section in result], ["Food", "Welcome"])
+        self.assertFalse(warnings)
+        self.assertEqual(ranks, {records[0]["id"]: 0, GROUP: 1, records[1]["id"]: 2})
+
+    def test_a_section_graph_puts_elsewhere_has_no_rank(self):
+        records, groups = grouped()
+        del records[2]["parentGroupId"]
+        with patch.object(order.Ordering, "entries", grouped_entries):
+            _, _, warnings, ranks = order.arrange(records, remote=GroupedRemote(), groups=groups)
+        self.assertNotIn(records[2]["id"], ranks)
+        self.assertEqual(ranks[GROUP], 1)
+        self.assertFalse(warnings)
+
     def test_listing_checkpoint_preserves_section_and_page_order(self):
-        result, _, _ = order.arrange(sections(), remote=Remote())
+        result, _, _, _ = order.arrange(sections(), remote=Remote())
         pages = [{"id": "second", "sectionId": result[0]["id"]},
                  {"id": "first", "sectionId": result[0]["id"]}]
         listing = onenote.Listing({"pages": pages}, result)
@@ -302,15 +392,15 @@ class OrderingTests(unittest.TestCase):
         self.assertEqual(data["pages"], pages)
 
     def test_unexpected_failures_and_throttles_are_alphabetical(self):
-        _, cached, _ = order.arrange(sections(), remote=Remote())
+        _, cached, _, _ = order.arrange(sections(), remote=Remote())
         for error in [RuntimeError("secret-url"), TypeError("secret-url"), SystemExit(1),
                       order.ratelimit.Throttled(60), toc.InvalidToc("unsupported"), TimeoutError()]:
             remote = Remote()
             with patch.object(remote, "get", side_effect=error):
-                result, saved, warnings = order.arrange(list(reversed(sections())), cached, remote)
+                result, saved, warnings, _ = order.arrange(list(reversed(sections())), cached, remote)
             self.assertEqual(result, alphabetical())
             self.assertFalse(saved["files"])
-            self.assertTrue(warnings)
+            self.assertEqual(warnings, ["Test: custom order unavailable; sections sorted alphabetically"])
             self.assertNotIn("secret-url", str(warnings))
 
     def test_partial_or_changed_id_mapping_is_rejected(self):
@@ -318,7 +408,7 @@ class OrderingTests(unittest.TestCase):
             remote = Remote()
             for item in remote.children[:count]:
                 item["id"] = "changed-" + item["id"]
-            result, saved, warnings = order.arrange(sections(), remote=remote)
+            result, saved, warnings, _ = order.arrange(sections(), remote=remote)
             self.assertEqual(result, alphabetical())
             self.assertFalse(saved["files"])
             self.assertTrue(warnings)
@@ -327,7 +417,7 @@ class OrderingTests(unittest.TestCase):
         remote = Remote()
         remote.download = lambda item: fixture(
             names=("Food.one", "Welcome.one", "Health.one", "New.one"), orders=(3, 1, 5))
-        result, saved, warnings = order.arrange(sections(), remote=remote)
+        result, saved, warnings, _ = order.arrange(sections(), remote=remote)
         self.assertEqual(result, alphabetical())
         self.assertTrue(warnings)
         self.assertFalse(saved["files"])
@@ -336,7 +426,7 @@ class OrderingTests(unittest.TestCase):
         remote = Remote()
         remote.download = lambda item: fixture(
             names=("Food.one", "Welcome.one", "Health.one", "New.one"), orders=(4, 1, 4, 9))
-        result, _, warnings = order.arrange(sections(), remote=remote)
+        result, _, warnings, _ = order.arrange(sections(), remote=remote)
         self.assertEqual([s["name"] for s in result], ["Welcome", "Food", "Health", "New"])
         self.assertFalse(warnings)
 
@@ -344,11 +434,11 @@ class OrderingTests(unittest.TestCase):
         for invalid in [None, {}, {"name": "x.one"}, {"id": "x", "name": []}]:
             remote = Remote()
             remote.children.append(invalid)
-            result, _, warnings = order.arrange(sections(), remote=remote)
+            result, _, warnings, _ = order.arrange(sections(), remote=remote)
             self.assertEqual(result, alphabetical())
             self.assertTrue(warnings)
         for files in [None, [], {TOC: None}, {TOC: {"etag": "v1", "entries": [None]}}]:
-            result, _, warnings = order.arrange(sections(), {"version": order.CACHE_VERSION, "files": files}, Remote())
+            result, _, warnings, _ = order.arrange(sections(), {"version": order.CACHE_VERSION, "files": files}, Remote())
             self.assertEqual(result, alphabetical())
             self.assertTrue(warnings)
 
@@ -357,7 +447,7 @@ class OrderingTests(unittest.TestCase):
         broken = [dict(section, id="other-" + section["id"], notebookId="unsupported", notebook="Broken")
                   for section in reversed(sections())]
         mixed = [section for pair in zip(broken, sections()) for section in pair]
-        result, saved, warnings = order.arrange(mixed, remote=Remote())
+        result, saved, warnings, _ = order.arrange(mixed, remote=Remote())
         self.assertEqual([section["name"] for section in result if section["notebookId"] == BOOK],
                          ["Welcome", "Food", "Health", "New"])
         self.assertEqual([section["name"] for section in result if section["notebookId"] == "unsupported"],
@@ -370,7 +460,7 @@ class OrderingTests(unittest.TestCase):
 class BoundaryTests(unittest.TestCase):
     def test_missing_scope_never_invokes_workaround(self):
         with patch.object(onenote, "files_read_granted", return_value=False), patch.object(order, "Remote") as remote:
-            result, saved, warnings = onenote.ordered_sections(list(reversed(sections())), {}, "token")
+            result, saved, warnings, _ = onenote.ordered_sections(list(reversed(sections())), {}, "token")
         remote.assert_not_called()
         self.assertEqual(result, alphabetical())
         self.assertFalse(saved)
@@ -384,20 +474,29 @@ class BoundaryTests(unittest.TestCase):
             return original_import(name, *args, **kwargs)
         with patch.object(onenote, "files_read_granted", return_value=True):
             with patch.object(builtins, "__import__", side_effect=missing):
-                result, _, warnings = onenote.ordered_sections(sections(), {}, "token")
+                result, _, warnings, _ = onenote.ordered_sections(sections(), {}, "token")
             self.assertEqual(result, alphabetical())
             self.assertNotIn("secret-url", str(warnings))
             with patch.object(order, "Remote", side_effect=RuntimeError("secret-url")):
-                result, _, warnings = onenote.ordered_sections(sections(), {}, "token")
+                result, _, warnings, _ = onenote.ordered_sections(sections(), {}, "token")
             self.assertEqual(result, alphabetical())
             self.assertTrue(warnings)
+
+    def test_optional_code_cannot_rank_what_graph_did_not_list(self):
+        for ranks in [{"stranger": 0}, {sections()[0]["id"]: -1}, {sections()[0]["id"]: "1"}, []]:
+            with patch.object(onenote, "files_read_granted", return_value=True), patch.object(order, "Remote"):
+                with patch.object(order, "arrange", return_value=(sections(), {}, [], ranks)):
+                    arranged, _, warnings, kept = onenote.ordered_sections(sections(), {}, "token")
+            self.assertEqual(arranged, alphabetical())
+            self.assertTrue(warnings)
+            self.assertEqual(kept, {})
 
     def test_invalid_optional_result_cannot_change_graph_membership(self):
         for result in [sections()[:-1], sections() + sections()[:1],
                        [dict(section, name="changed") for section in sections()]]:
             with patch.object(onenote, "files_read_granted", return_value=True), patch.object(order, "Remote"):
-                with patch.object(order, "arrange", return_value=(result, {}, [])):
-                    arranged, _, warnings = onenote.ordered_sections(sections(), {}, "token")
+                with patch.object(order, "arrange", return_value=(result, {}, [], {})):
+                    arranged, _, warnings, _ = onenote.ordered_sections(sections(), {}, "token")
             self.assertEqual(arranged, alphabetical())
             self.assertTrue(warnings)
 
@@ -445,7 +544,7 @@ class BoundaryTests(unittest.TestCase):
         self.assertNotIn("sectionOrders", files[onenote.ONENOTE_CACHE])
 
     def test_order_pass_writes_its_file_and_the_listing_follows_it(self):
-        expected, _, _ = order.arrange(sections(), remote=Remote())
+        expected, _, _, _ = order.arrange(sections(), remote=Remote())
         files = self.files({"sections": list(reversed(sections())), "pages": [], "fetched": time.time()})
         printed = io.StringIO()
         with contextlib.ExitStack() as stack:
@@ -468,7 +567,11 @@ class BoundaryTests(unittest.TestCase):
         self.assertTrue(order_file["metadata"]["files"])
         self.assertEqual([section["id"] for section in expected],
                          sorted(order_file["positions"], key=order_file["positions"].get))
+        ranks = {section["id"]: index for index, section in enumerate(expected)}
+        self.assertEqual(order_file["ranks"], ranks)
+        self.assertEqual(passed["sectionRanks"], ranks)
         self.assertEqual(listed["sections"], expected)
+        self.assertEqual(listed["sectionRanks"], ranks)
         self.assertFalse(listed["sectionOrderPending"])
 
     def test_order_pass_failure_is_alphabetical_and_contained(self):
@@ -509,6 +612,7 @@ class BoundaryTests(unittest.TestCase):
                 onenote.cmd_onenote_list(True)
             reply = json.loads(printed.getvalue())
             self.assertEqual(reply["sections"], alphabetical())
+            self.assertEqual(reply["sectionRanks"], {})
             self.assertTrue(reply["sectionOrderPending"])
 
     def test_print_then_exit_cannot_corrupt_provider_protocol(self):
@@ -517,7 +621,7 @@ class BoundaryTests(unittest.TestCase):
         printed = io.StringIO()
         with patch.object(onenote, "files_read_granted", return_value=True), patch.object(order, "Remote"):
             with patch.object(order, "arrange", side_effect=broken), contextlib.redirect_stdout(printed):
-                result, _, warnings = onenote.ordered_sections(sections(), {}, "token")
+                result, _, warnings, _ = onenote.ordered_sections(sections(), {}, "token")
         self.assertEqual(result, alphabetical())
         self.assertTrue(warnings)
         self.assertEqual(printed.getvalue(), "")

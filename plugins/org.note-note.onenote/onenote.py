@@ -4,9 +4,12 @@
   onenote.py list [--cached|--max-age S|--force] [--incremental] -> {"notebooks":[{id,name,userRole}],
                                            "sectionGroups":[{id,name,notebook,notebookId,parentGroupId?}],
                                            "sections":[{id,name,notebook,notebookId,parentGroupId?,modified}],
+                                           "sectionRanks":{id: rank},
                                            "pages":[{id,sectionId,title,modified}]}
                                            parentGroupId: the section group the section or group sits in;
                                            none for one directly in its notebook
+                                           sectionRanks: a section's or group's place among its holder's
+                                           children, as the last section-order pass ranked it
                                            --cached: cache only; --max-age S: cache if younger than S seconds;
                                            --force: fetch every section, ignoring the per-section timestamps
                                            --incremental: return the tree before fetching page lists
@@ -98,7 +101,7 @@ RELIST_AFTER = 30
 READ_ONLY_REASON = "This notebook is shared with you as read-only."
 MAX_PAGES = 3000
 MAX_LIST_BODY = 4 * 1024 * 1024   # one page of a listing
-SECTION_ORDER_VERSION = 3       # invalidates an order established before repeated numbers and several TOCs were accepted
+SECTION_ORDER_VERSION = 4       # invalidates an order established before sections and groups were ranked
 MAX_ORDER_CACHE = 1024 * 1024
 MAX_PAGE_HTML = 4 * 1024 * 1024   # a page's content
 MAX_IMAGE = 20 * 1024 * 1024      # one cached image
@@ -471,14 +474,22 @@ def remembered_order(sections, order):
     return in_notebook_slots(sections, arranged)
 
 
-def ordered_sections(sections, cache, token):
+def remembered_ranks(order):
+    """Each section's and group's place among its holder's children, as the
+    last pass ranked them (the order file): none without consent or with an
+    order file from another policy or consent state."""
+    ranks = order.get("ranks") if order_matches(order) and order.get("scope") else None
+    return ranks if isinstance(ranks, dict) else {}
+
+
+def ordered_sections(sections, cache, token, groups=()):
     """Optional-workaround boundary; normal note access never depends on it."""
     fallback = alphabetical_sections(sections)
     warning = ["Custom section order unavailable; sections sorted alphabetically"]
     if not sections:
-        return fallback, {}, []
+        return fallback, {}, [], {}
     if not files_read_granted():
-        return fallback, {}, warning
+        return fallback, {}, warning, {}
     try:
         # HIGH-RISK WORKAROUND: keep even imports inside the failure boundary.
         # A parser/module failure must not affect page reads, edits or listing.
@@ -486,21 +497,26 @@ def ordered_sections(sections, cache, token):
         # payload through a helper that prints before raising SystemExit.
         with open(os.devnull, "w") as sink, contextlib.redirect_stdout(sink):
             import section_order
-            result, saved, warnings = section_order.arrange(
-                [dict(section) for section in sections], cache, section_order.Remote(token))
+            result, saved, warnings, ranks = section_order.arrange(
+                [dict(section) for section in sections], cache, section_order.Remote(token),
+                [dict(group) for group in groups])
         # Only a permutation is accepted. Never let optional code supply new
-        # sections or modify the fields returned by the authoritative Graph API.
+        # sections or modify the fields returned by the authoritative Graph API,
+        # nor rank anything Graph did not list.
         originals = {section["id"]: section for section in sections}
+        known = set(originals) | {group["id"] for group in groups}
         if (len(result) != len(sections) or {section["id"] for section in result} != set(originals)
                 or any(section != originals[section["id"]] for section in result)
                 or not isinstance(saved, dict) or len(json.dumps(saved).encode()) > MAX_ORDER_CACHE
-                or not isinstance(warnings, list) or not all(isinstance(value, str) for value in warnings)):
-            return fallback, {}, warning
-        return [originals[section["id"]] for section in result], saved, warnings
+                or not isinstance(warnings, list) or not all(isinstance(value, str) for value in warnings)
+                or not isinstance(ranks, dict)
+                or not all(key in known and type(rank) is int and rank >= 0 for key, rank in ranks.items())):
+            return fallback, {}, warning, {}
+        return [originals[section["id"]] for section in result], saved, warnings, ranks
     except (Exception, SystemExit):
         # Never include exception text here: it could contain a signed URL.
         # KeyboardInterrupt still cancels the command rather than continuing.
-        return fallback, {}, warning
+        return fallback, {}, warning, {}
 
 
 class Listing:
@@ -665,7 +681,9 @@ class Listing:
     def answer(self):
         pending = self.pending()
         retries = {sid: self.progress.get(sid, {}).get("retryAt", 0) for sid in pending}
-        return {"sections": remembered_order(self.sections, load_order()), "notebooks": self.notebooks,
+        order = load_order()
+        return {"sections": remembered_order(self.sections, order), "sectionRanks": remembered_ranks(order),
+                "notebooks": self.notebooks,
                 "sectionGroups": self.groups, "pages": self.pages(), "inventoryReady": True,
                 "inventoryComplete": self.complete(),
                 "pendingSections": pending, "partialSections": self.partial(),
@@ -706,7 +724,8 @@ def cmd_onenote_list(cached, max_age=0, force=False, incremental=False):
         c = c or {"sections": [], "pages": []}
         sections = c.get("sections", [])
         answer = Listing(c, sections).answer() if inventory_ready else {}
-        answer.update(sections=remembered_order(sections, order), notebooks=c.get("notebooks", []),
+        answer.update(sections=remembered_order(sections, order), sectionRanks=remembered_ranks(order),
+                      notebooks=c.get("notebooks", []),
                       sectionGroups=c.get("sectionGroups", []),
                       pages=c.get("pages", []), cached=True, inventoryReady=inventory_ready,
                       inventoryComplete=c.get("inventoryComplete", False),
@@ -938,20 +957,24 @@ def cmd_section_order():
     OneDrive metadata it reads can take a while, and neither the pages nor a
     note may wait for it (docs/onenote-section-order.md). The order goes to
     its own file - positions by section id, the TOC metadata the next pass
-    may reuse, and the warnings - and the answer is the listing's sections
-    as they stand now, in that order: a listing that landed meanwhile keeps
-    its newer sections, waiting after the placed ones."""
-    sections = (load_listing() or {}).get("sections", [])
+    may reuse, the ranks of the sections and groups among their holders'
+    children, and the warnings - and the answer is the listing's sections
+    as they stand now, in that order, with the ranks: a listing that landed
+    meanwhile keeps its newer sections, waiting after the placed ones."""
+    listing = load_listing() or {}
+    sections = listing.get("sections", [])
     scope = files_read_granted()
     # This token has already worked for normal notes. Optional metadata uses
     # the snapshot as-is; it cannot refresh or invalidate the account.
     token = access_token() if sections and scope else ""
-    ordered, metadata, warnings = ordered_sections(sections, load_order().get("metadata"), token)
+    ordered, metadata, warnings, ranks = ordered_sections(sections, load_order().get("metadata"), token,
+                                                          listing.get("sectionGroups", []))
     order = {"version": SECTION_ORDER_VERSION, "scope": scope, "metadata": metadata, "warnings": warnings,
-             "positions": {section["id"]: index for index, section in enumerate(ordered)}}
+             "positions": {section["id"]: index for index, section in enumerate(ordered)}, "ranks": ranks}
     save_order(order)
     latest = (load_listing() or {}).get("sections", sections)
-    out({"sections": remembered_order(latest, order), "sectionOrderWarnings": warnings})
+    out({"sections": remembered_order(latest, order), "sectionRanks": remembered_ranks(order),
+         "sectionOrderWarnings": warnings})
 
 
 # Page images and recordings are only fetched from Graph's resource endpoint, with

@@ -1924,6 +1924,7 @@ ShellRoot {
     // event loop reclaims it.
     oneNote.onSections = [{ id: "section", name: "Section", notebookId: "book", notebook: "Book" }]
     oneNote.onGroups = [{ id: "group", name: "Group", notebookId: "book", notebook: "Book" }]
+    oneNote.orderRanks = { section: 0, group: 1 }
     oneNote.pages = [{ id: "page", sectionId: "section", title: "Note" }]
     var messages = []
     var relay = function(text) { messages.push(text) }
@@ -1935,8 +1936,8 @@ ShellRoot {
     oneNoteAccount.signedIn = false
     oneNoteAccount.signedOut()
     oneNoteAccount.updated()
-    check("the sign-out transition clears OneNote's pages and groups",
-          oneNote.pages.length === 0 && oneNote.onGroups.length === 0)
+    check("the sign-out transition clears OneNote's pages, groups and ranks",
+          oneNote.pages.length === 0 && oneNote.onGroups.length === 0 && Object.keys(oneNote.orderRanks).length === 0)
     oneNote.statusRequested.disconnect(relay)
     oneNoteAccount.signedIn = true
     oneNote.onSections = []
@@ -2101,7 +2102,7 @@ ShellRoot {
       return grouped.sections[0].rows.map(function(row) { return row.path + ":" + row.level }).join(",")
     }
     var folded = grouped.sections[0].rows
-    check("a notebook tab lists its sections, then its groups A–Z; a section whose group is not listed sits with the sections",
+    check("without ranks, a notebook tab lists its sections, then its groups A–Z; a section whose group is not listed sits with the sections",
           groupedRows() === "loose:0,orphan:0,empty:0,work:0", groupedRows())
     check("a group counts the pages of every section inside it, at any depth, and an empty group none",
           folded[3].count === 3 && folded[2].count === 0)
@@ -2121,6 +2122,12 @@ ShellRoot {
     grouped.revealPath(grouped.pathOf("o2"))
     check("revealing a page opens its notebook, every group above it and its section",
           grouped.expanded.join(",") === "gbook,work,archive,old", grouped.expanded.join(","))
+    grouped.expanded = ["work"]
+    grouped.orderRanks = { loose: 1, empty: 0, work: 2, tasks: 1, "notes-in-work": 0 }
+    grouped.rebuild()
+    check("ranked sections and groups stand in their holder's order together, the unranked after them",
+          groupedRows() === "empty:0,loose:0,work:0,notes-in-work:1,tasks:1,archive:1,orphan:0", groupedRows())
+    grouped.orderRanks = ({})
     grouped.notebookTabs = false
     grouped.expanded = ["gbook", "work"]
     grouped.rebuild()

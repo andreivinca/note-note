@@ -91,10 +91,18 @@ app-registration permission edit (tenant consent policies still apply).
   malformed, unsupported, cyclic or excessive structures.
 - `plugins/org.note-note.onenote/section_order.py`: verifies personal notebook package
   identity, walks ordered section-group folders, and joins only live IDs.
-  It orders sections alone, inside their groups too; the groups themselves
-  are listed A–Z after their holder's sections, since the folder-to-group
-  ID mapping has not been live-verified and the workaround is not broadened
-  to it.
+  It orders sections, inside their groups too, and ranks every section and
+  group among the children of the folder holding it, sections and groups
+  together: a folder's TOC lists both in one sequence, so a group can stand
+  between two sections. A group's rank joins its folder to Graph's group by
+  the same personal-ID mapping as a section's file, which no live check has
+  verified for folders (the app's group rename and delete rely on it too),
+  so the pass gives one only where the folder also has the group's name and
+  Graph puts the group in the same holder, under a group the listing holds;
+  a section gets one on the same holder terms. A group without a rank is
+  listed A–Z after its holder's ranked children, and the pass warns, so a
+  mapping that does not hold is seen and changes nothing else. The listing
+  answers the ranks (`sectionRanks`) with the order it remembers.
   Downloads metadata from signed Microsoft URLs without the bearer token,
   redirects or logging credentials. Parsed entries are reused by TOC eTag;
   no note bodies or manual order are stored by this feature.
@@ -173,7 +181,32 @@ folder's ordered children (section proxies and a group proxy, in two root
 lists), while every captured write changes a section's pages, never the
 folder. The client's own code names the two codes `invalidFileID` (6) and
 `unspecifiedFailure` (14), which fits the app having offered a section file's
-credentials for a folder. Writing section or group order therefore still
-needs two things: a capture of an actual section drag on the web, for the
-folder write's shape, and a live check of whether a preview minted for the
-notebook package item yields folder credentials.
+credentials for a folder. A capture of two section drags on the web, one in a notebook and one in a
+group (2026-11-02), gave the folder write's shape. It is one revision of the
+holder's folder cell, conditional on the revision just read, carrying the
+folder root (`0x60004`) with its mixed child list (`0x24001C20`) in the new
+order, its sections-only list (`0x24004C02`) unchanged, a modified time
+(`0x14001D7A`) and the sections' identity GUIDs (`0x1C004C04`) in the new
+order as one comma-separated string (`0x1C004C09`); and, for each section
+whose place among the sections changed, its proxy (`0x60005`) with that
+1-based place in `0x14001CB9` (`NotebookElementOrderingID`) and the same time.
+The web does not reorder groups. The holder's cell is the notebook's own
+folder cell, stable across a month, or, for a group, the group proxy's object
+id in its parent's list; the service rewrote the folder's `.onetoc2` within
+seconds of each write.
+
+What the app cannot do is authorize that folder. Live checks the same day,
+with the app's own sign-in: `driveItem/preview` on the notebook package and
+on a group folder, with the default and the `office` viewer, answers an
+embed page that reports an error and carries no WOPI information; the host's
+`Doc.aspx`, `WopiFrame.aspx` and `doc2.aspx` refuse the preview's token
+(401); the `.onetoc2` file previews like any file, but the service rejects
+folder operations under its credential (code 14) and cannot open it as a
+section (code 126, `InternalError.4`); a WOPI token names its file (`fid`
+claim), so a section's token does not open the folder, which is the earlier
+code 6; and opening a section with `GetCells` (kind 1, after the version and
+key challenges) returns a stand-in folder cell holding only that section,
+with no credential for its holder. On the web the folder token is minted
+server-side by OneDrive's `Doc.aspx` under the browser's cookie session,
+which the app does not hold. Writing section order therefore waits on a way
+for the app to be issued a folder credential of its own.

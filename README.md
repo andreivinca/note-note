@@ -218,7 +218,7 @@ section** in a notebook's own tab: the folders inside a notebook are its
 sections, to any depth, listed before its notes and folded until you open them.
 OneNote offers **New section** and **New section group** in a notebook's own
 tab and **New Note** only inside each section. OneNote section groups are
-folded rows after a notebook's sections, A–Z, each marked with a folders
+folded rows among a notebook's sections, where OneNote puts them, each marked with a folders
 icon, holding their sections and groups to any depth, and **New section** on
 a group's row makes one inside it; the app makes groups directly in a
 notebook only. New section, New section group and New notebook ask for the
@@ -332,9 +332,9 @@ unguaranteed Graph/OneDrive ID mapping. See the
 [risk assessment](docs/onenote-section-order.md#risk-classification).
 It currently supports personal OneDrive notebook
 packages with a unique readable `.onetoc2` per folder. It orders sections,
-inside their section groups too; the groups themselves are listed A–Z after
-their holder's sections, since their folder positions are not joined to
-Graph's groups. If metadata is unavailable, malformed,
+inside their section groups too, and places each group among its holder's
+sections where OneNote puts it. A group whose folder does not match Graph's
+group by name and place is listed A–Z after the rest, with a warning. If metadata is unavailable, malformed,
 ambiguous or no longer matches Graph, the affected notebook's sections are
 sorted alphabetically and a warning is shown. Stale custom ordering is not
 used as a fallback. Page ordering still comes directly from Graph.

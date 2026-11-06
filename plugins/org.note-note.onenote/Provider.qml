@@ -76,6 +76,10 @@ LaneProvider {
   // The section groups: [{ id, name, notebook, notebookId, parentGroupId? }].
   // A section or group without parentGroupId sits directly in its notebook.
   property var onGroups: []
+  // id -> a section's or group's place among its holder's children, sections
+  // and groups together, as the section-order pass ranked them from the
+  // notebook's table of contents (holderChildren).
+  property var orderRanks: ({})
   // Canonical page order includes pending deletions; visible rows hide them
   // until the remote result settles, so rollback retains their positions.
   property var pages: []         // [{ id, sectionId, title, modified }]
@@ -363,55 +367,84 @@ LaneProvider {
   // directly in the notebook — with the open sections' pages and New Note
   // rows and the open groups' contents, starting at `level`: 0 when the
   // notebook is a tab of its own, 1 when it sits under its own tree row.
-  // The sections first, in the order the section-order pass left; then
-  // the groups, A–Z, after their holder's sections as OneNote lists them.
   function bookRows(bookId, groupId, level) {
     var rows = []
-    for (var k = 0; k < root.onSections.length; k++) {
-      var sec = root.onSections[k]
-      if (sec.notebookId !== bookId || root.parentOf(sec) !== groupId || root.deletingSections[sec.id]) {
-        continue
-      }
-      var secOpen = root.expanded.indexOf(sec.id) >= 0
-      var pages = root.sectionPages(sec.id).filter(function(page) {
-        return !root.pendingDeletes[page.id]
-      })
-      rows.push({ kind: "tree", path: sec.id, title: sec.name, level: level,
-                  expanded: secOpen, count: pages.length, menu: root.sectionMenu(sec) })
-      if (!secOpen) {
-        continue
-      }
-      var orderable = root.pageOrderingAvailable(sec)
-      var pageMenu = root.bookWritable(bookId) ? root.noteMenu : []
-      // A page drags as OneNote on the web shows it: the pages stand still,
-      // and a line between them marks where it lands.
-      for (var p = 0; p < pages.length; p++) {
-        var pg = pages[p]
-        rows.push({ kind: "note", path: pathOf(pg.id), title: pg.title, preview: "", menu: pageMenu,
-                    level: level + 1 + (pg.level || 0),
-                    reorder: orderable && root.orderedPage(pg)
-                      ? { scope: "pages:" + sec.id, id: root.orderId(pg.id), descendants: true, marker: "line" } : null,
-                    version: pg.modified || "", modified: pg.modified || "" })
-      }
-      if (pageInventory.pendingSections.indexOf(sec.id) >= 0) {
-        rows.push({ kind: "action", path: "loadsection:" + sec.id, title: pageInventory.status(sec.id), icon: "󰑐", level: level + 1 })
-      }
-      if (root.bookWritable(bookId)) {
-        rows.push({ kind: "new", path: "section:" + sec.id, level: level + 1 })
-      }
-    }
+    root.holderChildren(bookId, groupId).forEach(function(child) {
+      rows = rows.concat(child.group ? root.groupRows(child.record, bookId, level)
+                                     : root.sectionRows(child.record, bookId, level))
+    })
+    return rows
+  }
+
+  // The sections and groups directly in a notebook or group, as OneNote
+  // places them: the ones the section-order pass ranked, sections and
+  // groups together, by rank; then the sections it has not ranked, in the
+  // order the listing gives; then such groups, A–Z. A section or group
+  // made since the pass ran is not ranked yet, and OneNote adds it last.
+  function holderChildren(bookId, groupId) {
+    var sections = root.onSections.filter(function(sec) {
+      return sec.notebookId === bookId && root.parentOf(sec) === groupId && !root.deletingSections[sec.id]
+    }).map(function(sec) {
+      return { group: false, record: sec }
+    })
     var groups = root.onGroups.filter(function(group) {
       return group.notebookId === bookId && root.parentOf(group) === groupId && !root.deletingGroups[group.id]
     })
     groups.sort(function(a, b) { return a.name.localeCompare(b.name) })
-    for (var g = 0; g < groups.length; g++) {
-      var group = groups[g]
-      var groupOpen = root.expanded.indexOf(group.id) >= 0
-      rows.push({ kind: "tree", path: group.id, title: group.name, icon: "󰉓", level: level, expanded: groupOpen,
-                  count: root.groupPages(group.id, root.visiblePages()).length, menu: root.groupMenu(group) })
-      if (groupOpen) {
-        rows = rows.concat(root.bookRows(bookId, group.id, level + 1))
-      }
+    var children = sections.concat(groups.map(function(group) {
+      return { group: true, record: group }
+    }))
+    function ranked(child) {
+      return typeof root.orderRanks[child.record.id] === "number"
+    }
+    var placed = children.filter(ranked)
+    placed.sort(function(a, b) {
+      return root.orderRanks[a.record.id] - root.orderRanks[b.record.id]
+    })
+    return placed.concat(children.filter(function(child) {
+      return !ranked(child)
+    }))
+  }
+
+  // A section's row, and its pages and New Note row when it is open.
+  function sectionRows(sec, bookId, level) {
+    var secOpen = root.expanded.indexOf(sec.id) >= 0
+    var pages = root.sectionPages(sec.id).filter(function(page) {
+      return !root.pendingDeletes[page.id]
+    })
+    var rows = [{ kind: "tree", path: sec.id, title: sec.name, level: level,
+                  expanded: secOpen, count: pages.length, menu: root.sectionMenu(sec) }]
+    if (!secOpen) {
+      return rows
+    }
+    var orderable = root.pageOrderingAvailable(sec)
+    var pageMenu = root.bookWritable(bookId) ? root.noteMenu : []
+    // A page drags as OneNote on the web shows it: the pages stand still,
+    // and a line between them marks where it lands.
+    for (var p = 0; p < pages.length; p++) {
+      var pg = pages[p]
+      rows.push({ kind: "note", path: pathOf(pg.id), title: pg.title, preview: "", menu: pageMenu,
+                  level: level + 1 + (pg.level || 0),
+                  reorder: orderable && root.orderedPage(pg)
+                    ? { scope: "pages:" + sec.id, id: root.orderId(pg.id), descendants: true, marker: "line" } : null,
+                  version: pg.modified || "", modified: pg.modified || "" })
+    }
+    if (pageInventory.pendingSections.indexOf(sec.id) >= 0) {
+      rows.push({ kind: "action", path: "loadsection:" + sec.id, title: pageInventory.status(sec.id), icon: "󰑐", level: level + 1 })
+    }
+    if (root.bookWritable(bookId)) {
+      rows.push({ kind: "new", path: "section:" + sec.id, level: level + 1 })
+    }
+    return rows
+  }
+
+  // A group's row, and what it holds when it is open.
+  function groupRows(group, bookId, level) {
+    var groupOpen = root.expanded.indexOf(group.id) >= 0
+    var rows = [{ kind: "tree", path: group.id, title: group.name, icon: "󰉓", level: level, expanded: groupOpen,
+                  count: root.groupPages(group.id, root.visiblePages()).length, menu: root.groupMenu(group) }]
+    if (groupOpen) {
+      rows = rows.concat(root.bookRows(bookId, group.id, level + 1))
     }
     return rows
   }
@@ -1202,6 +1235,7 @@ LaneProvider {
     if (!root.ready) {
       root.onNotebooks = []
       root.onGroups = []
+      root.orderRanks = ({})
       root.onSections = []
       root.pages = []
       rebuild()
@@ -1272,6 +1306,9 @@ LaneProvider {
     }
     if (result.sections instanceof Array) {
       root.onSections = root.listedSections(result.sections)
+    }
+    if (result.sectionRanks instanceof Object) {
+      root.orderRanks = result.sectionRanks
     }
     if (result.pages instanceof Array) {
       var pages = result.pages
@@ -1358,6 +1395,9 @@ LaneProvider {
       if (result.sections instanceof Array) {
         root.onSections = root.listedSections(result.sections)
       }
+      if (result.sectionRanks instanceof Object) {
+        root.orderRanks = result.sectionRanks
+      }
       if (result.sectionOrderWarnings instanceof Array && result.sectionOrderWarnings.length) {
         root.statusRequested("OneNote section order: " + result.sectionOrderWarnings.join("; "))
       }
@@ -1419,6 +1459,7 @@ LaneProvider {
       root.changedSections = ({})
       root.onSections = []
       root.onGroups = []
+      root.orderRanks = ({})
       root.onNotebooks = []
       root.clearListedPages()
       root.loadVersions = ({})
@@ -1428,6 +1469,7 @@ LaneProvider {
       root.supersedeOrderPass()
       root.onSections = []
       root.onGroups = []
+      root.orderRanks = ({})
       root.onNotebooks = []
       root.clearListedPages()
       root.loadVersions = ({})

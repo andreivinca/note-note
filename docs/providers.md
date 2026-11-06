@@ -150,7 +150,8 @@ folders cannot be deleted from the app. OneNote's
 notebook rows, in its one-tab shape, make a section or a section group, as
 its tab's two buttons do otherwise, and its group rows make a section, and
 rename or delete the group with everything in it on a section's terms: a
-notebook lists its sections, then its groups A–Z, each a marked tree row
+notebook lists its sections and groups in the places OneNote gives them,
+a group the order pass could not place A–Z after the rest, each group a marked tree row
 holding sections — and, made in OneNote, groups of its own, to any depth —
 with a count of every page inside it; the app itself makes groups directly
 in a notebook alone. OneNote's section rows list
