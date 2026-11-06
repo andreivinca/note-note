@@ -202,7 +202,7 @@ Item {
     root.childSections(key).forEach(function(section) {
       var open = root.opened.indexOf(section.key) >= 0
       var count = root.notesUnder(section.key).length
-      rows.push({ kind: "tree", path: "dir:" + section.key, title: section.name, level: level,
+      rows.push({ kind: "tree", path: "dir:" + section.key, title: section.name, tab: true, level: level,
                   expanded: open, count: count, menu: root.folderMenu(section, count, "section") })
       if (open) {
         rows = rows.concat(root.folderRows(section.key, level + 1))

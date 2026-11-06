@@ -412,7 +412,7 @@ LaneProvider {
     var pages = root.sectionPages(sec.id).filter(function(page) {
       return !root.pendingDeletes[page.id]
     })
-    var rows = [{ kind: "tree", path: sec.id, title: sec.name, level: level,
+    var rows = [{ kind: "tree", path: sec.id, title: sec.name, tab: true, level: level,
                   expanded: secOpen, count: pages.length, menu: root.sectionMenu(sec) }]
     if (!secOpen) {
       return rows

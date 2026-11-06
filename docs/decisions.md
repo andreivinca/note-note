@@ -1087,3 +1087,24 @@ reordered: OneNote saves their order only through a folder credential the
 app cannot obtain (onenote-section-order.md). Without sections the line had
 no purpose, so it was removed, and OneNote's pages drag as local notes do.
 Do not bring it back for pages alone.
+
+## 2026-11-05: a section is marked with OneNote's tab, not a fold arrow
+
+A section's row and its notes' rows read alike in the sidebar: the same
+weight and colour, and a note's title starts right under its section's.
+A section's row now shows OneNote's section tab, gray as OneNote on the
+web draws a section it has not loaded, in place of its fold arrow, and a
+notebook's, section's or group's row is taller than a control's. The
+tab is the host's (`tab: true` on a tree row, docs/providers.md);
+OneNote's sections and the local provider's ask for it, while groups,
+folders that are notebooks and notebook rows keep their arrow, as in
+OneNote.
+
+*Considered:* a guide line beside an open section's notes, regular
+weight for note titles in a tree, and a deeper indent for notes. The
+tab is what OneNote's users know a section by.
+
+*Not done:* each section's own colour. OneNote keeps it in the section's
+file (`NotebookColor`), not in Graph's listing or the notebook's table
+of contents, which is why the web shows it only once a section is
+loaded; reading it would mean reading every section's file.

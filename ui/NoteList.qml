@@ -13,7 +13,9 @@ import "../design/controls"
 //                      label, `icon` its glyph
 //   kind "tree"        an expandable group inside a notebook (OneNote
 //                      notebook / section): `path` is its id, `expanded`
-//                      its state, optional `count` its note count;
+//                      its state, optional `count` its note count, `icon`
+//                      its glyph and `tab` a section tab in place of its
+//                      fold arrow;
 //                      rows are indented by `level`
 // Any row with a `reorder` group (services/notes/ordering.js) can be dragged
 // among the rows of that group; the rest keep their slots. A row's `menu`
@@ -110,6 +112,12 @@ Item {
   // the gap reads the same whether or not a row is lit.
   readonly property int rowGap: Style.spacing.xs
   readonly property int rowHeight: Math.max(Style.space(52), root.noteFontSize * 2 + Style.space(20)) + rowGap
+  // A notebook's, section's or group's row: one line, with room around it
+  // that sets it apart from the controls between the rows.
+  readonly property int treeRowHeight: Math.max(Style.space(36), root.noteFontSize + Style.space(18)) + rowGap
+  // The air around a section's tab in its row: the same on its left as
+  // above and below it.
+  readonly property real tabMargin: Style.space(5)
   // The page's own margin. The rows sit inside it, so a title never starts on
   // the panel's edge and the list has air above and below it.
   readonly property real pagePadding: Style.spacing.sm
@@ -386,6 +394,7 @@ Item {
             readonly property bool isTree: modelData.kind === "tree"
             readonly property bool hasCount: isTree && typeof modelData.count === "number" && modelData.count >= 0
             readonly property bool hasIcon: isTree && !!modelData.icon
+            readonly property bool hasTab: isTree && modelData.tab === true
             readonly property bool hasMenu: (modelData.menu || []).length > 0
             // One step of indent is the parent's icon column plus the gap
             // after it, so a child's icon starts under its parent's label —
@@ -394,7 +403,8 @@ Item {
             readonly property int indent: (modelData.level || 0)
               * (Style.font.icon + Style.space(2) + Style.spacing.md - Style.spacing.sm)
             readonly property bool draggable: !!modelData.reorder
-            readonly property real itemHeight: isNote ? root.rowHeight : Style.spacing.controlHeight + root.rowGap
+            readonly property real itemHeight: isNote ? root.rowHeight
+              : (isTree ? root.treeRowHeight : Style.spacing.controlHeight + root.rowGap)
             // Where this row sits on screen while a drag shuffles the order.
             readonly property int visualIndex: slot.DelegateModel.itemsIndex
             function cancelDrag() {
@@ -459,21 +469,53 @@ Item {
                 visible: !slot.isNote
                 anchors.left: parent.left
                 anchors.right: parent.right
-                anchors.leftMargin: root.textInset + slot.indent
+                anchors.leftMargin: (slot.hasTab ? root.tabMargin : root.textInset) + slot.indent
                 anchors.rightMargin: Style.spacing.sm
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: Style.spacing.md
+                // The fold arrow; a section's tab stands in its place.
                 Text {
+                  id: leadIcon
+                  anchors.verticalCenter: parent.verticalCenter
+                  visible: !slot.hasTab
                   text: slot.isNew ? "+" : (slot.isAction ? (slot.modelData.icon || "󰊻")
                     : (slot.modelData.expanded ? "󰅀" : "󰅂"))
                   color: root.accentInk
                   font.family: Style.fontFamily
                   font.pixelSize: Style.font.iconSmall
                 }
+                // A section's tab, where its provider asks for one: drawn as
+                // OneNote draws a section it has not loaded, a block rounded
+                // on the left against a straight strip on the right, in gray.
+                Item {
+                  id: sectionTab
+                  objectName: "sectionTab-" + slot.modelData.path
+                  visible: slot.hasTab
+                  anchors.verticalCenter: parent.verticalCenter
+                  width: Style.spacing.lg
+                  height: root.treeRowHeight - root.rowGap - root.tabMargin * 2
+                  readonly property color ink: Util.alpha(root.foreground, 0.35)
+                  Rectangle {
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: parent.width - Style.spacing.xxs
+                    height: parent.height - Style.spacing.sm
+                    topLeftRadius: Style.spacing.sm
+                    bottomLeftRadius: Style.spacing.sm
+                    color: sectionTab.ink
+                  }
+                  Rectangle {
+                    anchors.right: parent.right
+                    width: Style.spacing.xxs
+                    height: parent.height
+                    color: sectionTab.ink
+                  }
+                }
                 // A tree row's own icon, where its provider gives one to tell
                 // one kind of row from another: a OneNote section group's.
                 Text {
                   id: treeIcon
+                  anchors.verticalCenter: parent.verticalCenter
                   visible: slot.hasIcon
                   text: slot.hasIcon ? slot.modelData.icon : ""
                   color: Util.alpha(root.foreground, 0.75)
@@ -484,7 +526,10 @@ Item {
                 // too long for the row elides, which leaves the count at the
                 // row's right edge.
                 Text {
-                  width: Math.max(0, Math.min(implicitWidth, parent.width - Style.font.iconSmall - parent.spacing
+                  anchors.verticalCenter: parent.verticalCenter
+                  width: Math.max(0, Math.min(implicitWidth, parent.width
+                                              - (leadIcon.visible ? leadIcon.width + parent.spacing : 0)
+                                              - (slot.hasTab ? sectionTab.width + parent.spacing : 0)
                                               - (slot.hasIcon ? treeIcon.width + parent.spacing : 0)
                                               - (slot.hasCount ? treeCount.width + parent.spacing : 0)))
                   text: slot.isNew ? "New note…" : slot.modelData.title

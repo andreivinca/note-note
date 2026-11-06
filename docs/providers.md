@@ -86,7 +86,7 @@ do — a folder is not a brand.
 time and which one is open is the user's, kept between runs. Passing it is
 harmless.
 
-A row is `{ kind, path, title, preview, icon, level, expanded, count, menu, reorder, version, modified }` with
+A row is `{ kind, path, title, preview, icon, tab, level, expanded, count, menu, reorder, version, modified }` with
 `kind` one of `note`, `new` (path = create target), `action` (path = action
 id), `tree` (path = tree id, `expanded`).
 Tree rows can supply `count`, a nonnegative note count displayed in a badge after the
@@ -94,7 +94,10 @@ title, including when collapsed. Count all notes in the group, including subpage
 and omit notes hidden by pending deletion. Omit `count` when unavailable.
 A tree row can also supply `icon`, a glyph shown before its title, where one
 kind of tree row has to be told from another: OneNote marks its section
-groups with one, and its sections have none.
+groups with one. A tree row with `tab: true` shows a section tab in place of
+its fold arrow, gray, drawn as OneNote on the web draws a section it has not
+loaded, which tells a section from its notes: OneNote's sections and the
+local provider's ask for one.
 
 ### Row menus
 

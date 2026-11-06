@@ -70,7 +70,7 @@ function matchesQuery(row, query) {
 function row(provider, key, source) {
   return { provider: provider.id, notebook: key, kind: source.kind || "note", path: source.path || "",
            title: source.title || "", hasTitle: provider.hasTitle !== false,
-           preview: source.preview || "", icon: source.icon || "",
+           preview: source.preview || "", icon: source.icon || "", tab: source.tab === true,
            reorder: Ordering.descriptor(provider, ownKey(key), source), level: source.level || 0,
            expanded: source.expanded === true, count: source.count, menu: source.menu || [],
            modified: source.modified || "" }

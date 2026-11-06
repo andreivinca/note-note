@@ -1124,11 +1124,13 @@ ShellRoot {
     check("flat lists preserve provider order across modification dates",
           flatModel.rows.map(function(item) { return item.path }).join(",") === "old,first,second,unknown,create"
           && JSON.stringify(flat) === originalFlat)
-    var hierarchy = [{ kind: "tree", path: "section" }].concat(flat)
+    var hierarchy = [{ kind: "tree", path: "section", tab: true }].concat(flat)
     flatProvider.sections[0].rows = hierarchy
     var treeModel = Sidebar.build([flatProvider], "flat/notes", "", {})
     check("sidebar preserves provider hierarchies",
           treeModel.rows.map(function(item) { return item.path }).join(",") === "section,old,first,second,unknown,create")
+    check("a tree row keeps the section tab its provider asked for, and no other row has one",
+          treeModel.rows[0].tab === true && treeModel.rows[1].tab === false)
     check("a tab key is spelt in one place and read back by the same",
           Sidebar.sectionKey({ id: "p" }, { key: "s/t" }) === "p/s/t"
           && Sidebar.providerIdOf("p/s/t") === "p" && Sidebar.ownKey("p/s/t") === "s/t")
@@ -2113,6 +2115,7 @@ ShellRoot {
           groupedRows() === "loose:0,orphan:0,empty:0,work:0,tasks:1,archive:1,old:2,notes-in-work:1", groupedRows())
     check("a group's row is marked, and makes a section in it where the notebook can be written, no group inside a group",
           grouped.sections[0].rows[3].icon === "󰉓" && !grouped.sections[0].rows[0].icon
+          && grouped.sections[0].rows[0].tab === true && grouped.sections[0].rows[3].tab === undefined
           && grouped.sections[0].rows[3].menu.map(function(item) { return item.id + (item.prompt ? "?" : "") }).join(",") === "newSection?",
           JSON.stringify(grouped.sections[0].rows[3]))
     check("the breadcrumb names the groups down to the page",
