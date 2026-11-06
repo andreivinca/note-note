@@ -34,6 +34,17 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.0.48" date="2026-11-06">
+      <description>
+        <p>OneNote section groups are shown: a section inside a group is
+        listed under it, and each group stands where OneNote places it among
+        its notebook's sections. New section group makes one; a group's menu
+        makes a section in it, and renames or deletes the group.</p>
+        <p>Sections wear OneNote's tab, so a long list shows where each one
+        starts. A note's title scrolls with its body, and the wheel scrolls
+        the note anywhere in its panel.</p>
+      </description>
+    </release>
     <release version="1.0.47" date="2026-10-27">
       <description>
         <p>New Note, New section, New notebook and a source's other actions
