@@ -560,10 +560,27 @@ class Content(unittest.TestCase):
             self.assertIsNotNone(match, name)
             self.assertEqual(json.loads(match[1]), getattr(dialect, name), name)
         native = (ROOT / "cpp/dialect.h").read_text()
-        for name in ("QUOTE_PX", "LINE_HEIGHT_PCT", "IMAGE_LINE_GAP_PX", "CODE_MARGIN_PX"):
+        for name in ("QUOTE_PX", "LINE_HEIGHT_PCT", "IMAGE_LINE_GAP_PX", "CODE_MARGIN_PX", "CODE_PAD_PX"):
             self.assertEqual(int(re.search(r"constexpr qreal " + name + r" = (\d+);", native)[1]), getattr(dialect, name), name)
         self.assertEqual(chr(int(re.search(r"BLANK_PARAGRAPH = QChar\(0x([0-9a-f]+)\)", native)[1], 16)), dialect.BLANK_PARAGRAPH)
         self.assertEqual(re.search(r'MONO_FAMILY = QStringLiteral\("([^"]*)"\)', native)[1], dialect.MONO_FAMILY)
+        for name in ("BOLD_WEIGHT", "HEAVY_WEIGHT"):
+            self.assertEqual(int(re.search(r"constexpr int " + name + r" = (\d+);", native)[1]), getattr(dialect, name), name)
+        sizes = re.search(r"HEADING_FONT_SIZE = \{(.*?)\};", native, re.S)[1]
+        self.assertEqual(re.findall(r'QStringLiteral\("([^"]*)"\)', sizes),
+                         [dialect.HEADING_FONT_SIZE[level] for level in range(1, 7)])
+        self.assertEqual(re.search(r'LAST_HEADING_VARIANT = QStringLiteral\("([^"]*)"\)', native)[1],
+                         dialect.HEADING_VARIANT[6])
+        # The toolbar's rule and empty table, inserted natively, are the
+        # writer's own: the snippets the tools give the Markdown route.
+        def snippet(tool):
+            return json.loads(re.search(r'property string markdown: ("(?:[^"\\]|\\.)*")',
+                                        (ROOT / "ui/tools" / tool).read_text())[1])
+        def literal(name):
+            body = re.search(name + r" = QStringLiteral\((.*?)\);", native, re.S)[1]
+            return "".join(json.loads(part) for part in re.findall(r'"(?:[^"\\]|\\.)*"', body))
+        self.assertTrue(to_html(snippet("HorizontalRule.qml")).endswith(literal("RULE_HTML")))
+        self.assertTrue(to_html(snippet("InsertTable.qml")).endswith(literal("EMPTY_TABLE_HTML")))
         native = (ROOT / "cpp/textblocks.h").read_text()
         # The editor and the native module agree on the interface version.
         self.assertEqual(int(re.search(r"var NATIVE_VERSION = (\d+)", js)[1]),

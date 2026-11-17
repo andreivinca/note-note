@@ -406,7 +406,7 @@ int TextBlocks::deleteParagraphBoundary(int position)
     }
     const bool emptyParagraph = (block.text().isEmpty() || block.text() == QString(NoteNoteDialect::BLANK_PARAGRAPH))
             && !block.textList() && !NoteNoteDialect::isCodeBlock(block.blockFormat())
-            && !block.blockFormat().hasProperty(QTextFormat::BlockTrailingHorizontalRulerWidth);
+            && !NoteNoteDialect::isRule(block.blockFormat());
     QTextCursor cursor(doc);
     cursor.setPosition(position);
     if (!emptyParagraph && !cursor.atBlockEnd()) {
@@ -459,7 +459,7 @@ QVariantList TextBlocks::blocks() const
         // property, and the editor needs to know — a rule that ends the
         // note leaves the caret no position after it (escapeForward).
         entry.insert(QStringLiteral("rule"),
-                     format.hasProperty(QTextFormat::BlockTrailingHorizontalRulerWidth));
+                     NoteNoteDialect::isRule(format));
         // Backspace can detach a block from its list without clearing its
         // marker property. Qt no longer paints a checkbox on that paragraph;
         // decorations must follow list membership as well as the stored flag.

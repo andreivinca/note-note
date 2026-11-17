@@ -160,6 +160,20 @@ margins Enter copies, joining the triggering edit for undo. A list level's
 width is the document's `indentWidth` (Qt's default 40px), which the editor
 sets from its font (`TextBlocks.listIndent`).
 
+**A block made in place reads Qt's import, not a restatement of it**
+(measured on 6.11). Qt gives a heading tag margins of its own (18/12px for
+`<h1>`, 16/12 for `<h2>`, none for `<h6>`) and a block character format
+from the tag, and a table's cells, column constraints and border come from
+its importer too. So the native block tools take a heading's or a code
+line's formats from Qt importing the writer's markup for one
+(`textparagraphs.cpp`), and insert the toolbar's rule and table as the
+writer's HTML through `QTextCursor::insertFragment` at the end of the block
+they follow: that fragment's leading empty block merges into the block, and
+the result is the document `setHtml` gives for the whole note. One leftover
+of the importer is no difference: the block after a table keeps the cell's
+object properties in its character format, which Qt exports as an empty
+`style=""` and draws nothing for.
+
 **Link hover must wait for document edits to finish.** Syntax highlighting
 runs during table undo, before the document's frame layout is stable.
 Emitting link notifications immediately can re-enter `hitTest()` through a

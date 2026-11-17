@@ -143,6 +143,31 @@ QtObject {
     host.insertSnippet(markdown, true)
   }
 
+  // The Code block tool in place through the native helper: whether it
+  // took the selection (NoteEditor.makeCodeBlock, unmakeCodeBlock).
+  function makeCodeBlock() {
+    return writable && host.makeCodeBlock()
+  }
+
+  function unmakeCodeBlock() {
+    return writable && host.unmakeCodeBlock()
+  }
+
+  // The toolbar's rule and empty table, in place through the native helper;
+  // `markdown` is the same block for the Markdown route, which a host
+  // without the helper takes, and a table cell.
+  function insertRule(markdown) {
+    if (!host.insertRule()) {
+      host.insertSnippet(markdown)
+    }
+  }
+
+  function insertEmptyTable(markdown) {
+    if (!host.insertEmptyTable()) {
+      host.insertSnippet(markdown, true)
+    }
+  }
+
   // Code lines take no inline formatting, and no HTML: text put in as HTML
   // loses the code font, which ends the block (docs/engine-notes.md).
   function acceptsInline() {
@@ -382,6 +407,31 @@ QtObject {
     return markdown.marked.test(prefix) ? "" : markdown.prefix
   }
 
+  // Quote on the paragraphs under the caret or the selection; asked of
+  // lines that are all quoted already, it takes it off. The native helper
+  // sets the paragraphs' margins in place; a selection it leaves — one
+  // holding a heading — and a host without it rewrite the Markdown.
+  function toggleQuote() {
+    if (!writable || host.toggleQuote()) {
+      return
+    }
+    transformBlocks(function(line) {
+      return (/^>[ \t]/.test(line.prefix) ? "" : "> ") + line.content
+    }, { unchangedMessage: "Quotes cannot be applied inside tables or code blocks" })
+  }
+
+  // Heading `level` (1 to 3 in the menu), or Normal at 0, on the paragraphs
+  // under the caret or the selection. In place through the native helper;
+  // a host without it rewrites the Markdown.
+  function setHeading(level) {
+    if (!writable || host.setHeading(level)) {
+      return
+    }
+    transformBlocks(function(line) {
+      return "#".repeat(level) + (level ? " " : "") + line.content
+    })
+  }
+
   function setListStyle(style) {
     if (!writable || !canStyleLists) {
       return
@@ -486,6 +536,23 @@ QtObject {
     pending = next
     pendingLen = textArea.length
     pendingCursor = textArea.cursorPosition
+  }
+
+  // Runs an edit that is not typing — a typed prefix becoming a list item —
+  // without ending the pending style: the text typed after it takes it.
+  function keepingPending(edit) {
+    if (!pending) {
+      edit()
+      return
+    }
+    applying = true
+    try {
+      edit()
+    } finally {
+      applying = false
+      pendingLen = textArea.length
+      pendingCursor = textArea.cursorPosition
+    }
   }
 
   function typePending(text) {

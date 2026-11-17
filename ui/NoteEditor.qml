@@ -760,6 +760,17 @@ Item {
     return true
   }
 
+  function deleteQuoteMarker() {
+    if (root.readOnly || root.plain || area.selectionStart !== area.selectionEnd || !nativeBlocks.item) {
+      return false
+    }
+    if (!nativeBlocks.item.removeQuoteAtStart(area.cursorPosition)) {
+      return false
+    }
+    root.edited()
+    return true
+  }
+
   // The list Space last started from typed text (startTypedList): the caret
   // it left and the document's revision then. Backspace there, before any
   // other edit, takes the paragraph back to the text as typed.
@@ -776,11 +787,16 @@ Item {
     if (!typed.tool || !editing.supports(typed.tool) || (lettered && !editing.supports("listStyles"))) {
       return false
     }
-    var caret = nativeBlocks.item.startTypedList(area.cursorPosition)
+    var caret = -1
+    editing.keepingPending(function() {
+      caret = nativeBlocks.item.startTypedList(area.cursorPosition)
+      if (caret >= 0) {
+        area.cursorPosition = caret
+      }
+    })
     if (caret < 0) {
       return false
     }
-    area.cursorPosition = caret
     root.typedList = { caret: caret, revision: nativeBlocks.item.contentRevision }
     root.updateInList()
     root.edited()
@@ -879,6 +895,48 @@ Item {
       root.edited()
     }
     return true
+  }
+
+  // A paragraph style the native helper sets in place on the selected
+  // paragraphs, one undo step that keeps the selection: `edit` calls the
+  // helper with the selection's ends. Whether the helper took the request;
+  // without it, or for a selection it leaves, the Markdown route does it.
+  function restyleSelection(edit) {
+    if (!nativeBlocks.item) {
+      return false
+    }
+    var backwards = area.cursorPosition === area.selectionStart
+    var selection = {}
+    atomic(function() {
+      selection = edit(nativeBlocks.item, area.selectionStart, area.selectionEnd)
+    })
+    if (selection.from === undefined) {
+      return false
+    }
+    area.select(backwards ? selection.to : selection.from, backwards ? selection.from : selection.to)
+    updateContext()
+    root.edited()
+    return true
+  }
+
+  function toggleQuote() {
+    return restyleSelection(function(blocks, from, to) { return blocks.toggleQuote(from, to) })
+  }
+
+  function setHeading(level) {
+    return restyleSelection(function(blocks, from, to) { return blocks.setHeading(from, to, level) })
+  }
+
+  // In the code background the writer is given, so a code block made in
+  // place is the one the note reopens with.
+  function makeCodeBlock() {
+    return restyleSelection(function(blocks, from, to) {
+      return blocks.makeCodeBlock(from, to, root.markdown ? root.markdown.codeBackground : "transparent")
+    })
+  }
+
+  function unmakeCodeBlock() {
+    return restyleSelection(function(blocks, from, to) { return blocks.unmakeCodeBlock(from, to) })
   }
 
   function indentBlocks(direction) {
@@ -1484,8 +1542,8 @@ Item {
 
   // ── leaving a block: the second Enter ───────────────────────────────
   // Qt's own Enter continues a code block, quote or list with a fresh empty
-  // line; Enter again on that empty line leaves the block instead. Lists
-  // leave through the native helper. Other blocks take the Markdown trip:
+  // line; Enter again on that empty line leaves the block instead, through
+  // the native helper. A host without it takes the Markdown trip:
   // the empty line comes off the block, a blank paragraph lands after it,
   // and its rendering filler is removed so typing starts clean.
 
@@ -1544,6 +1602,10 @@ Item {
     }
     if (nativeBlocks.item && nativeBlocks.item.leaveEmptyList(area.cursorPosition)) {
       updateInList()
+      root.edited()
+      return true
+    }
+    if (nativeBlocks.item && nativeBlocks.item.leaveEmptyQuote(area.cursorPosition)) {
       root.edited()
       return true
     }
@@ -1643,6 +1705,9 @@ Item {
   // the caret on a rule lands as the new paragraph's first character rather
   // than on the ruler (typeLeavesRule).
   function leaveBlock(kind, seed) {
+    if (kind === "code" && landNatively(function(blocks, position) { return blocks.leaveEmptyCode(position) })) {
+      return
+    }
     withMarkdown(function(lines, map) {
       var i = caretLine(map)
       var out = lines.slice()
@@ -1683,12 +1748,42 @@ Item {
   // caret takes it, the way the second Enter leaves a block. The block
   // itself stays exactly as it was.
   function stepPastBlock(seed) {
+    if (landNatively(function(blocks, position) { return blocks.stepPastBlock(position, seed || "") })) {
+      return
+    }
     withMarkdown(function(lines, map) {
       var end = blockEndLine(map, caretLine(map))
       var out = lines.slice()
       out.splice(end + 1, 0, "", Dialect.BLANK_PARAGRAPH, "")
       landOn(out, lastBlockThrough(map, end) + 1, seed)
     })
+  }
+
+  // A landing the native helper makes in place, one undo step: `edit` calls
+  // it with the caret and answers the caret's new place, or -1 to leave the
+  // landing to the Markdown route, as a host without the helper does.
+  function landNatively(edit) {
+    if (!nativeBlocks.item) {
+      return false
+    }
+    var caret = -1
+    atomic(function() {
+      caret = edit(nativeBlocks.item, area.cursorPosition)
+    })
+    if (caret < 0) {
+      return false
+    }
+    area.cursorPosition = caret
+    root.edited()
+    return true
+  }
+
+  function insertRule() {
+    return landNatively(function(blocks, position) { return blocks.insertRule(position) })
+  }
+
+  function insertEmptyTable() {
+    return landNatively(function(blocks, position) { return blocks.insertTable(position) })
   }
 
   function landOn(out, target, seed) {
@@ -2252,7 +2347,8 @@ Item {
               }
             }
             if (event.key === Qt.Key_Backspace && event.modifiers === Qt.NoModifier
-                && (root.undoTypedList() || root.deleteListMarker() || root.deletePreviousTable())) {
+                && (root.undoTypedList() || root.deleteListMarker() || root.deleteQuoteMarker()
+                    || root.deletePreviousTable())) {
               event.accepted = true
               return
             }

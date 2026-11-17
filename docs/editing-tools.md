@@ -181,6 +181,42 @@ The choices retain their `h1`, `h2`, `h3`, and `p` action IDs for IPC and
 provider capabilities. Only supported choices appear; the dropdown hides
 when none are supported or the caret is inside a list, a table or a code block.
 
+## Block tools in place
+
+With the native helper, the block tools change the document where it
+stands, as the list tools do: the click shows its result at once, as one
+undo step, and the result is the document the note reopens with
+(`textparagraphs.cpp`). Without the helper, each rewrites the note's
+Markdown instead, which takes a converter round trip of the whole note.
+
+- **Quote** quotes the selected paragraphs, list items leaving their list;
+  a selection that is all quoted loses the quote, a mixed one is quoted
+  whole. Enter on a quote's empty last line leaves the quote, and Backspace
+  at the start of a quote line takes the quote off that line, the caret
+  staying on it; the next Backspace joins the line to the one above.
+- **Heading** sets the level or **Normal**, list items leaving their list
+  and quotes their margins. Bold text keeps reading as bold: inside a
+  heading the author's bold is the heavier weight.
+- **Indent** and **Outdent** add or remove the four no-break spaces of a
+  paragraph indent, as they move list items a level.
+- **Code block** makes the selected paragraphs one code block of their
+  visible text, a line per paragraph or soft line break, and turns a code
+  block back into paragraphs, each line read as Markdown reads it: runs of
+  spaces collapse and four columns of leading whitespace or more become the
+  paragraph indent.
+- **Horizontal rule** and **Insert a table** go in after the caret's block,
+  or after the whole code block the caret is in, splitting a list; when
+  nothing follows, the caret lands on a new paragraph after them. Right at
+  the note's end, Enter on a code block's empty last line, and typing or
+  Enter on a rule step past the block the same way.
+
+A few selections keep the Markdown route, which has rules of its own for
+them: a quote of a heading or of text sized like one, a code block reaching
+into another code block (which it merges with), a list, a table, a rule or
+an image (which it refuses or reports), a code line of one to three spaces
+alone (which Markdown reads as the gap between blocks), and a rule or table
+inserted with the caret in a table.
+
 ## Text color
 
 Text color opens a six-column palette of twelve compact circular swatches based on
@@ -432,7 +468,10 @@ an action's content, rules and UI belong in its tool file.
 | `transformBlocks(transform, options)` | Transform selected Markdown blocks. The callback receives `{ indent, prefix, content, isList }` and returns a line. `options.list` manages paragraph separators when toggling lists; `unchangedMessage` supplies optional feedback. |
 | `toggleListStyle(style)` | Toggle `todo`, `ul` or `ol` on actual document blocks, including table cells, preserving selections and undo. |
 | `canStyleLists`, `setListStyle(style)` | Apply `disc`, `circle`, `square`, `decimal`, `lower-alpha`, `upper-alpha`, `lower-roman` or `upper-roman` without toggling off. `canStyleLists` is the native support; the style options declare the provider's `listStyles` capability, which gates them as any tool's. |
-| `indentBlocks(direction)` | Indent (`1`) or outdent (`-1`) selected list items natively, including table cells; paragraphs selected with them take or lose four no-break spaces, as the paragraph operation gives them. Returns false when no list item is selected, so the tool can use its paragraph operation. |
+| `indentBlocks(direction)` | Indent (`1`) or outdent (`-1`) the selected list items and paragraphs natively: an item moves a level, a paragraph takes or loses four no-break spaces; a table cell's paragraph moves only with list items beside it. Returns false without the native helper or a paragraph to move, so the tool can use its Markdown operation. |
+| `toggleQuote()`, `setHeading(level)` | Quote, or set heading `level` (`0` is Normal), on the selected paragraphs in place; the Markdown route without the native helper or for a selection it leaves ([Block tools in place](#block-tools-in-place)). |
+| `makeCodeBlock()`, `unmakeCodeBlock()` | The Code block tool in place: the selection's paragraphs as one code block, or the code block holding the selection as paragraphs. False when the tool must take its Markdown route. |
+| `insertRule(markdown)`, `insertEmptyTable(markdown)` | The toolbar's rule and empty table in place after the caret's block; `markdown` is the same block for the Markdown route, which a host without the native helper and a caret in a table take. |
 | `tableContext()`, `changeTable(operation, index, count)` | Read the innermost table's row/column and dimensions, and insert/remove rows or columns as one undo transaction. Operations are `insertRows`, `removeRows`, `insertColumns`, `removeColumns`. |
 | `transformTable(transform)` | Plain-table fallback when the native helper is absent. Callback arguments are `(rows, row, column)`; row 1 is the Markdown separator row. Return `false` to leave the document unchanged. |
 | `withMarkdown(callback, asText, paragraphs)` | Read Markdown lines and the line/block map, rejecting stale or failed conversions. `asText` optionally reads a code block as prose. `paragraphs` projects selected list items as paragraphs without changing the live document, for block restyling. |

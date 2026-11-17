@@ -2568,6 +2568,30 @@ Window {
             "a later Backspace did more than take the marker off: " + savedMarkdown())
   }
 
+  // A typed prefix works in an empty table cell, and keeps a style switched
+  // on before it for the item's text.
+  function typedListEdges() {
+    load({ source: "| Header | Other |\n|---|---|\n|  | untouched |\n" })
+    var target = editor.cellStart(2)
+    editor.setCursorPosition(target)
+    var originalCells = cells()
+    typeText("1. Item")
+    require(editor.blockInfoAt(target).kind === "list", "1. did not start a list in the cell")
+    require(cells() === originalCells, "typing a list changed the table's cells")
+    var saved = savedMarkdown()
+    require(saved.indexOf("<li>Item</li>") >= 0 && saved.indexOf("untouched") >= 0,
+            "the cell's list was not saved: " + saved)
+    load({ source: saved })
+    require(savedMarkdown() === saved, "the cell's list changed on reload: " + savedMarkdown())
+
+    load({ source: "Above\n" })
+    editor.setCursorPosition(editor.plainText().length)
+    keys.keyClick(Qt.Key_Return)
+    keys.keyClick(Qt.Key_B, Qt.ControlModifier)
+    typeText("1. Item")
+    require(savedMarkdown() === "Above\n\n1. **Item**\n", "Bold switched on before the prefix was lost: " + savedMarkdown())
+  }
+
   // A list sits flush with the paragraphs around it, its marker close to the margin.
   function listSpacing() {
     var body = keys.findChild(editor, "noteBody")
@@ -3173,6 +3197,320 @@ Window {
     require(savedMarkdown() === "First\n\nSecond\n", "removing quotes left an empty quote between paragraphs")
   }
 
+  // The native helper quotes in place: the click shows the quote at once,
+  // as one undo step, takes list items out of their list, and quotes a
+  // mixed selection whole. A heading still takes the Markdown route.
+  function quoteToolNative() {
+    load({ source: "First\n\n> Second\n\n- Item\n- Kept\n" })
+    var original = editor.documentHtml()
+    var body = keys.findChild(editor, "noteBody")
+    body.select(0, editor.plainText().indexOf("Item") + 2)
+    clickEditingTool("quote")
+    require(editor.blockInfoAt(0).kind === "quote", "Quote did not apply as the click landed")
+    require(savedMarkdown() === "> First\n\n> Second\n\n> Item\n\n- Kept\n",
+            "a mixed selection was not quoted whole: " + savedMarkdown())
+    editor.undo()
+    require(editor.documentHtml() === original, "Quote did not undo in one step")
+
+    load({ source: "> First\n\n> Second\n" })
+    selectText(editor.plainText())
+    clickEditingTool("quote")
+    require(editor.blockInfoAt(0).kind !== "quote" && savedMarkdown() === "First\n\nSecond\n",
+            "Quote did not come off as the click landed: " + savedMarkdown())
+
+    load({ source: "# Title\n" })
+    editor.setCursorPosition(2)
+    clickEditingTool("quote")
+    keys.tryVerify(function() { return editor.blockInfoAt(0).kind === "quote" }, 3000)
+    require(savedMarkdown() === "> Title\n", "a heading was not quoted: " + savedMarkdown())
+  }
+
+  // A native edit and the same note reopened are one document — the block
+  // and character formats a re-render gives, not only the same Markdown.
+  // Reopens the note: what follows starts from the re-render. One leftover
+  // of Qt's import is no difference: the block after a table keeps the
+  // cell's object properties in its character format, which Qt exports as
+  // an empty style attribute and draws nothing for (measured on 6.11).
+  function requireAsReopened(label) {
+    var bare = function(html) { return html.replace(/ style=""/g, "") }
+    var edited = editor.documentHtml()
+    load({ source: savedMarkdown() })
+    require(bare(editor.documentHtml()) === bare(edited),
+            label + " differs from the note reopened:\n" + edited + "\n--- reopened ---\n" + editor.documentHtml())
+  }
+
+  // Enter on a quote's empty last line leaves the quote in place, at once.
+  function quoteLeaveNative() {
+    load({ source: "> First\n\nBelow\n" })
+    editor.setCursorPosition(editor.plainText().indexOf("First") + 5)
+    keys.keyClick(Qt.Key_Return)
+    var position = editor.cursorPosition()
+    require(editor.blockInfoAt(position).kind === "quote", "Enter did not continue the quote")
+    var continued = editor.documentHtml()
+    keys.keyClick(Qt.Key_Return)
+    require(editor.blockInfoAt(position).kind !== "quote" && editor.cursorPosition() === position,
+            "the second Enter did not leave the quote as the key landed")
+    typeText("Middle")
+    require(savedMarkdown() === "> First\n\nMiddle\n\nBelow\n", "leaving the quote changed the note: " + savedMarkdown())
+    editor.undo()
+    editor.undo()
+    require(editor.documentHtml() === continued, "undo did not restore the empty quote line")
+    editor.redo()
+    editor.redo()
+    requireAsReopened("leaving a quote")
+
+    load({ source: "> First\n\n> \u00a0\n\n> Last\n" })
+    var empty = editor.plainText().indexOf("Last") - 1
+    editor.setCursorPosition(empty)
+    require(editor.blockInfoAt(empty).kind === "quote", "fixture has no empty quote line")
+    keys.keyClick(Qt.Key_Return)
+    require(editor.blockInfoAt(editor.cursorPosition()).kind === "quote", "Enter left the quote from a line above its last")
+  }
+
+  // Indent and Outdent move a plain paragraph in place, at once, as the
+  // reopened note has it; a quote line keeps its quote.
+  function indentNative() {
+    for (var source of ["word\n", "> word\n"]) {
+      load({ source: source })
+      editor.setCursorPosition(1)
+      var original = editor.documentHtml()
+      clickEditingTool("indent")
+      require(savedMarkdown() === source.replace("word", "\u00a0\u00a0\u00a0\u00a0word"),
+              "Indent did not apply as the click landed: " + JSON.stringify(savedMarkdown()))
+      editor.undo()
+      require(editor.documentHtml() === original, "Indent did not undo in one step")
+      editor.redo()
+      requireAsReopened("Indent on " + JSON.stringify(source))
+      editor.setCursorPosition(editor.plainText().indexOf("word"))
+      clickEditingTool("outdent")
+      require(savedMarkdown() === source, "Outdent did not apply as the click landed: " + JSON.stringify(savedMarkdown()))
+      requireAsReopened("Outdent on " + JSON.stringify(source))
+    }
+    load({ source: "| Cell |\n|---|\n| one |\n\nAfter\n" })
+    var body = keys.findChild(editor, "noteBody")
+    body.select(editor.plainText().indexOf("one"), editor.plainText().indexOf("After") + 2)
+    clickEditingTool("indent")
+    var indented = savedMarkdown()
+    require(indented === "| Cell |\n|---|\n| one |\n\n\u00a0\u00a0\u00a0\u00a0After\n",
+            "Indent across a table changed its cells: " + JSON.stringify(indented))
+  }
+
+  // A selection crossing into a table takes the whole table, from its
+  // opening mark at the end of the paragraph before it, and passes over the
+  // empty block Qt keeps after it: a list styles neither of those blocks.
+  function listAcrossTable() {
+    load({ source: "| Cell |\n|---|\n| one |\n\nAfter\n" })
+    var body = keys.findChild(editor, "noteBody")
+    body.select(editor.plainText().indexOf("one"), editor.plainText().indexOf("After") + 2)
+    clickEditingTool("ul")
+    require(savedMarkdown() === "<table><tr><td><ul><li>Cell</li></ul></td></tr><tr><td><ul><li>one</li></ul></td></tr></table>\n\n- After\n",
+            "a list across a table styled the blocks around it: " + JSON.stringify(savedMarkdown()))
+  }
+
+  // The Heading menu restyles in place, at once and in one undo step, as
+  // the reopened note has it: sizes, margins and the author's bold moved
+  // between a paragraph's weight and a heading's.
+  function headingNative() {
+    var cases = [
+      { source: "word\n", id: "h1", expected: "# word\n" },
+      { source: "plain **bold** *italic*\n", id: "h2", expected: "## plain **bold** *italic*\n" },
+      { source: "# Title **bold**\n", id: "h3", expected: "### Title **bold**\n" },
+      { source: "## head **bold**\n", id: "p", expected: "head **bold**\n" },
+      { source: "- kept\n- item\n\nafter\n", id: "h1", select: ["item", "after"], expected: "- kept\n\n# item\n\n# after\n" },
+      { source: "> quoted\n", id: "h2", expected: "## quoted\n" },
+      { source: "> quoted\n", id: "p", expected: "quoted\n" }
+    ]
+    for (var data of cases) {
+      load({ source: data.source })
+      var body = keys.findChild(editor, "noteBody")
+      var caret = data.select ? editor.plainText().indexOf(data.select[1]) + 2 : 1
+      body.select(data.select ? editor.plainText().indexOf(data.select[0]) : caret, caret)
+      editor.updateInTable()
+      editor.updateInList()
+      var original = editor.documentHtml()
+      require(editor.tool(data.id), data.id + " was not executable on " + JSON.stringify(data.source))
+      require(editor.documentHtml() !== original, data.id + " did not apply as the click landed on " + JSON.stringify(data.source))
+      require(savedMarkdown() === data.expected, data.id + " on " + JSON.stringify(data.source) + " gave " + JSON.stringify(savedMarkdown()))
+      require(editor.cursorPosition() === caret, data.id + " moved the caret")
+      editor.undo()
+      require(editor.documentHtml() === original, data.id + " did not undo in one step")
+      editor.redo()
+      requireAsReopened(data.id + " on " + JSON.stringify(data.source))
+    }
+    load({ source: "Above\n" })
+    editor.setCursorPosition(editor.plainText().length)
+    keys.keyClick(Qt.Key_Return)
+    editor.updateInTable()
+    editor.updateInList()
+    require(editor.tool("h1"), "h1 was not executable")
+    typeText("Typed")
+    // The empty line's filler stays behind the typed text until the note is
+    // saved, which drops it, as an empty list item's does.
+    require(savedMarkdown() === "Above\n\n# Typed\n", "typing into an empty line made a heading gave " + JSON.stringify(savedMarkdown()))
+  }
+
+  // Leaving a code block and stepping past one or a rule land in place, at
+  // once, and type into a paragraph as the reopened note has it.
+  function landingNative() {
+    var code = "```\ncode\n```\n"
+    var rule = "Above\n\n---\n\nBelow\n"
+    var cases = [
+      { source: code, keys: [Qt.Key_Right], expected: code + "\nAfter\n" },
+      { source: "---\n", keys: [Qt.Key_Right], expected: "---\n\nAfter\n" },
+      { source: code, keys: [Qt.Key_Return, Qt.Key_Return], expected: code + "\nAfter\n" },
+      { source: "```\n\n```\n", keys: [Qt.Key_Return], expected: "```\n\n```\n\nAfter\n" },
+      { source: rule, on: "rule", keys: [Qt.Key_Return], expected: "Above\n\n---\n\nAfter\n\nBelow\n" },
+      { source: rule, on: "rule", keys: [], expected: "Above\n\n---\n\nAfter\n\nBelow\n" }
+    ]
+    for (var data of cases) {
+      load({ source: data.source })
+      // The rule is the empty block between its neighbours' text.
+      editor.setCursorPosition(data.on ? editor.plainText().indexOf("Below") - 1 : editor.plainText().length)
+      for (var key of data.keys) {
+        keys.keyClick(key)
+      }
+      typeText("After")
+      require(savedMarkdown() === data.expected,
+              JSON.stringify(data.source) + " with " + JSON.stringify(data.keys) + " gave " + JSON.stringify(savedMarkdown()))
+      requireAsReopened("landing after " + JSON.stringify(data.source) + " with " + JSON.stringify(data.keys))
+    }
+  }
+
+  // The toolbar's rule and table go in at once, in one undo step, where the
+  // Markdown route puts them — after the caret's block, an empty line
+  // included, past a whole code block, splitting a list; the caret lands on
+  // a paragraph after them when the note ends there.
+  function ruleAndTableNative() {
+    var blocks = { rule: "---", table: "|  |  |\n|---|---|\n|  |  |" }
+    for (var id of ["rule", "table"]) {
+      var block = blocks[id]
+      var cases = [
+        { source: "Before\n\nAfter\n", at: "efore", expected: "Before\n\n" + block + "\n\nAfter\n", stays: true },
+        { source: "Before\n", at: "efore", expected: "Before\n\n" + block + "\n", lands: true },
+        { source: "Before\n", enter: true, expected: "Before\n\n\u00a0\n\n" + block + "\n", lands: true },
+        { source: "Before\n\n\u00a0\n\nAfter\n", at: "\u00a0", expected: "Before\n\n\u00a0\n\n" + block + "\n\nAfter\n", stays: true },
+        { source: "- a\n- b\n", at: "a", expected: "- a\n\n" + block + "\n\n- b\n", stays: true },
+        { source: "```\nx\ny\n```\n\nAfter\n", at: "x", expected: "```\nx\ny\n```\n\n" + block + "\n\nAfter\n", stays: true },
+        { source: "> q\n\nAfter\n", at: "q", expected: "> q\n\n" + block + "\n\nAfter\n", stays: true }
+      ]
+      for (var data of cases) {
+        var label = id + " in " + JSON.stringify(data.source) + (data.enter ? " after Enter" : "")
+        load({ source: data.source })
+        if (data.enter) {
+          editor.setCursorPosition(editor.plainText().length)
+          keys.keyClick(Qt.Key_Return)
+        } else {
+          editor.setCursorPosition(editor.plainText().indexOf(data.at) + (data.at === "\u00a0" ? 0 : 1))
+        }
+        var caret = editor.cursorPosition()
+        editor.updateInTable()
+        editor.updateInList()
+        var original = editor.documentHtml()
+        require(editor.tool(id), label + ": not executable")
+        require(editor.documentHtml() !== original, label + ": did not apply as the click landed")
+        require(savedMarkdown() === data.expected, label + " gave " + JSON.stringify(savedMarkdown()))
+        if (data.stays) {
+          require(editor.cursorPosition() === caret, label + " moved the caret")
+        }
+        if (data.lands) {
+          require(editor.cursorPosition() === editor.plainText().length, label + " did not land the caret after the block")
+          typeText("x")
+          require(savedMarkdown() === data.expected + "\nx\n", label + " typed elsewhere: " + JSON.stringify(savedMarkdown()))
+        }
+        var edited = editor.documentHtml()
+        editor.undo()
+        if (data.lands) {
+          editor.undo()
+        }
+        require(editor.documentHtml() === original, label + ": undo did not restore the note")
+        editor.redo()
+        if (data.lands) {
+          editor.redo()
+        }
+        require(editor.documentHtml() === edited, label + ": redo changed the result")
+        requireAsReopened(label)
+      }
+    }
+  }
+
+  // The Code block tool turns prose into code and back in place, at once
+  // and in one undo step, with the text the Markdown route gives: code is
+  // the visible text, a line per paragraph or soft break; prose is each
+  // line read as Markdown reads it, whitespace collapsed and a deep indent
+  // kept as the dialect's. What that route would lose, it does itself.
+  function codeBlockNative() {
+    var cases = [
+      { source: "word\n", expected: "```\nword\n```\n" },
+      { source: "**bold** and *it*\n\nsecond\n", all: true, expected: "```\nbold and it\nsecond\n```\n" },
+      { source: "a\n\n\u00a0\n\nb\n", all: true, expected: "```\na\n\nb\n```\n" },
+      { source: "# Title\n", expected: "```\nTitle\n```\n" },
+      { source: "> q\n", expected: "```\nq\n```\n" },
+      { source: "one\\\ntwo\n", expected: "```\none\ntwo\n```\n" },
+      { source: "```\nold\n```\n\nnew\n", at: "new", expected: "```\nold\nnew\n```\n" },
+      { source: "```\nword\n```\n", expected: "word\n" },
+      { source: "```\na    b\n\n\t\tdeep\n**x**\n```\n", expected: "a b\n\n\u00a0\n\n" + "\u00a0".repeat(8) + "deep\n\n\\*\\*x\\*\\*\n" }
+    ]
+    for (var data of cases) {
+      var label = "Code block on " + JSON.stringify(data.source)
+      load({ source: data.source })
+      var body = keys.findChild(editor, "noteBody")
+      if (data.all) {
+        body.select(0, editor.plainText().length)
+      } else {
+        editor.setCursorPosition(editor.plainText().indexOf(data.at || editor.plainText().replace(/^\s+/, "").charAt(0)) + 1)
+      }
+      editor.updateInTable()
+      editor.updateInList()
+      var original = editor.documentHtml()
+      require(editor.tool("codeblock"), label + ": not executable")
+      require(editor.documentHtml() !== original, label + ": did not apply as the click landed")
+      require(savedMarkdown() === data.expected, label + " gave " + JSON.stringify(savedMarkdown()))
+      var edited = editor.documentHtml()
+      editor.undo()
+      require(editor.documentHtml() === original, label + ": undo did not restore the note")
+      editor.redo()
+      require(editor.documentHtml() === edited, label + ": redo changed the result")
+      requireAsReopened(label)
+    }
+
+    // A caret on a line whose text shrinks stays on it, as far as it reaches.
+    load({ source: "```\na    b\n```\n" })
+    editor.setCursorPosition(editor.plainText().indexOf("b") + 1)
+    editor.updateInTable()
+    editor.updateInList()
+    require(editor.tool("codeblock"), "Code block in code: not executable")
+    require(editor.cursorPosition() === editor.plainText().indexOf("b") + 1, "the caret left its line: " + editor.cursorPosition())
+
+    // Spaces too few to be an indent are a gap between blocks to Markdown:
+    // that route, not the native one, reads the line.
+    load({ source: "```\nx\n  \ny\n```\n" })
+    editor.setCursorPosition(1)
+    editor.updateInTable()
+    editor.updateInList()
+    require(editor.tool("codeblock"), "Code block on a spaces line: not executable")
+    keys.tryVerify(function() { return savedMarkdown() !== "```\nx\n  \ny\n```\n" }, 3000)
+    require(savedMarkdown() === "x\n\ny\n", "the Markdown route did not read the spaces line: " + JSON.stringify(savedMarkdown()))
+  }
+
+  // Edges of the native quote: text sized like a heading without being one
+  // reads as a heading in the dialect, so it takes the Markdown route and
+  // still comes out quoted; a paragraph holding an image quotes in place.
+  function quoteToolEdges() {
+    load({ html: '<p><span style="font-size:xx-large; font-weight:700;">Big</span></p>' })
+    require(savedMarkdown() === "# Big\n", "fixture is not a sized heading: " + savedMarkdown())
+    editor.setCursorPosition(1)
+    clickEditingTool("quote")
+    keys.tryVerify(function() { return editor.blockInfoAt(0).kind === "quote" }, 3000)
+    require(savedMarkdown() === "> Big\n", "sized text lost its quote: " + savedMarkdown())
+
+    var image = "Text ![alt](missing.png)\n"
+    load({ source: image })
+    editor.setCursorPosition(1)
+    clickEditingTool("quote")
+    require(editor.blockInfoAt(0).kind === "quote", "a paragraph with an image was not quoted")
+    require(savedMarkdown() === "> " + image, "quoting changed the image: " + savedMarkdown())
+  }
+
   function blockToolTargeting(id) {
     var kind = id === "quote" ? "quote" : "code"
     var formatted = id === "quote" ? "> Target" : "```\nTarget\n```"
@@ -3236,6 +3574,36 @@ Window {
     keys.tryVerify(function() { return editor.blockInfoAt(0).kind !== "quote" }, 3000)
     typeText("Plain")
     require(savedMarkdown() === "Plain\n", "Enter did not leave a quote containing only an empty line")
+  }
+
+  // Backspace at the start of a quote line takes the quote off that line and
+  // leaves the caret on it; only the next Backspace joins the line above.
+  function quoteBackspace() {
+    load({ source: "Above\n\n> Quote\n" })
+    var start = editor.plainText().indexOf("Quote")
+    editor.setCursorPosition(start + "Quote".length)
+    for (var i = 0; i < "Quote".length; i++) {
+      keys.keyClick(Qt.Key_Backspace)
+    }
+    require(editor.blockInfoAt(start).kind === "quote", "deleting the text took the quote off early")
+    var emptied = editor.documentHtml()
+    keys.keyClick(Qt.Key_Backspace)
+    require(editor.cursorPosition() === start && editor.blockInfoAt(start).kind !== "quote",
+            "Backspace did not take the quote off its own line: " + editor.cursorPosition())
+    require(editor.plainText().indexOf("Above") === 0 && editor.plainText().length > "Above".length,
+            "Backspace removed the quote's line: " + JSON.stringify(editor.plainText()))
+    typeText("Plain")
+    require(savedMarkdown() === "Above\n\nPlain\n", "the line kept quote formatting: " + savedMarkdown())
+    editor.undo()
+    editor.undo()
+    require(editor.documentHtml() === emptied, "undo did not restore the empty quote line")
+
+    load({ source: "Above\n\n> First\n\n> Second\n" })
+    var second = editor.plainText().indexOf("Second")
+    editor.setCursorPosition(second)
+    keys.keyClick(Qt.Key_Backspace)
+    require(editor.cursorPosition() === second && savedMarkdown() === "Above\n\n> First\n\nSecond\n",
+            "Backspace at a quote line's start did not take only that line out: " + savedMarkdown())
   }
 
   // With the caret in a table or a code block Quote is hidden; a selection
@@ -3493,7 +3861,8 @@ Window {
       { name: "Space after a typed list prefix starts that list", run: typedListPrefixes },
       { name: "a typed list prefix before text or in code stays text", run: typedListPrefixesStayText },
       { name: "Backspace right after a typed list gives the prefix back", run: typedListBackspace },
-      { name: "lists sit flush with paragraphs and close to the margin", run: listSpacing }
+      { name: "lists sit flush with paragraphs and close to the margin", run: listSpacing },
+      { name: "a typed list prefix works in table cells and keeps a pending style", run: typedListEdges }
     ]
     ;["todo", "ul", "ol"].forEach(function(id) {
       checks.forEach(function(check) {
@@ -3509,6 +3878,16 @@ Window {
       { name: "Quote preserves paragraph boundaries in both toggle directions", run: quoteToolParagraphs },
       { name: "Quote transforms the current paragraph, including text typed below tables", run: function() { blockToolTargeting("quote") } },
       { name: "Enter continues a quote and leaves its empty last line with undo", run: quoteEnter },
+      { name: "Backspace at a quote line's start takes the quote off and keeps the line", run: quoteBackspace },
+      { name: "Quote applies in place, in one undo step, to paragraphs and list items", run: quoteToolNative },
+      { name: "Quote keeps sized text and images", run: quoteToolEdges },
+      { name: "Enter on a quote's empty last line leaves it in place", run: quoteLeaveNative },
+      { name: "Indent and Outdent move plain paragraphs in place", run: indentNative },
+      { name: "a list across a table styles neither block around the table", run: listAcrossTable },
+      { name: "the Heading menu restyles in place as the note reopens", run: headingNative },
+      { name: "leaving and stepping past code and rules land in place as the note reopens", run: landingNative },
+      { name: "rules and tables go in place where the Markdown route puts them", run: ruleAndTableNative },
+      { name: "Code block turns prose into code and back in place as the note reopens", run: codeBlockNative },
       { name: "Quote explains a selection holding only table or code lines", run: quoteUnavailable },
       { name: "a code block hides the tools that would style or restyle its lines", run: toolsInCode },
       { name: "a table cell hides the block styles that cannot reach its lines", run: toolsInTable },

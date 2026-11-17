@@ -5,5 +5,6 @@ set(NOTE_NOTE_NATIVE_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/extensionruntime.h ${CMAKE_CURRENT_LIST_DIR}/extensionruntime.cpp
     ${CMAKE_CURRENT_LIST_DIR}/dialect.h
     ${CMAKE_CURRENT_LIST_DIR}/textblocks.h ${CMAKE_CURRENT_LIST_DIR}/textblocks.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/textlists.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/textedits.h ${CMAKE_CURRENT_LIST_DIR}/textlists.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/textparagraphs.cpp
     ${CMAKE_CURRENT_LIST_DIR}/textlinks.h ${CMAKE_CURRENT_LIST_DIR}/textlinks.cpp)

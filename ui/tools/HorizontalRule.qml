@@ -7,7 +7,11 @@ Tool {
   label: "Horizontal rule"
   icon: "󰍴"
 
+  // What a host without the native helper inserts; the helper inserts the
+  // writer's own rendering of it (cpp/dialect.h, RULE_HTML).
+  readonly property string markdown: "---"
+
   function execute() {
-    editor.insertSnippet("---")
+    editor.insertRule(markdown)
   }
 }

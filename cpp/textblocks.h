@@ -18,6 +18,10 @@
 // including Backspace immediately after a table and edits inside nested ones.
 // List actions target document blocks directly, including empty table cells;
 // textlists.cpp owns list membership, toggles and leaving an empty item.
+// textparagraphs.cpp owns the paragraph styles the toolbar sets in place —
+// quote, heading, code block — and the rules and tables it inserts, as the
+// writer would make them (qthtml/writer.py), so that an edit and the same
+// note reopened are one document. Both share textedits.h.
 // TextLinks colours and locates URLs without changing the document, and
 // clears inherited anchors from empty paragraphs.
 // The edit-block brackets (beginEditBlock/
@@ -66,7 +70,7 @@ class TextBlocks : public QObject
     // its number or checkbox sits in. Qt's 40px leaves a wide gap; the
     // editor sizes it to its font so a list sits close to the margin.
     Q_PROPERTY(qreal listIndent READ listIndent WRITE setListIndent NOTIFY listIndentChanged)
-    static constexpr int Version = 7;
+    static constexpr int Version = 9;
 
 public:
     Q_INVOKABLE int insertFormattedText(int from, int to, const QString &text, const QVariantMap &styles);
@@ -83,6 +87,28 @@ public:
     // List membership never crosses a table cell. Return the selection adjusted
     // for empty items' rendering fillers. The operation is one undo step.
     Q_INVOKABLE QVariantMap toggleList(int from, int to, const QString &style, bool toggle = true);
+    // Quote the selected paragraphs, list items leaving their lists, or take
+    // the quote off when they are all quoted already. A selection holding a
+    // heading — Qt's heading tag, or text in a font size, which the dialect
+    // reads as one — or reaching into a table answers nothing: the Markdown
+    // route knows what a heading's size and weight become in a quote, and a
+    // cell holds no quote. Returns the selection adjusted for empty lines'
+    // fillers. One undo step.
+    Q_INVOKABLE QVariantMap toggleQuote(int from, int to);
+    // The selected paragraphs become headings of `level` (1 to 6), or plain
+    // paragraphs at 0 — the Heading menu's Normal. List items leave their
+    // lists and quotes their margins, as a heading line in Markdown holds
+    // only its text. The text keeps its formats, its weight moved between a
+    // paragraph's and a heading's (qthtml/dialect.py, HEAVY_WEIGHT). A
+    // selection reaching into a table answers nothing: a cell holds no
+    // heading. Returns the selection adjusted for empty lines' fillers.
+    // One undo step.
+    Q_INVOKABLE QVariantMap setHeading(int from, int to, int level);
+    // Indent (`direction` 1) or outdent (-1) the selected paragraphs: a
+    // list item moves a level, taking the style an earlier item has there
+    // (with `cycleStyles`, the next marker in its family when none does),
+    // and a plain paragraph gains or loses one INDENT_TEXT. One undo step;
+    // false when the selection holds no paragraph to move.
     Q_INVOKABLE bool indentBlocks(int from, int to, int direction, bool cycleStyles = true);
     // A read-only projection for paragraph tools: selected list items become
     // paragraphs in a clone, while unselected list structure is retained.
@@ -90,6 +116,45 @@ public:
     // Backspace at the start of an item removes its marker and list indent
     // together, without deleting text or crossing a table-cell boundary.
     Q_INVOKABLE bool removeListAtStart(int position);
+    // Backspace at the start of a quote line takes the quote's margins off
+    // that line, which stays where it is; Qt's own Backspace would join it
+    // to the line above. One undo step.
+    Q_INVOKABLE bool removeQuoteAtStart(int position);
+    // Enter on the empty last line of a quote: the line leaves the quote as
+    // an empty paragraph, the way Enter leaves an empty list item. Lines
+    // higher up are the quote's content and stay. One undo step.
+    Q_INVOKABLE bool leaveEmptyQuote(int position);
+    // The caret on a rule or in a code block, which it can stand on but
+    // never after at the note's end: a paragraph goes in after the rule or
+    // the whole code block, starting with `text` — the keystroke typed on a
+    // rule — and the caret lands at its end, which this answers. -1 for
+    // any other block. One undo step.
+    Q_INVOKABLE int stepPastBlock(int position, const QString &text);
+    // Enter on the empty last line of a code block: the line leaves the
+    // block as an empty paragraph, the caret staying on it; a block's only
+    // line stays and a paragraph lands after it (stepPastBlock). Answers the
+    // caret, or -1 when the caret is not on such a line. One undo step.
+    Q_INVOKABLE int leaveEmptyCode(int position);
+    // The toolbar's horizontal rule and empty table (cpp/dialect.h), after
+    // the caret's block or the whole code block it is in; a paragraph
+    // follows when nothing else does. Answers the caret — on that paragraph
+    // when the block ends the note, where it was otherwise — or -1 with the
+    // caret in a table, where the Markdown route places it. One undo step.
+    Q_INVOKABLE int insertRule(int position);
+    Q_INVOKABLE int insertTable(int position);
+    // The Code block tool on prose: the selected paragraphs become one code
+    // block in the note's code `background` — their visible text, a line
+    // per paragraph or soft line break, in the writer's code line format.
+    // A selection the Markdown route has a rule for answers nothing: one
+    // reaching into a code block it merges with, a list it may refuse, a
+    // table or rule it refuses, an image. Returns the selection. One undo
+    // step.
+    Q_INVOKABLE QVariantMap makeCodeBlock(int from, int to, const QString &background);
+    // The Code block tool in code: the code block holding `from` becomes
+    // paragraphs, each line as the Markdown route reads it (paragraphText),
+    // the selection keeping its lines. A line that route would lose answers
+    // nothing. One undo step.
+    Q_INVOKABLE QVariantMap unmakeCodeBlock(int from, int to);
     Q_INVOKABLE bool leaveEmptyList(int position);
     // Space typed after "1.", "1)", "a.", "A.", "-", "*" or "[]" on a
     // paragraph holding nothing else makes it a list item, Markdown's way.

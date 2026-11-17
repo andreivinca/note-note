@@ -9,12 +9,17 @@ Tool {
   icon: "󰅩"
   available: !editor.inTable
 
+  // In place through the native helper; a host without it, and a selection
+  // it leaves — one this route merges, refuses or reads its own way — take
+  // the Markdown route below.
   function execute() {
     if (editor.selectionInCode(true)) {
-      editor.editBlocks(function(lines) {
-        return lines
-      }, editor.blockAt(editor.selection().from))
-    } else {
+      if (!editor.unmakeCodeBlock()) {
+        editor.editBlocks(function(lines) {
+          return lines
+        }, editor.blockAt(editor.selection().from))
+      }
+    } else if (!editor.makeCodeBlock()) {
       editor.editBlocks(fenceBlocks, undefined, true)
     }
   }

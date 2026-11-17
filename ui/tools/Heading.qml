@@ -10,9 +10,7 @@ Tool {
   available: !editor.inList && !editor.inTable && !editor.inCode
 
   function apply(level) {
-    editor.transformBlocks(function(line) {
-      return "#".repeat(level) + (level ? " " : "") + line.content
-    })
+    editor.setHeading(level)
   }
 
   options: [
