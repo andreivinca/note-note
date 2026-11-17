@@ -120,8 +120,24 @@ same actions as the toolbar buttons. The Key bindings page lists them, as
 Checkbox, bullet and numbered list actions format the paragraph at the caret or
 the selected paragraphs, including empty paragraphs and table cells. A selection
 ending at the start of another paragraph leaves that paragraph untouched. Mixed
-selections adopt the requested style; clicking again removes the markers. Existing
-checked states survive when applying checkboxes to a mixed selection.
+selections adopt the requested style; clicking again removes the markers.
+Checkboxes take three steps, as in OneNote: the first press adds them, the
+second checks them and the third removes them. Existing checked states survive
+when applying checkboxes to a mixed selection.
+
+Typing a list's Markdown prefix and then Space on an empty paragraph starts
+that list: `1.` or `1)` numbers from the typed number, `a.` and `A.` letter
+from the typed letter, `-` and `*` bullet, and `[]` or `[ ]` adds a checkbox.
+A number that is the next one of the list just above continues it; any other
+number starts a new list. Backspace right after the list appears, or Ctrl+Z,
+turns it back into the text as typed, `1. ` included. A prefix typed before
+existing text, inside code or in a list item stays text. Lettered lists need
+the provider's `listStyles` capability, and the conversion needs the native
+helper.
+
+Lists sit flush with the paragraphs around them, with no space above or
+below, and each list level is one and a half times the text size wide, room
+for its number or checkbox.
 
 Bullets and numbered lists have split buttons: the main button toggles the
 default marker, while the arrow opens the styles. Bullets offer **●**, **○** and

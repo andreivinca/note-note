@@ -332,7 +332,22 @@ void TextBlocks::setDocument(QQuickTextDocument *document)
     // A depth carried across documents would end blocks the new
     // document never began.
     m_editDepth = 0;
+    if (document) {
+        document->textDocument()->setIndentWidth(m_listIndent);
+    }
     emit documentChanged();
+}
+
+void TextBlocks::setListIndent(qreal width)
+{
+    if (width == m_listIndent) {
+        return;
+    }
+    m_listIndent = width;
+    if (m_document) {
+        m_document->textDocument()->setIndentWidth(width);
+    }
+    emit listIndentChanged();
 }
 
 void TextBlocks::enterEditBlock(QTextDocument *doc)
@@ -572,16 +587,12 @@ void TextBlocks::normalizeListMargins()
         if (!list) {
             continue;
         }
-        const bool nested = list->format().indent() > 1;
-        const int item = list->itemNumber(block);
-        const qreal top = !nested && item == 0 ? 12 : 0;
-        const qreal bottom = !nested && item == list->count() - 1 ? 12 : 0;
         QTextBlockFormat format = block.blockFormat();
-        if (format.topMargin() == top && format.bottomMargin() == bottom) {
+        if (format.topMargin() == 0 && format.bottomMargin() == 0) {
             continue;
         }
-        format.setTopMargin(top);
-        format.setBottomMargin(bottom);
+        format.setTopMargin(0);
+        format.setBottomMargin(0);
         QTextCursor cursor(block);
         cursor.joinPreviousEditBlock();
         cursor.setBlockFormat(format);

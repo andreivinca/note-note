@@ -2495,6 +2495,96 @@ Window {
     })
   }
 
+  // Space after a typed list prefix on an empty paragraph makes the item.
+  function typedListPrefixes() {
+    var cases = [
+      { typed: "1.", expected: "1. Item\n" },
+      { typed: "1)", expected: "1. Item\n" },
+      { typed: "3.", expected: "3. Item\n" },
+      { typed: "-", expected: "- Item\n" },
+      { typed: "*", expected: "- Item\n" },
+      { typed: "[]", expected: "- [ ] Item\n" },
+      { typed: "[ ]", expected: "- [ ] Item\n" }
+    ]
+    for (var data of cases) {
+      load({ source: "" })
+      typeText(data.typed + " Item")
+      require(savedMarkdown() === data.expected, data.typed + " did not start its list: " + savedMarkdown())
+    }
+    for (var letter of [{ typed: "b.", style: "lower-alpha" }, { typed: "C)", style: "upper-alpha" }]) {
+      load({ source: "" })
+      typeText(letter.typed + " Item")
+      var saved = savedMarkdown()
+      require(saved.indexOf(letter.style) >= 0 && saved.indexOf("<li>Item</li>") >= 0,
+              letter.typed + " did not start a lettered list: " + saved)
+      load({ source: saved })
+      require(savedMarkdown() === saved, letter.typed + " changed on reload: " + savedMarkdown())
+    }
+    load({ source: "1. One\n2. Two\n" })
+    editor.setCursorPosition(editor.plainText().length)
+    keys.keyClick(Qt.Key_Return)
+    keys.keyClick(Qt.Key_Return)
+    typeText("3. Three")
+    require(savedMarkdown() === "1. One\n2. Two\n3. Three\n", "the next number did not continue the list: " + savedMarkdown())
+  }
+
+  // Only an otherwise empty paragraph outside code turns into a list.
+  function typedListPrefixesStayText() {
+    load({ source: "Text\n" })
+    editor.setCursorPosition(0)
+    typeText("1. ")
+    require(editor.plainText() === "1. Text" && editor.blockInfoAt(0).kind !== "list",
+            "a prefix typed before text started a list: " + editor.plainText())
+    load({ source: "```\ncode\n```\n" })
+    editor.setCursorPosition(editor.plainText().indexOf("code") + 4)
+    keys.keyClick(Qt.Key_Return)
+    typeText("1. ")
+    require(editor.blockInfoAt(editor.cursorPosition()).kind === "code", "a prefix typed in code started a list")
+  }
+
+  // Backspace or undo right after the conversion leaves the prefix as typed;
+  // later, Backspace at the item's start takes only the marker.
+  function typedListBackspace() {
+    load({ source: "" })
+    typeText("1. ")
+    require(editor.blockInfoAt(0).kind === "list", "1. did not start a list")
+    keys.keyClick(Qt.Key_Backspace)
+    require(editor.plainText() === "1. " && editor.blockInfoAt(0).kind !== "list" && editor.cursorPosition() === 3,
+            "Backspace did not give back the typed prefix: " + JSON.stringify(editor.plainText()))
+    keys.keyClick(Qt.Key_Backspace)
+    require(editor.plainText() === "1.", "a second Backspace did not delete the typed space: " + JSON.stringify(editor.plainText()))
+
+    load({ source: "" })
+    typeText("- ")
+    keys.keyClick(Qt.Key_Z, Qt.ControlModifier)
+    require(editor.plainText() === "- " && editor.blockInfoAt(0).kind !== "list",
+            "undo did not give back the typed prefix: " + JSON.stringify(editor.plainText()))
+
+    load({ source: "" })
+    typeText("1. Item")
+    editor.setCursorPosition(editor.plainText().indexOf("Item"))
+    keys.keyClick(Qt.Key_Backspace)
+    require(savedMarkdown() === "Item\n" && editor.blockInfoAt(0).kind !== "list",
+            "a later Backspace did more than take the marker off: " + savedMarkdown())
+  }
+
+  // A list sits flush with the paragraphs around it, its marker close to the margin.
+  function listSpacing() {
+    var body = keys.findChild(editor, "noteBody")
+    load({ source: "Above\n\nBelow\n" })
+    var paragraphGap = body.positionToRectangle(editor.plainText().indexOf("Below")).y
+      - body.positionToRectangle(0).y
+    load({ source: "Above\n\n- Item\n\nBelow\n" })
+    var text = editor.plainText()
+    var item = body.positionToRectangle(text.indexOf("Item"))
+    var above = body.positionToRectangle(0)
+    var below = body.positionToRectangle(text.indexOf("Below"))
+    require(item.y - above.y === paragraphGap && below.y - item.y === paragraphGap,
+            "a list keeps space above or below: " + JSON.stringify([paragraphGap, item.y - above.y, below.y - item.y]))
+    require(item.x - above.x === Math.round(body.font.pixelSize * 1.5),
+            "a list level is not sized to the font: " + (item.x - above.x))
+  }
+
   function listIndentCycle(id, styles) {
     load({ source: listPrefix(id) + "Parent\n" + listPrefix(id) + "Target\n" })
     editor.setCursorPosition(editor.plainText().indexOf("Target") + 2)
@@ -2710,6 +2800,10 @@ Window {
     editor.setCursorPosition(0)
     keys.keyClick(key, Qt.ControlModifier)
     require(savedMarkdown() === listPrefix(id) + "Target\n", "the shortcut did not make the list: " + savedMarkdown())
+    if (id === "todo") {
+      keys.keyClick(key, Qt.ControlModifier)
+      require(savedMarkdown() === "- [x] Target\n", "the shortcut did not check the checkbox: " + savedMarkdown())
+    }
     keys.keyClick(key, Qt.ControlModifier)
     require(savedMarkdown() === "Target\n", "the shortcut did not take the list off again: " + savedMarkdown())
   }
@@ -2744,6 +2838,13 @@ Window {
     helperlessEditor.tools.execute(id)
     keys.tryVerify(function() { return helperlessMarkdown() === listed }, 3000)
     require(helperlessMarkdown() === listed, "the Markdown way did not make the list: " + helperlessMarkdown())
+    if (id === "todo") {
+      var checked = source.replace("Target", "- [x] Target")
+      helperlessEditor.setCursorPosition(helperlessEditor.plainText().indexOf("Target"))
+      helperlessEditor.tools.execute(id)
+      keys.tryVerify(function() { return helperlessMarkdown() === checked }, 3000)
+      require(helperlessMarkdown() === checked, "the Markdown way did not check the checkbox: " + helperlessMarkdown())
+    }
     helperlessEditor.setCursorPosition(helperlessEditor.plainText().indexOf("Target"))
     helperlessEditor.tools.execute(id)
     keys.tryVerify(function() { return helperlessMarkdown() === source }, 3000)
@@ -2815,6 +2916,10 @@ Window {
       require(savedMarkdown() === expected, "selection included the next paragraph or lost numbering: " + savedMarkdown())
       require(body.selectionStart === 0 && body.selectionEnd === end && body.cursorPosition === (backwards ? 0 : end),
               "list changed the selection")
+      if (id === "todo") {
+        clickEditingTool(id)
+        require(savedMarkdown() === "- [x] First\n- [x] Second\n\nThird\n", "second click did not check the selected boxes: " + savedMarkdown())
+      }
       clickEditingTool(id)
       require(savedMarkdown() === "First\n\nSecond\n\nThird\n", "second click did not remove selected markers")
     }
@@ -2825,6 +2930,13 @@ Window {
     var expectedMixed = id === "ol" ? "1. Checked\n2. Bullet\n3. Plain\n"
       : (id === "todo" ? "- [x] Checked\n- [ ] Bullet\n- [ ] Plain\n" : "- Checked\n- Bullet\n- Plain\n")
     require(saved === expectedMixed, "mixed selection did not become one consistent list: " + saved)
+    if (id === "todo") {
+      clickEditingTool(id)
+      require(savedMarkdown() === "- [x] Checked\n- [x] Bullet\n- [x] Plain\n",
+              "partly checked boxes were not all checked: " + savedMarkdown())
+      clickEditingTool(id)
+      require(savedMarkdown() === "Checked\n\nBullet\n\nPlain\n", "checked boxes were not removed: " + savedMarkdown())
+    }
   }
 
   function listToolTables(id) {
@@ -2865,8 +2977,13 @@ Window {
       }
       editor.setCursorPosition(target)
       require(editor.blockInfoAt(target).kind === "list", "reload lost the table list")
+      if (id === "todo") {
+        clickEditingTool(id)
+        require(editor.blockInfoAt(target).kind === "list" && editor.checkBoxes.length === 1 && editor.checkBoxes[0].checked,
+                "second click did not check the table checkbox")
+      }
       clickEditingTool(id)
-      require(editor.blockInfoAt(target).kind !== "list", "second click did not remove the table list")
+      require(editor.blockInfoAt(target).kind !== "list", "the last click did not remove the table list")
     }
   }
 
@@ -3372,7 +3489,11 @@ Window {
       { name: "a paragraph indented with list items takes no-break spaces", run: listIndentWithParagraph },
       { name: "list styles respect selections, numbering, table cells and read-only notes", run: listStyleSelectionAndTables },
       { name: "styled lists continue on Enter and indent at empty and boundary positions", run: styledListTyping },
-      { name: "block tools transform selected styled-list items and preserve their neighbours", run: styledListBlockTools }
+      { name: "block tools transform selected styled-list items and preserve their neighbours", run: styledListBlockTools },
+      { name: "Space after a typed list prefix starts that list", run: typedListPrefixes },
+      { name: "a typed list prefix before text or in code stays text", run: typedListPrefixesStayText },
+      { name: "Backspace right after a typed list gives the prefix back", run: typedListBackspace },
+      { name: "lists sit flush with paragraphs and close to the margin", run: listSpacing }
     ]
     ;["todo", "ul", "ol"].forEach(function(id) {
       checks.forEach(function(check) {

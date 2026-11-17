@@ -760,6 +760,45 @@ Item {
     return true
   }
 
+  // The list Space last started from typed text (startTypedList): the caret
+  // it left and the document's revision then. Backspace there, before any
+  // other edit, takes the paragraph back to the text as typed.
+  property var typedList: null
+
+  // Space after "1.", "a.", "-" or "[]" on an otherwise empty paragraph
+  // makes it a list item of a style the provider keeps.
+  function typeStartsList() {
+    if (root.readOnly || root.plain || area.selectionStart !== area.selectionEnd || !nativeBlocks.item) {
+      return false
+    }
+    var typed = nativeBlocks.item.typedListAt(area.cursorPosition)
+    var lettered = typed.style === "lower-alpha" || typed.style === "upper-alpha"
+    if (!typed.tool || !editing.supports(typed.tool) || (lettered && !editing.supports("listStyles"))) {
+      return false
+    }
+    var caret = nativeBlocks.item.startTypedList(area.cursorPosition)
+    if (caret < 0) {
+      return false
+    }
+    area.cursorPosition = caret
+    root.typedList = { caret: caret, revision: nativeBlocks.item.contentRevision }
+    root.updateInList()
+    root.edited()
+    return true
+  }
+
+  function undoTypedList() {
+    var typed = root.typedList
+    root.typedList = null
+    if (!typed || !nativeBlocks.item || area.selectionStart !== area.selectionEnd
+        || area.cursorPosition !== typed.caret || nativeBlocks.item.contentRevision !== typed.revision) {
+      return false
+    }
+    root.undo()
+    root.updateInList()
+    return true
+  }
+
   function deletePreviousTable() {
     if (root.readOnly || root.plain || area.selectionStart !== area.selectionEnd || !nativeBlocks.item) {
       return false
@@ -1100,6 +1139,14 @@ Item {
         console.log("note-note: native text inspector not built (sh cpp/build.sh); scanning HTML instead")
       }
     }
+  }
+
+  // A list level is as wide as its marker needs, not Qt's 40px.
+  Binding {
+    target: nativeBlocks.item
+    property: "listIndent"
+    value: Math.round(area.font.pixelSize * 1.5)
+    when: nativeBlocks.item !== null
   }
 
   function configureLinkDisplay() {
@@ -2205,7 +2252,7 @@ Item {
               }
             }
             if (event.key === Qt.Key_Backspace && event.modifiers === Qt.NoModifier
-                && (root.deleteListMarker() || root.deletePreviousTable())) {
+                && (root.undoTypedList() || root.deleteListMarker() || root.deletePreviousTable())) {
               event.accepted = true
               return
             }
@@ -2223,6 +2270,10 @@ Item {
             if (event.text.length > 0
                 && !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier))
                 && root.typeLeavesRule(event.text)) {
+              event.accepted = true
+              return
+            }
+            if (event.key === Qt.Key_Space && event.modifiers === Qt.NoModifier && root.typeStartsList()) {
               event.accepted = true
               return
             }

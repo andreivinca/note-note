@@ -153,11 +153,12 @@ the eye sees over the glyph's cell (NoteEditor.qml, block decorations;
 
 **Nested lists have no vertical margins** (measured on 6.11). Qt gives the
 first and last items of an outer list 12px top and bottom margins, but every
-item in a nested list (`QTextListFormat::indent() > 1`) gets zero. Applying
-outer margins to every `QTextList` makes a one-item sublist jump by 12px on
-both sides when typing anywhere triggers `normalizeListMargins()`. The
-normalizer preserves Qt's imported spacing and repairs margins copied by
-Enter, joining the triggering edit for undo.
+item in a nested list (`QTextListFormat::indent() > 1`) gets zero. The editor
+gives no list any: the writer states zero margins on every `<ul>` and `<ol>`,
+and `normalizeListMargins()` clears the 12px a pasted list brings and the
+margins Enter copies, joining the triggering edit for undo. A list level's
+width is the document's `indentWidth` (Qt's default 40px), which the editor
+sets from its font (`TextBlocks.listIndent`).
 
 **Link hover must wait for document edits to finish.** Syntax highlighting
 runs during table undo, before the document's frame layout is stable.

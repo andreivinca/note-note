@@ -347,15 +347,17 @@ QtObject {
   }
 
   // The list styles as Markdown writes them: what shows a line is of the
-  // style already, and what makes it one.
+  // style already, and what makes it one. An unchecked checkbox is checked
+  // before it comes off, as OneNote does.
   readonly property var listStyles: ({
-    todo: { marked: /\[[ xX]\]/, prefix: "- [ ] " },
+    todo: { marked: /\[[ xX]\]/, prefix: "- [ ] ", unchecked: /\[ \]/, checked: "- [x] " },
     ol: { marked: /^\d+[.)][ \t]/, prefix: "1. " },
     ul: { marked: /^[-*+][ \t](?!\[)/, prefix: "- " }
   })
 
   // `todo`, `ul` or `ol` on the paragraphs under the caret or the selection;
   // asked of paragraphs that are all of that style already, it takes it off.
+  // A checkbox goes three ways: added, then checked, then taken off.
   function toggleListStyle(style) {
     var markdown = listStyles[style]
     if (!writable || !markdown || host.toggleListStyle(style)) {
@@ -369,9 +371,15 @@ QtObject {
       return
     }
     transformBlocks(function(line) {
-      var prefix = markdown.marked.test(line.prefix) ? "" : markdown.prefix
-      return line.indent + prefix + (line.content || Dialect.EMPTY_ITEM)
+      return line.indent + toggledPrefix(markdown, line.prefix) + (line.content || Dialect.EMPTY_ITEM)
     }, { list: true })
+  }
+
+  function toggledPrefix(markdown, prefix) {
+    if (markdown.unchecked && markdown.unchecked.test(prefix)) {
+      return markdown.checked
+    }
+    return markdown.marked.test(prefix) ? "" : markdown.prefix
   }
 
   function setListStyle(style) {

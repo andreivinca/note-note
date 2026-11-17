@@ -62,7 +62,11 @@ class TextBlocks : public QObject
     // of another version at load.
     Q_PROPERTY(int version READ version CONSTANT)
     Q_PROPERTY(int contentRevision READ contentRevision NOTIFY contentChanged)
-    static constexpr int Version = 6;
+    // The width of a list level: the room in front of an item's text that
+    // its number or checkbox sits in. Qt's 40px leaves a wide gap; the
+    // editor sizes it to its font so a list sits close to the margin.
+    Q_PROPERTY(qreal listIndent READ listIndent WRITE setListIndent NOTIFY listIndentChanged)
+    static constexpr int Version = 7;
 
 public:
     Q_INVOKABLE int insertFormattedText(int from, int to, const QString &text, const QVariantMap &styles);
@@ -74,7 +78,8 @@ public:
 
     // Format the actual selected paragraphs, with an exclusive selection end.
     // Mixed selections adopt the style; a uniform selection toggles it off,
-    // unless `toggle` is false: then the style applies even where it is set.
+    // though checkboxes are checked first and come off once all are checked.
+    // When `toggle` is false the style applies even where it is set.
     // List membership never crosses a table cell. Return the selection adjusted
     // for empty items' rendering fillers. The operation is one undo step.
     Q_INVOKABLE QVariantMap toggleList(int from, int to, const QString &style, bool toggle = true);
@@ -86,12 +91,25 @@ public:
     // together, without deleting text or crossing a table-cell boundary.
     Q_INVOKABLE bool removeListAtStart(int position);
     Q_INVOKABLE bool leaveEmptyList(int position);
+    // Space typed after "1.", "1)", "a.", "A.", "-", "*" or "[]" on a
+    // paragraph holding nothing else makes it a list item, Markdown's way.
+    // typedListAt answers which list a Space at `position` would start —
+    // `tool` (ol, ul or todo), `style` and `start`, the number typed — or
+    // nothing. startTypedList types the Space, one undo step, then turns
+    // the paragraph into that item, another: undo leaves the text as typed.
+    // A number continues the list just above when it is that list's next
+    // one and starts a list of its own otherwise. Answers the caret, in
+    // front of the item's text, or -1 when the paragraph asks for no list.
+    Q_INVOKABLE QVariantMap typedListAt(int position) const;
+    Q_INVOKABLE int startTypedList(int position);
 
     explicit TextBlocks(QObject *parent = nullptr);
 
     int linkRevision() const { return m_linkRevision; }
     int version() const { return Version; }
     int contentRevision() const { return m_contentRevision; }
+    qreal listIndent() const { return m_listIndent; }
+    void setListIndent(qreal width);
 
     QQuickTextDocument *document() const { return m_document; }
     void setDocument(QQuickTextDocument *document);
@@ -184,11 +202,13 @@ public:
 
     Q_INVOKABLE QString linkAt(qreal x, qreal y) const;
 
-    // Qt gives an outer list 12px above its first item and below its last,
-    // with zero between items. Nested lists (indent > 1) have zero margins
-    // throughout. Enter copies the split item's margins, so restore this
-    // imported form as the items change. The repair joins the triggering
-    // edit for undo and never reaches the note: the reader ignores margins.
+    // A list sits flush with the paragraphs around it, as OneNote's do: no
+    // item has a vertical margin. The writer says so on every list
+    // (qthtml/writer.py), but a list pasted from elsewhere brings Qt's 12px
+    // above its first item and below its last, and Enter copies the split
+    // item's margins, so this clears them as the items change. The repair
+    // joins the triggering edit for undo and never reaches the note: the
+    // reader ignores margins.
     Q_INVOKABLE void normalizeListMargins();
 
     // The dialect states prose line height and an image line's fixed distance
@@ -226,6 +246,7 @@ signals:
     void contentChanged();
     void documentChanged();
     void linksChanged();
+    void listIndentChanged();
 
 private:
     // Counts a bracket in; the outermost one first notes the first
@@ -238,6 +259,7 @@ private:
     QQuickTextDocument *m_document = nullptr;
     QMetaObject::Connection m_contentConnection;
     int m_contentRevision = 0;
+    qreal m_listIndent = 40;
     int m_editDepth = 0;
     QTextCharFormat m_firstBlockCharFormat;
 };

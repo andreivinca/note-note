@@ -294,13 +294,10 @@ class _Renderer:
         css = "list-style-type:%s;" % style if style else ""
         if list_indent:
             css += "-qt-list-indent:%d;" % list_indent
-            if list_indent > 1:
-                # Qt draws a list below the first level without vertical
-                # margins (docs/engine-notes.md, "Nested lists have no
-                # vertical margins"); one that starts there says so itself.
-                css += "margin-top:0px;margin-bottom:0px;"
-        if css:
-            attrs += ' style="%s"' % css
+        # A list sits flush with the paragraphs around it, as OneNote's do;
+        # Qt would give an outer one 12px above and below.
+        css += "margin-top:0px;margin-bottom:0px;"
+        attrs += ' style="%s"' % css
         return "<%s%s>%s</%s>" % (
             tag, attrs, "".join(self.item(i, indent, quote) for i in token.get("children") or []), tag)
 
