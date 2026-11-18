@@ -153,19 +153,15 @@ QtObject {
     return writable && host.unmakeCodeBlock()
   }
 
-  // The toolbar's rule and empty table, in place through the native helper;
-  // `markdown` is the same block for the Markdown route, which a host
-  // without the helper takes, and a table cell.
-  function insertRule(markdown) {
-    if (!host.insertRule()) {
-      host.insertSnippet(markdown)
-    }
+  // The toolbar's rule and empty table, in place through the native helper:
+  // whether it put them in (NoteEditor.insertRule, insertEmptyTable). A
+  // host without it, and a caret in a table, take the tool's Markdown.
+  function insertRule() {
+    return writable && host.insertRule()
   }
 
-  function insertEmptyTable(markdown) {
-    if (!host.insertEmptyTable()) {
-      host.insertSnippet(markdown, true)
-    }
+  function insertEmptyTable() {
+    return writable && host.insertEmptyTable()
   }
 
   // Code lines take no inline formatting, and no HTML: text put in as HTML
@@ -407,29 +403,14 @@ QtObject {
     return markdown.marked.test(prefix) ? "" : markdown.prefix
   }
 
-  // Quote on the paragraphs under the caret or the selection; asked of
-  // lines that are all quoted already, it takes it off. The native helper
-  // sets the paragraphs' margins in place; a selection it leaves — one
-  // holding a heading — and a host without it rewrite the Markdown.
+  // The Quote tool and the Heading menu in place through the native helper:
+  // whether it took the selection (NoteEditor.toggleQuote, setHeading).
   function toggleQuote() {
-    if (!writable || host.toggleQuote()) {
-      return
-    }
-    transformBlocks(function(line) {
-      return (/^>[ \t]/.test(line.prefix) ? "" : "> ") + line.content
-    }, { unchangedMessage: "Quotes cannot be applied inside tables or code blocks" })
+    return writable && host.toggleQuote()
   }
 
-  // Heading `level` (1 to 3 in the menu), or Normal at 0, on the paragraphs
-  // under the caret or the selection. In place through the native helper;
-  // a host without it rewrites the Markdown.
   function setHeading(level) {
-    if (!writable || host.setHeading(level)) {
-      return
-    }
-    transformBlocks(function(line) {
-      return "#".repeat(level) + (level ? " " : "") + line.content
-    })
+    return writable && host.setHeading(level)
   }
 
   function setListStyle(style) {

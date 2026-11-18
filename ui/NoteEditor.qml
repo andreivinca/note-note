@@ -876,31 +876,12 @@ Item {
     }
   }
 
-  // Whether the native helper took the request. A host without it has the
-  // Markdown way (EditorApi.toggleListStyle), which asks here first.
-  function toggleListStyle(style, toggle) {
-    if (!nativeBlocks.item) {
-      return false
-    }
-    var backwards = area.cursorPosition === area.selectionStart
-    var selection = {}
-    // The toggle is one undo step on its own; the bracket gives that step
-    // the caret to come back to.
-    atomic(function() {
-      selection = nativeBlocks.item.toggleList(area.selectionStart, area.selectionEnd, style, toggle !== false)
-    })
-    if (selection.from !== undefined) {
-      area.select(backwards ? selection.to : selection.from, backwards ? selection.from : selection.to)
-      updateInList()
-      root.edited()
-    }
-    return true
-  }
-
   // A paragraph style the native helper sets in place on the selected
   // paragraphs, one undo step that keeps the selection: `edit` calls the
   // helper with the selection's ends. Whether the helper took the request;
   // without it, or for a selection it leaves, the Markdown route does it.
+  // The edit is one undo step on its own; the bracket gives that step the
+  // caret to come back to.
   function restyleSelection(edit) {
     if (!nativeBlocks.item) {
       return false
@@ -916,6 +897,18 @@ Item {
     area.select(backwards ? selection.to : selection.from, backwards ? selection.from : selection.to)
     updateContext()
     root.edited()
+    return true
+  }
+
+  // Whether the native helper took the request. A host without it has the
+  // Markdown way (EditorApi.toggleListStyle), which asks here first. Where
+  // the helper is built it owns lists: a selection it leaves — code lines
+  // and rules alone — is one the Markdown way leaves too.
+  function toggleListStyle(style, toggle) {
+    if (!nativeBlocks.item) {
+      return false
+    }
+    restyleSelection(function(blocks, from, to) { return blocks.toggleList(from, to, style, toggle !== false) })
     return true
   }
 
@@ -956,12 +949,12 @@ Item {
 
   readonly property string sep: "\u2029"
   // ── document conversion shared by tools and keyboard editing ────────
-  // QML cannot set block styles directly. Lists use the native helper above
-  // where it is built; the other block tools, and lists without the helper,
-  // read the document as Markdown, rewrite the lines they own, and put it
-  // back. The
-  // conversion answers with a map from Markdown line to document block, which
-  // is how the caret finds its line.
+  // QML cannot set block styles directly. Where the native helper is built,
+  // the block tools set them in place through it (above). A host without
+  // it, and a selection the helper leaves to the Markdown route, read the
+  // document as Markdown, rewrite the lines they own, and put it back. The
+  // conversion answers with a map from Markdown line to document block,
+  // which is how the caret finds its line.
   //
   // Putting it back is remove()+insert(), never `text = …`: both are ordinary
   // edits, so ctrl+z still walks back through toolbar actions — and the pair

@@ -13,6 +13,8 @@ Tool {
   readonly property string markdown: "|  |  |\n|---|---|\n|  |  |"
 
   function execute() {
-    editor.insertEmptyTable(markdown)
+    if (!editor.insertEmptyTable()) {
+      editor.insertTable(markdown)
+    }
   }
 }

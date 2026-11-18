@@ -3337,6 +3337,16 @@ Window {
       editor.redo()
       requireAsReopened(data.id + " on " + JSON.stringify(data.source))
     }
+    // The menu offers three levels; the helper sets all six, the last in
+    // small capitals, each read from the writer's own heading markup.
+    for (var level = 4; level <= 6; level++) {
+      load({ source: "word **bold**\n" })
+      editor.setCursorPosition(1)
+      require(editor.setHeading(level), "level " + level + " did not apply in place")
+      require(savedMarkdown() === "#".repeat(level) + " word **bold**\n",
+              "level " + level + " gave " + JSON.stringify(savedMarkdown()))
+      requireAsReopened("heading level " + level)
+    }
     load({ source: "Above\n" })
     editor.setCursorPosition(editor.plainText().length)
     keys.keyClick(Qt.Key_Return)
@@ -3448,7 +3458,10 @@ Window {
       { source: "one\\\ntwo\n", expected: "```\none\ntwo\n```\n" },
       { source: "```\nold\n```\n\nnew\n", at: "new", expected: "```\nold\nnew\n```\n" },
       { source: "```\nword\n```\n", expected: "word\n" },
-      { source: "```\na    b\n\n\t\tdeep\n**x**\n```\n", expected: "a b\n\n\u00a0\n\n" + "\u00a0".repeat(8) + "deep\n\n\\*\\*x\\*\\*\n" }
+      { source: "```\na    b\n\n\t\tdeep\n**x**\n```\n", expected: "a b\n\n\u00a0\n\n" + "\u00a0".repeat(8) + "deep\n\n\\*\\*x\\*\\*\n" },
+      // An indent too shallow for the dialect's goes, trailing whitespace
+      // goes, and a tab reaches the next fourth column (expandtabs).
+      { source: "```\n  lead\ntrail  \n \tx\n```\n", expected: "lead\n\ntrail\n\n" + "\u00a0".repeat(4) + "x\n" }
     ]
     for (var data of cases) {
       var label = "Code block on " + JSON.stringify(data.source)

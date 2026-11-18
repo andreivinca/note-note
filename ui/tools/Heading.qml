@@ -9,8 +9,15 @@ Tool {
   toolbarLabelVisible: false
   available: !editor.inList && !editor.inTable && !editor.inCode
 
+  // In place through the native helper; a host without it takes the
+  // Markdown route below.
   function apply(level) {
-    editor.setHeading(level)
+    if (editor.setHeading(level)) {
+      return
+    }
+    editor.transformBlocks(function(line) {
+      return "#".repeat(level) + (level ? " " : "") + line.content
+    })
   }
 
   options: [

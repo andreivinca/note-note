@@ -12,6 +12,8 @@ Tool {
   readonly property string markdown: "---"
 
   function execute() {
-    editor.insertRule(markdown)
+    if (!editor.insertRule()) {
+      editor.insertSnippet(markdown)
+    }
   }
 }
