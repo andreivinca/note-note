@@ -120,11 +120,15 @@ MAX_UPLOAD_PARTS = 4
 
 
 def graph_err(res, status):
+    """Graph's message, and its error code when it gives one: a message can
+    say nothing ("Something failed, the API cannot share any more
+    information …"), and the code is what Microsoft's error reference
+    lists. Never an empty message, which would explain nothing."""
     err = res.get("error") if isinstance(res, dict) else None
     if isinstance(err, dict):
-        # Never pass an empty message through: the autosave retries on the
-        # status code in the text, and "" retries nothing and explains nothing.
-        return err.get("message") or "Graph error %s" % status
+        message = err.get("message") or "Graph error %s" % status
+        code = err.get("code")
+        return "%s (error %s)" % (message, code) if code else message
     return str(err or res or "") or "Graph error %s" % status
 
 

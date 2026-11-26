@@ -408,6 +408,28 @@ class PastedImageTests(unittest.TestCase):
                 self.assertIn(header.encode() + data, body)
 
 
+class GraphCommandTests(unittest.TestCase):
+    def test_a_failure_names_graphs_error_code(self):
+        unexplained = {"error": {"code": "19999", "message": "Something failed"}}
+        self.assertEqual(onenote.graph_err(unexplained, 500), "Something failed (error 19999)")
+        self.assertEqual(onenote.graph_err({"error": {"message": "Access denied"}}, 403), "Access denied")
+
+    def test_insertions_beside_a_replaced_element_travel_inside_its_replacement(self):
+        def insert(target, position, text):
+            return {"target": target, "action": "insert", "position": position, "content": "<p>%s</p>" % text}
+
+        tree = onenote.onenote_patch.parse('<div><p id="p:a">a</p><p id="p:b">b</p></div>')
+        insertions = [insert("p:b", "before", "1"), insert("p:b", "before", "2"), insert("p:b", "after", "3"),
+                      insert("p:b", "after", "4"), insert("p:a", "after", "5")]
+        replacements = [{"target": "p:b", "action": "replace", "content": "<p>B</p>"}]
+        commands = onenote.onenote_patch.graph_commands(insertions, replacements)
+        self.assertEqual([(command["action"], command["target"]) for command in commands],
+                         [("insert", "p:a"), ("replace", "p:b")])
+        sent = onenote.onenote_patch.simulate(tree, commands)
+        planned = onenote.onenote_patch.simulate(tree, tuple(insertions + replacements))
+        self.assertEqual(onenote.onenote_patch.serialize(sent), onenote.onenote_patch.serialize(planned))
+
+
 class SaveFixture(unittest.TestCase):
     """A page behind a scripted Graph, saved and read through the provider's commands."""
 
@@ -447,6 +469,12 @@ class SaveFixture(unittest.TestCase):
             return 200, self.remote
         if method == "PATCH":
             operations = json.loads(data)
+            replaced = {operation["target"] for operation in operations if operation["action"] == "replace"}
+            if any(operation["action"] == "insert" and operation["target"] in replaced for operation in operations):
+                # OneNote's answer to a PATCH that replaces an element it also
+                # inserts beside, whichever side and order.
+                return 500, ('{"error":{"code":"19999","message":"Something failed, the API cannot share '
+                             'any more information at the time of the request."}}')
             current = ET.fromstring(self.remote)
             for operation in operations:
                 if operation["target"] == "title":
@@ -1141,6 +1169,44 @@ class SaveTests(SaveFixture):
         with self.store() as journal:
             self.assertIsNone(journal.recover())
 
+    def test_a_day_added_on_top_repeating_older_lines_preserves_existing_page(self):
+        self.remote = page_html(note("**17 sep**\n\n- [x] analize\n- [ ] Same\n\n**16 sep**\n\n- [ ] Same"))
+        loaded = self.load()
+        kept = [node.get("id") for node in ET.fromstring(self.remote).iter() if node.get("id")]
+        desired = "**18 sep**\n\n- [ ] Same\n- [x] analize\n\n" + loaded["body"]
+        saved = self.save(note(desired), loaded["view"])
+        self.assertTrue(saved.get("ok"), saved)
+        self.assertEqual(self.load()["body"], desired)
+        current = [node.get("id") for node in ET.fromstring(self.remote).iter() if node.get("id")]
+        self.assertTrue(set(kept) <= set(current), "an existing element was replaced")
+
+    # A day as OneNote clients write it: to-do paragraphs, a bulleted list
+    # among them. The editor reads the run as one Markdown list.
+    DAY = ('<p id="p:day">Duminica</p>'
+           '<p id="p:a" data-tag="to-do:completed">Check in</p>'
+           '<p id="p:b" data-tag="to-do">Cauta itinerariu</p>'
+           '<ul id="ul:sights"><li id="li:one">M3</li><li id="li:two">Notre Dame</li></ul>'
+           '<p id="p:c" data-tag="to-do">Phase 2</p>')
+
+    def test_a_day_added_above_a_day_the_editor_shows_as_one_list_is_inserted(self):
+        self.remote = '<html><head><title>Title</title></head><body><div>' + self.DAY + '</div></body></html>'
+        loaded = self.load()
+        kept = [node.get("id") for node in ET.fromstring(self.remote).iter() if node.get("id")]
+        desired = "Luni\n\n- [ ] Phase 2\n\n" + loaded["body"]
+        saved = self.save(note(desired), loaded["view"])
+        self.assertTrue(saved.get("ok"), saved)
+        self.assertEqual(self.load()["body"], desired)
+        current = [node.get("id") for node in ET.fromstring(self.remote).iter() if node.get("id")]
+        self.assertTrue(set(kept) <= set(current), "an existing element was replaced")
+
+    def test_an_edit_beside_a_day_the_editor_shows_as_one_list_leaves_the_day_alone(self):
+        self.remote = '<html><head><title>Title</title></head><body><div>' + self.DAY + '</div></body></html>'
+        loaded = self.load()
+        saved = self.save(note(loaded["body"].replace("Duminica", "Luni")), loaded["view"])
+        self.assertTrue(saved.get("ok"), saved)
+        operations = [op for method, _, data in self.calls if method == "PATCH" for op in json.loads(data)]
+        self.assertEqual([(op["target"], op["action"]) for op in operations], [("p:day", "replace")])
+
     def test_clearing_table_body_preserves_header_cells_and_structure(self):
         self.remote = ('<html><head><title>Title</title></head><body><div>'
                        '<p id="p:before">Before</p><table id="table:calendar">'
@@ -1466,6 +1532,9 @@ class SaveTests(SaveFixture):
     def test_expanded_final_paragraph_preserves_neighbours(self):
         self.assert_paragraph_edit_preserves_neighbours("one\n\nmiddle\n\nLAST\n\nextra")
 
+    def test_split_final_paragraph_preserves_neighbours(self):
+        self.assert_paragraph_edit_preserves_neighbours("one\n\nmiddle\n\nla\n\n11\\. st\n\nadded")
+
     def test_identical_item_names_keep_positions_and_inline_formatting(self):
         self.remote = ('<html><head><title>Title</title></head><body><div>'
                        '<p id="p:first" data-tag="to-do"><span style="color:#123456">Same</span></p>'
@@ -1775,6 +1844,17 @@ class SaveTests(SaveFixture):
         result = self.save(note("First paragraph"), loaded["view"])
         self.assertTrue(result.get("ok"), result)
         self.assertEqual(self.load()["body"], "First paragraph")
+
+    def test_a_list_on_an_empty_page_is_appended_by_graph(self):
+        # A page OneNote holds with no outline at all: the native list writer
+        # has none to edit, so the list's first outline is Graph's to make.
+        self.remote = '<html><head><title>Title</title></head><body data-absolute-enabled="true"/></html>'
+        loaded = self.load()
+        result = self.save(note("1. one\n2. two"), loaded["view"])
+        self.assertTrue(result.get("ok"), result)
+        self.assertEqual(self.load()["body"], "1. one\n2. two")
+        operations = [op for method, _, data in self.calls if method == "PATCH" for op in json.loads(data)]
+        self.assertEqual([(op["target"], op["action"]) for op in operations], [("body", "append")])
 
     def test_conflict_never_writes_and_recovery_can_be_resolved(self):
         loaded = self.load()

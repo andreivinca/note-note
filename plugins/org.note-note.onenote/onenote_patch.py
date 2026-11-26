@@ -12,8 +12,10 @@ against the page that writer leaves.
 import copy
 from dataclasses import dataclass
 import html
+import re
 
 from notemerge import AmbiguousAlignment, align, text_key
+from notemerge.alignment import Span
 from onenote_md import Converter, Node, TreeBuilder
 import htmltables
 
@@ -21,6 +23,8 @@ REPLACEABLE = {"p", "li", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "table
 LISTS = {"ul", "ol"}
 LAYOUT = {"html", "body", "div"}
 MEDIA = {"img", "object", "table"}
+# An element the editor shows as a Markdown list item, read from its text.
+LIST_ITEM = re.compile(r"(?:[-+*]|[0-9]+[.)])[ \t]")
 
 
 class UnsupportedEdit(ValueError):
@@ -155,6 +159,31 @@ def unchanged(old, new):
     return role(old) == role(new) and text(old) == text(new)
 
 
+def spans(before, after):
+    """align()'s spans between two element sequences.
+
+    When every original element is still there unchanged, in order, and
+    content was only added — above them (a journal's newest day on top),
+    below them, or between — no identity needs evidence, even where the
+    added content repeats a heading or checklist label the page holds: all
+    the originals stay. Anything else, a removal or a change, is align()'s
+    to place, and its refusal of ambiguous repeated entries stands.
+    """
+    limit = min(len(before), len(after))
+    start = 0
+    while start < limit and unchanged(before[start], after[start]):
+        start += 1
+    end = 0
+    while end < limit - start and unchanged(before[-1 - end], after[-1 - end]):
+        end += 1
+    if start + end < len(before):
+        return align(before, after, identity)
+    inserted = Span("insert", start, start, start, len(after) - end)
+    return [span for span in (Span("equal", 0, start, 0, start), inserted,
+                              Span("equal", start, len(before), len(after) - end, len(after)))
+            if span.before_end > span.before_start or span.after_end > span.after_start]
+
+
 def list_levels(nodes, depth=0, kind=""):
     """Each item's depth and family, or None for a span with other blocks."""
     result = []
@@ -253,15 +282,7 @@ class _Planner:
                 self.retained[identifier] = (original.tag, dict(original.attrs), content)
 
     def sequence(self, before, after, container):
-        # An unchanged prefix has no identities to disambiguate, even when
-        # appended content repeats an existing heading or checklist label.
-        # Preserve every original node and use the last one as the anchor.
-        if len(after) > len(before) and all(unchanged(old, new) for old, new in zip(before, after)):
-            for original in before:
-                self.retain(original)
-            self.insert(after[len(before):], before, len(before), container)
-            return
-        for span in align(before, after, identity):
+        for span in spans(before, after):
             old = before[span.before_start:span.before_end]
             new = after[span.after_start:span.after_end]
             if self.relevel_list(old, new):
@@ -535,8 +556,8 @@ class _Planner:
     def finish(self):
         # Blank lines are removed first. Insertions then use original
         # anchors, which still exist before any replacements. Simulate
-        # exactly that same order.
-        commands = tuple(self.insertions + self.replacements)
+        # exactly the commands Graph is sent.
+        commands = graph_commands(self.insertions, self.replacements)
         blank_lines = tuple(BlankLines(before, after, count, tuple(sorted(removed)))
                             for (before, after), (count, removed) in self.blank_runs.items())
         simulated = simulate(without_blank_lines(self.tree, blank_lines), commands)
@@ -547,7 +568,10 @@ class _Planner:
                 raise InvalidPlan("an unchanged element lost its identity")
             if content is not None and serialize(kept, keep_ids=True) != content:
                 raise InvalidPlan("an unchanged element was modified")
-        return Plan(commands, serialize(simulated, keep_ids=True), blank_lines, self.native(commands, blank_lines))
+        # Whether the native writer goes first depends on the edit itself, so
+        # it reads the insertions as planned, not as Graph is sent them.
+        planned = tuple(self.insertions + self.replacements)
+        return Plan(commands, serialize(simulated, keep_ids=True), blank_lines, self.native(planned, blank_lines))
 
     def native(self, commands, blank_lines):
         """The page OneNote's native writer must make first, or None.
@@ -562,7 +586,9 @@ class _Planner:
         their outlines anyway; one beside a list is its to remove in any case,
         since blank_lines.py cannot name a list as a neighbour. Media cannot
         be written natively: a paragraph holding a no-break space stands where
-        each goes, which Graph can target and the next plan replaces.
+        each goes, which Graph can target and the next plan replaces. Nor can
+        an empty page's first content: the writer edits the outlines a page
+        has, and Graph's append to the body makes that outline.
         """
         # What the outlines' lists hold, by ID; and the targets inside tables.
         scope = {node.attrs["id"]: node for outline_list in outside_tables(self.tree) if outline_list.tag in LISTS
@@ -575,7 +601,7 @@ class _Planner:
             content = parse(command["content"])
             lists = any(node.tag in LISTS for node in outside_tables(content))
             target = scope.get(command["target"])
-            if command["target"] in cells or (target is None and not lists):
+            if command["target"] in cells or command["target"] == "body" or (target is None and not lists):
                 continue
             # Only an item's text replaced in place leaves its list as it was.
             moves = moves or lists or command["action"] != "replace" or any(node.tag in LISTS for node in walk(target))
@@ -605,6 +631,31 @@ def without_blank_lines(tree, blank_lines):
         removed = {id(breaks[index]) for index in run.removed}
         parents[0].children = [child for child in parents[0].children if id(child) not in removed]
     return tree
+
+
+def graph_commands(insertions, replacements):
+    """The commands of one PATCH: the insertions, then the replacements.
+
+    OneNote fails a PATCH (HTTP 500, error 19999) that replaces an element
+    another of its commands inserts beside, on either side. Such an
+    insertion travels inside that replacement instead, where sending the
+    two in order would have left it: one before the element lands after
+    the earlier ones, one after it lands ahead of them.
+    """
+    replaced = {command["target"] for command in replacements}
+    before, after, kept = {}, {}, []
+    for command in insertions:
+        anchor = command["target"]
+        if command["action"] != "insert" or anchor not in replaced:
+            kept.append(command)
+        elif command["position"] == "before":
+            before[anchor] = before.get(anchor, "") + command["content"]
+        else:
+            after[anchor] = command["content"] + after.get(anchor, "")
+    carriers = [dict(command, content=before.get(command["target"], "") + command["content"]
+                     + after.get(command["target"], ""))
+                for command in replacements]
+    return tuple(kept + carriers)
 
 
 def simulate(tree, commands):
@@ -646,39 +697,70 @@ def preserve_projected(before, after, project):
     """Match the editor's representation back to its original source elements.
 
     A source table can display as a table followed by images, and whitespace
-    can normalize on import. Only a complete, consecutive, unchanged projection
-    permits retaining the source subtree. Changed projections still go through
-    the ordinary target checks and the caller's whole-document validation.
+    can normalize on import. Consecutive elements can display as one: to-do
+    paragraphs and a bulleted list among them read as one Markdown list, so
+    they are projected together (projected_runs). Only a complete,
+    consecutive, unchanged projection permits retaining the source subtrees.
+    Changed projections still go through the ordinary target checks and the
+    caller's whole-document validation.
     """
     projected, groups = [], []
-    for original in before:
-        start = len(projected)
-        projected.extend(document_elements(parse(project(original))) or [original])
-        groups.append((original, start, len(projected)))
+    for run, shown in projected_runs(before, project):
+        groups.append((run, len(projected), len(projected) + len(shown)))
+        projected.extend(shown)
 
     matches = {}
-    if len(after) >= len(projected) and all(unchanged(old, new) for old, new in zip(projected, after)):
-        matches = dict(enumerate(range(len(projected))))
-    else:
-        for span in align(projected, after, identity):
-            if span.kind != "equal":
-                continue
-            for old, new in zip(range(span.before_start, span.before_end), range(span.after_start, span.after_end)):
-                if unchanged(projected[old], after[new]):
-                    matches[old] = new
+    for span in spans(projected, after):
+        if span.kind != "equal":
+            continue
+        for old, new in zip(range(span.before_start, span.before_end), range(span.after_start, span.after_end)):
+            if unchanged(projected[old], after[new]):
+                matches[old] = new
 
     retained = {}
-    for original, start, end in groups:
+    for run, start, end in groups:
         position = matches.get(start)
         if position is not None and all(matches.get(index) == position + index - start for index in range(start, end)):
-            retained[position] = (original, end - start)
+            retained[position] = (run, end - start)
 
     result, index = [], 0
     while index < len(after):
-        original, count = retained.get(index, (after[index], 1))
-        result.append(original)
+        run, count = retained.get(index, ([after[index]], 1))
+        result.extend(run)
         index += count
     return result
+
+
+def projected_runs(before, project):
+    """`before` in runs the editor shows as one, each with what it shows as.
+
+    Markdown joins consecutive list items into one list, whatever OneNote
+    holds them as, and a list holding more than to-dos shows as a bulleted
+    list: to-do paragraphs with a bulleted list among them read as one list.
+    So consecutive elements that each show as list items are projected
+    together, and are one run where that shows fewer elements than
+    projecting them apart. Every other element is a run of its own, as is
+    each item of a list that does not join, so a checked to-do keeps its
+    neighbours' identities.
+    """
+    alone = [document_elements(parse(project(original))) for original in before]
+    items = [bool(shown) and all(LIST_ITEM.match(text(node)) for node in shown) for shown in alone]
+    index = 0
+    while index < len(before):
+        end = index + 1
+        while items[index] and end < len(before) and items[end]:
+            end += 1
+        joined = []
+        if end - index > 1:
+            holder = Node("div")
+            holder.children = before[index:end]
+            joined = document_elements(parse(project(holder)))
+        if joined and len(joined) < sum(len(alone[position]) for position in range(index, end)):
+            yield before[index:end], joined
+        else:
+            for position in range(index, end):
+                yield [before[position]], alone[position] or [before[position]]
+        index = end
 
 
 def plan(current, desired, project=None):

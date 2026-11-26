@@ -657,6 +657,13 @@ documentation disagrees with the service in three places.
   preserves the draft and reports an error; there is no page rebuild fallback.
   An element is unchanged only with the same text in the same list role: an
   item and the same item one level deeper read alike, but are not the same.
+  Content only added — above the page's elements, below them or between —
+  keeps every one of them, even when it repeats a line the page holds
+  (`spans`); a removal of one of several equal lines still asks for review.
+  Markdown joins consecutive list items, so to-do paragraphs with a bulleted
+  list among them, as OneNote clients write a day of a journal, read as one
+  list: such a run is compared, and kept, as a whole (`projected_runs`), and
+  an edit beside it no longer rewrites it.
 - **List structure is written natively, never through Graph.** Graph cannot
   move a list item, and replacing one recreates it. OneNote's web revision
   service (`list_edits.py`) reparents the existing items with their children
@@ -672,7 +679,9 @@ documentation disagrees with the service in three places.
   removes the save's blank lines, and it always removes a blank line beside
   a list, which `blank_lines.py` cannot name. It cannot write media: where a
   table or picture goes, it leaves a paragraph holding one no-break space,
-  which Graph exports with an ID and the next plan replaces. Graph's HTML
+  which Graph exports with an ID and the next plan replaces. Nor an empty
+  page's first content: the writer edits the outlines a page has, and Graph's
+  append to the body makes the first one. Graph's HTML
   export also omits skipped list levels and group boundaries;
   `list_indents.py` restores them from the native objects. A page whose
   levels OneNote does not return opens read-only, since a save planned
@@ -698,6 +707,22 @@ documentation disagrees with the service in three places.
 - A `replace` may carry **several sibling elements** in one content string
   (`<div>…</div><img …/><div>…</div>`), which is what lets one command rewrite
   the whole gap between two images.
+- **An element cannot be both replaced and an insertion's anchor in one
+  PATCH.** Measured on 2026-11-26: a PATCH that replaces an element and
+  inserts before or after it fails with HTTP 500, error 19999 ("Something
+  failed, the API cannot share any more information at the time of the
+  request."), every time, and changes nothing; replacing first and inserting
+  beside it fails with 400, error 20120, as the replaced element's ID is gone.
+  Splitting a page's last paragraph plans exactly that pair, and it left
+  every such save failing. `onenote_patch.graph_commands` carries the
+  insertion inside the replacement instead, where the two in order would have
+  put it; the simulation checks the commands as sent.
+- **A table cell is not a target.** Appending to a `<td>` is refused (400,
+  error 20138); replacing one answers 204 but removes the cell, leaving its
+  row a column short (measured on 2026-11-26). A cell holding only a line
+  break or bare text, as OneNote clients leave some, therefore has nothing
+  Graph can write, and the planner refuses an edit to it rather than replace
+  the table.
 - An uncertain `insert` or `append` must not automatically retry, even without
   image parts: the first request may have inserted the item already.
 - A freshly written resource serves **200 with an empty body** until it
