@@ -34,6 +34,19 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.0.50" date="2026-11-26">
+      <description>
+        <p>OneNote saves that failed now go through: splitting the last
+        line of a page, adding a day at the top of a journal, and a list
+        typed on an empty page. Editing one day of a journal no longer
+        rewrites the days around it.</p>
+        <p>In OneNote notebooks of accounts whose Microsoft ID starts with
+        a zero, removing blank lines, editing lists, ordering pages and
+        renaming or deleting sections now work. A save OneNote refuses
+        shows its error code. Ctrl+Left and Ctrl+Right always move the
+        caret a word in a note, and no longer move the sidebar.</p>
+      </description>
+    </release>
     <release version="1.0.49" date="2026-11-19">
       <description>
         <p>Typing a list's prefix and Space on an empty line starts that
