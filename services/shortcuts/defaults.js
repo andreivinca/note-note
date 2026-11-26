@@ -14,8 +14,6 @@ var ACTIONS = [
   { id: "nextNote", keys: ["Ctrl+Down", "Ctrl+J"], context: "notes", repeatable: true, group: "Getting around", description: "The note below" },
   { id: "nextTab", keys: ["Ctrl+Tab"], context: "notes", repeatable: true, group: "Getting around", description: "The next notebook" },
   { id: "previousTab", keys: ["Ctrl+Shift+Tab"], context: "notes", repeatable: true, group: "Getting around", description: "The notebook before it" },
-  { id: "openTree", keys: ["Ctrl+Right"], context: "notes", repeatable: true, group: "Getting around", description: "Open the notebook under the cursor" },
-  { id: "closeTree", keys: ["Ctrl+Left"], context: "notes", repeatable: true, group: "Getting around", description: "Fold the notebook under the cursor" },
   { id: "toggleList", workspace: true, keys: ["Ctrl+E"], context: "notes", group: "Getting around", description: "Show or hide the sidebar" },
   { id: "back", keys: ["Escape"], context: "notes", group: "Getting around", description: "Clear the search or put the window away" },
   { id: "newNote", workspace: true, keys: ["Ctrl+N"], context: "notes", group: "Notes", description: "A new note in the open notebook" },

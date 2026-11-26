@@ -1836,66 +1836,6 @@ Item {
     return r.kind === "note" && r.path === root.currentPath
   }
 
-  function treeCursorIndex() {
-    if (!root.treeCursor) {
-      return -1
-    }
-
-    for (var i = 0; i < root.rows.length; i++) {
-      if (root.rows[i].kind === "tree" && root.rows[i].path === root.treeCursor) {
-        return i
-      }
-    }
-    return -1
-  }
-
-  // Ctrl+Right opens the section under the cursor. Only that: with the
-  // cursor on a note the key stays the editor's (jump a word right).
-  function openTreeCursor() {
-    var i = treeCursorIndex()
-    if (i < 0) {
-      return false
-    }
-
-    if (!root.rows[i].expanded) {
-      treeToggle(root.rows[i].path)
-    }
-
-    return true
-  }
-
-  // Ctrl+Left walks up the tree: an open section closes, a closed one
-  // yields to its parent, and from a note the cursor jumps to the section
-  // that holds it. A note with no section above it leaves the key to the
-  // editor.
-  function closeTreeCursor() {
-    var i = treeCursorIndex()
-    if (i >= 0) {
-      if (root.rows[i].expanded) {
-        treeToggle(root.rows[i].path)
-      } else {
-        cursorToParent(i)
-      }
-      return true
-    }
-    var n = rowIndexOf(root.currentPath)
-    return n >= 0 && cursorToParent(n)
-  }
-
-  // The parent of rows[i]: the nearest section row above it a level up.
-  function cursorToParent(i) {
-    var level = root.rows[i].level || 0
-    for (var j = i - 1; j >= 0; j--) {
-      var r = root.rows[j]
-      if (r.kind === "tree" && (r.level || 0) < level) {
-        root.treeCursor = r.path
-        list.positionViewAtIndex(j, ListView.Contain)
-        return true
-      }
-    }
-    return false
-  }
-
   // ── create / delete ─────────────────────────────────────────────────
   function newNoteDestination(providerId, target) {
     var p = providerId ? providerById(providerId) : activeProvider()
@@ -2268,8 +2208,6 @@ Item {
     previousNote: function() {
       root.moveSelection(-1)
     },
-    openTree: root.openTreeCursor,
-    closeTree: root.closeTreeCursor,
     nextTab: function() {
       root.cycleSection(1)
     },
