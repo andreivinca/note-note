@@ -34,6 +34,14 @@
   </supports>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.0.51" date="2026-11-26">
+      <description>
+        <p>A numbered list in OneNote that starts at a number other than 1
+        keeps that number: it used to show counting from 1, and editing it
+        renumbered it from 1 in OneNote too. Turning paragraphs into a list
+        that starts at such a number now saves in one go.</p>
+      </description>
+    </release>
     <release version="1.0.50" date="2026-11-26">
       <description>
         <p>OneNote saves that failed now go through: splitting the last
