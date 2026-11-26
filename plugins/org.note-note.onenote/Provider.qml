@@ -343,7 +343,7 @@ LaneProvider {
     })
     var role = book ? (book.userRole || "").toLowerCase() : ""
     return (role === "owner" || role === "contributor")
-      && /^0-[0-9a-f]{16}!(?:[0-9]+|s[0-9a-f]{32})$/i.test(book.id)
+      && /^0-[0-9a-f]{1,16}!(?:[0-9]+|s[0-9a-f]{32})$/i.test(book.id)
   }
 
   // Page ordering is the notebook's to allow, and nothing the section is

@@ -177,10 +177,12 @@ class TransportTests(unittest.TestCase):
 
     def test_a_section_file_is_found_in_its_owners_drive(self):
         """A notebook shared with the account is reached by the owner's drive,
-        whether OneDrive numbered the section's file or gave it a GUID ID."""
-        for number in ("123", "s0123456789abcdef0123456789abcdef"):
-            item = "0123456789ABCDEF!" + number
-            path = "/drives/0123456789ABCDEF/items/0123456789ABCDEF%21" + number
+        whether OneDrive numbered the section's file or gave it a GUID ID, and
+        when the item ID leaves out the drive ID's leading zero."""
+        drive = "0123456789ABCDEF"
+        for item in (drive + "!123", drive + "!s0123456789abcdef0123456789abcdef",
+                     "123456789ABCDEF!s0123456789abcdef0123456789abcdef"):
+            path = "/drives/%s/items/%s" % (drive, item.replace("!", "%21"))
             metadata = {"id": item, "name": "Section.one", "file": {},
                         "parentReference": {"driveId": "0123456789abcdef", "driveType": "personal"}}
             info = {"wopiSrc": "https://my.microsoftpersonalcontent.com/personal/0123456789abcdef/_vti_bin/wopi.ashx/files/" + item,
@@ -203,7 +205,7 @@ class TransportTests(unittest.TestCase):
     def test_only_personal_item_ids_reach_the_revision_service(self):
         graph = Mock()
         for section in ("1-business-id", "0-0123456789ABCDEF!s0123", "0-0123456789ABCDEF!x" + "0" * 32,
-                        "0-0123456789ABCDE!123", "0-0123456789ABCDEF!12a"):
+                        "0-0123456789ABCDEF0!123", "0-0123456789ABCDEF!12a"):
             with self.subTest(section=section), self.assertRaises(web.WebError):
                 web.Session.for_section({"id": section}, graph)
         graph.assert_not_called()

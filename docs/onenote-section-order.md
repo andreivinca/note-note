@@ -73,6 +73,13 @@ its `.one` file has the OneDrive ID `{drive}!s{guid}`, and OneNote's revision
 service opens the section under it. `onenote_web.PERSONAL_ID` accepts
 both shapes and nothing else.
 
+An item ID writes the drive ID without its leading zeros. Live-verified on
+2026-11-26 with an account whose drive ID is `015CAE1537A887F1`: its notebook
+is `0-15CAE1537A887F1!126` and a section's file `15CAE1537A887F1!s{guid}`, while
+the file's `parentReference.driveId`, its preview URL and its revision-service
+file URL all name the drive as `015CAE1537A887F1`. `onenote_web.drive_of` pads
+an item's drive back to 16 digits wherever the drive is meant.
+
 Graph documents [listing children of package items](https://learn.microsoft.com/en-us/graph/api/driveitem-list-children?view=graph-rest-1.0),
 and OneNote notebooks have a [package facet](https://learn.microsoft.com/en-us/graph/api/resources/package?view=graph-rest-1.0).
 The endpoint requires `Files.Read` at minimum, which

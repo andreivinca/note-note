@@ -30,10 +30,11 @@ import ratelimit
 
 # HIGH-RISK WORKAROUND: observed personal-ID shape, not a documented mapping.
 # A personal notebook or section ID is "0-" and its OneDrive item ID: the
-# drive ID, "!", then the item's number or, for items OneDrive created since
-# it changed formats, "s" and a GUID (docs/onenote-section-order.md). Keep
-# this restriction; do not infer support for other notebook ID formats.
-PERSONAL_ID = re.compile(r"0-([0-9A-Fa-f]{16}!(?:[0-9]+|s[0-9A-Fa-f]{32}))\Z")
+# drive ID without its leading zeros (drive_of), "!", then the item's number
+# or, for items OneDrive created since it changed formats, "s" and a GUID
+# (docs/onenote-section-order.md). Keep this restriction; do not infer
+# support for other notebook ID formats.
+PERSONAL_ID = re.compile(r"0-([0-9A-Fa-f]{1,16}!(?:[0-9]+|s[0-9A-Fa-f]{32}))\Z")
 
 NIL = "00000000-0000-0000-0000-000000000000|0"
 # The web client's unknown-root sentinel, resolved by the server on reads.
@@ -78,6 +79,14 @@ def write_granted():
     return "Files.ReadWrite" in token.get("scope", "").split()
 
 
+def drive_of(item_id):
+    """The drive holding a OneDrive item. An item ID writes the drive ID
+    without its leading zeros, which the drive ID itself, and the preview
+    and file URLs naming it, keep: drive 015CAE1537A887F1 holds item
+    15CAE1537A887F1!126."""
+    return item_id.split("!", 1)[0].rjust(16, "0")
+
+
 def personal_item(identifier):
     match = PERSONAL_ID.fullmatch(str(identifier))
     if not match:
@@ -90,7 +99,7 @@ def section_item(section, graph=msgraph.graph):
     is that file. It lives in its owner's OneDrive; a notebook shared with
     this account is reached by that drive, not /me/drive."""
     item_id = personal_item(section["id"])
-    drive_id = item_id.split("!", 1)[0]
+    drive_id = drive_of(item_id)
     path = "/drives/%s/items/%s" % (drive_id, urllib.parse.quote(item_id, safe=""))
     status, metadata = graph("GET", path + "?$select=id,name,file,parentReference")
     if status == 404:
@@ -113,7 +122,7 @@ def group_item(group, graph=msgraph.graph):
     the holder are checked besides, this mapping having been seen live less."""
     item_id = personal_item(group["id"])
     holder_id = personal_item(group.get("parentGroupId") or group.get("notebookId"))
-    drive_id = item_id.split("!", 1)[0]
+    drive_id = drive_of(item_id)
     path = "/drives/%s/items/%s" % (drive_id, urllib.parse.quote(item_id, safe=""))
     status, metadata = graph("GET", path + "?$select=id,name,folder,parentReference")
     if status == 404:
@@ -160,7 +169,7 @@ def frame_info(raw, item_id):
         token = info["wopiTokenAppAndUser"]
         ttl = int(info["wopiTokenAppAndUserTtl"])
         parsed = urllib.parse.urlsplit(source)
-        expected = "/personal/%s/_vti_bin/wopi.ashx/files/%s" % (item_id.split("!", 1)[0], item_id)
+        expected = "/personal/%s/_vti_bin/wopi.ashx/files/%s" % (drive_of(item_id), item_id)
         valid = (parsed.scheme == "https" and parsed.hostname == "my.microsoftpersonalcontent.com"
                  and not parsed.username and not parsed.password and parsed.port in (None, 443)
                  and not parsed.query and not parsed.fragment
