@@ -5,6 +5,7 @@ representation; ordinary tables and lists retain their Markdown syntax.
 HTML is parsed into the same AST as Markdown, never passed through to the editor.
 """
 import html
+import re
 
 import audio
 import htmltree
@@ -151,6 +152,15 @@ def _blocks(nodes):
     return out
 
 
+def list_start(node):
+    """The number a list's first item shows: the list's `start`, or the first
+    item's own `value`, which is how OneNote exports a list it restarted
+    (`<li value="2">`). 1 when neither holds a number."""
+    first = next((child for child in node.children if child.tag == "li"), None)
+    start = (first.attrs.get("value") if first is not None else None) or node.attrs.get("start", "1")
+    return int(start) if re.fullmatch(r"-?\d+", start) else 1
+
+
 def lists(node, read_item, depth=1):
     """The list tokens of an HTML list, its items read by `read_item(li, depth)`.
 
@@ -177,7 +187,7 @@ def lists(node, read_item, depth=1):
             continue
         style = liststyles.from_attributes(child.attrs, inherited)
         if not groups or groups[-1]["attrs"]["list_style"] != style:
-            start = int(node.attrs.get("start", "1")) if not groups else 1
+            start = list_start(node) if not groups else 1
             groups.append({"type": "list", "tight": True, "children": [],
                            "attrs": {"ordered": ordered, "start": start, "list_style": style, "list_indent": indent}})
         groups[-1]["children"].append(read_item(child, depth))

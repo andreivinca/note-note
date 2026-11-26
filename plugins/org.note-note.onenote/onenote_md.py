@@ -302,8 +302,7 @@ class Converter:
                 self.lines.extend([htmltables.markup(htmltables.lists(node, self.styled_item)), ""])
                 self.last = None
                 return
-            start = node.attrs.get("start", "1") if t == "ol" else "1"
-            n = int(start) - 1 if re.fullmatch(r"-?\d+", start) else 0
+            n = htmltables.list_start(node) - 1 if t == "ol" else 0
             item = indent
             for c in node.children:
                 if c.tag == "li":

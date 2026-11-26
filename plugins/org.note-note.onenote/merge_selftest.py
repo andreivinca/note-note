@@ -1845,6 +1845,19 @@ class SaveTests(SaveFixture):
         self.assertTrue(result.get("ok"), result)
         self.assertEqual(self.load()["body"], "First paragraph")
 
+    def test_a_list_onenote_restarted_keeps_its_first_number(self):
+        # OneNote exports a numbered list it restarted at 2 with the number on
+        # its first item, not on the list.
+        self.remote = ('<html><head><title>Title</title></head><body><div>'
+                       '<ol id="ol:steps"><li id="li:two" value="2">Two</li><li id="li:three">Three</li></ol>'
+                       '<p id="p:after">After</p></div></body></html>')
+        loaded = self.load()
+        self.assertEqual(loaded["body"], "2. Two\n3. Three\n\nAfter")
+        result = self.save(note(loaded["body"].replace("After", "Later")), loaded["view"])
+        self.assertTrue(result.get("ok"), result)
+        operations = [op for method, _, data in self.calls if method == "PATCH" for op in json.loads(data)]
+        self.assertEqual([(op["target"], op["action"]) for op in operations], [("p:after", "replace")])
+
     def test_a_list_on_an_empty_page_is_appended_by_graph(self):
         # A page OneNote holds with no outline at all: the native list writer
         # has none to edit, so the list's first outline is Graph's to make.

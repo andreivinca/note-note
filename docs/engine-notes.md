@@ -683,7 +683,11 @@ documentation disagrees with the service in three places.
   page's first content: the writer edits the outlines a page has, and Graph's
   append to the body makes the first one. Graph's HTML
   export also omits skipped list levels and group boundaries;
-  `list_indents.py` restores them from the native objects. A page whose
+  `list_indents.py` restores them from the native objects. A numbered list
+  OneNote restarted, at 2 say, is exported with the number on its first item
+  (`<li value="2">`), not as the list's `start`; `htmltables.list_start`
+  reads both, or the list would read as starting at 1 and the native
+  writer's own restart would fail its verification. A page whose
   levels OneNote does not return opens read-only, since a save planned
   against Graph's HTML could flatten them. The page check, every minute,
   reuses the levels the last read restored while Graph's HTML is unchanged;
